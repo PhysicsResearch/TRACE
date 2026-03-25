@@ -53,6 +53,7 @@ Thumbs.db
 *.bmp
 *.svg
 *.pdf
+!assets/Open-Logo.png
 
 # --- Logs & Temp ---
 *.tmp
