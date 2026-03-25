@@ -1,0 +1,67 @@
+
+# --- Python & Virtual environments ---
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+site/
+dist/
+build/
+.eggs/
+*.log
+
+venv/
+env/
+ENV/
+.venv/
+
+# --- IDEs & Editors --
+.vscode/
+.idea/
+.ipynb_checkpoints/
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- Qt / PySide ---
+*.ui.bak
+*.qmlc
+*.jsc
+
+# --- Data Files (Medical Imaging) ---
+*.dcm
+*.nii
+*.nii.gz
+*.hdr
+*.img
+*.nrrd
+*.mhd
+*.raw
+*.h5
+*.hdf5
+*.csv
+*.tsv
+*.dat
+
+# --- Figures / Outputs ---
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.svg
+*.pdf
+
+# --- Logs & Temp ---
+*.tmp
+*.temp
+*.swp
+*.bak
+
+# --- Misc ---
+*.zip
+*.tar
+*.gz
+*.7z
