@@ -9,5 +9,9 @@ This software accompanies the dynamic anthropomorphic thorax phantom, as describ
 - Real-time motion verification
 - Triggered imaging using Geiger module
 
+# Installation instructions
+1. Clone the repository (we recommend using SourceTree)
+2. Create a virtual environment using the environment.yml file
+
 # Publications using the phantom (and previous software implemented in AMIGOpy)
 Development of a novel 3D-printed dynamic anthropomorphic thorax phantom for evaluation of four-dimensional computed tomography Phys Imaging Radiat Oncol. 2024 Oct 2 doi: 10.1016/j.phro.2024.100656
