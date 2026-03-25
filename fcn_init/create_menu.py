@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QMenuBar
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtGui import QFont
+from .init_support import show_support_popup
 
 def initializeMenuBar(self):
     # define fontsize
@@ -121,6 +122,10 @@ def initializeMenuBar(self):
 
     # adjust font size:
     apply_font_recursively(menu_bar, f)
+
+    supportAction = QAction("Support", self)
+    supportAction.triggered.connect(lambda: show_support_popup(self))
+    self.menuBar().addAction(supportAction)
 
         
 def set_font_size(self, size):
