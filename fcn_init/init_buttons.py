@@ -1,5 +1,5 @@
 # Import functions to attach to buttons
-from fcn_control.fcn_control    import setDuetIP, setPhOperFolder, step, home
+from fcn_control.fcn_control    import setDuetIP, setPhOperFolder, step, home, move
 from fcn_plan.fcn_create        import add_row, remove_row, createCurve
 from fcn_plan.fcn_import        import openCSVFile_BrCv
 from fcn_plan.fcn_edit          import scaleAmpl, shiftAmpl, zeroAmpl, clipAmpl, scaleFreq, \
@@ -20,22 +20,31 @@ def initialize_software_buttons(self):
 
     # HOME BUTTONS
     self.HOME_Z.clicked.connect(lambda: home(self, 'Z'))
-    self.HOME_X.clicked.connect(lambda: home(self, 'Z'))
-    self.HOME_Y.clicked.connect(lambda: home(self, 'Z'))
+    self.HOME_X.clicked.connect(lambda: home(self, 'X'))
+    self.HOME_Y.clicked.connect(lambda: home(self, 'Y'))
 
     # STEP BUTTONS
     self.MIN_A.clicked.connect(lambda: step(self, 'A', plus=False))
     self.MIN_B.clicked.connect(lambda: step(self, 'B', plus=False))
     self.MIN_C.clicked.connect(lambda: step(self, 'C', plus=False))
     self.MIN_D.clicked.connect(lambda: step(self, 'D', plus=False))
+    self.MIN_X.clicked.connect(lambda: step(self, 'X', plus=False))
+    self.MIN_W.clicked.connect(lambda: step(self, 'W', plus=False))
+    self.MIN_XAXIS.clicked.connect(lambda: step(self, 'XAXIS', plus=False))
+    self.MIN_YAXIS.clicked.connect(lambda: step(self, 'YAXIS', plus=False))
+    self.MIN_ZAXIS.clicked.connect(lambda: step(self, 'ZAXIS', plus=False))
 
     self.PLUS_A.clicked.connect(lambda: step(self, 'A'))
     self.PLUS_B.clicked.connect(lambda: step(self, 'B'))
     self.PLUS_C.clicked.connect(lambda: step(self, 'C'))
     self.PLUS_D.clicked.connect(lambda: step(self, 'D'))
-    # self.MIN_X.clicked.connect(lambda: step(self, 'X'))
-    # self.MIN_x.clicked.connect(lambda: step(self, "'x"))
-    # self.MIN_Y.clicked.connect(lambda: step(self, 'Y'))
+    self.PLUS_X.clicked.connect(lambda: step(self, 'X'))
+    self.PLUS_W.clicked.connect(lambda: step(self, 'W'))
+    self.PLUS_XAXIS.clicked.connect(lambda: step(self, 'XAXIS'))
+    self.PLUS_YAXIS.clicked.connect(lambda: step(self, 'YAXIS'))
+    self.PLUS_ZAXIS.clicked.connect(lambda: step(self, 'ZAXIS'))
+
+    # self.MOVE_Z.clicked.connect(lambda: move(self, 'Z'))
 
 
     #--- PLANNING: CREATE ---

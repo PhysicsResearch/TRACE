@@ -68,23 +68,23 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_19.addWidget(self.HOME_Y, 1, 0, 1, 1)
 
-        self.lineEdit_21 = QLineEdit(self.groupBox_10)
-        self.lineEdit_21.setObjectName(u"lineEdit_21")
+        self.POS_DES_Y = QLineEdit(self.groupBox_10)
+        self.POS_DES_Y.setObjectName(u"POS_DES_Y")
 
-        self.gridLayout_19.addWidget(self.lineEdit_21, 2, 3, 1, 1)
+        self.gridLayout_19.addWidget(self.POS_DES_Y, 2, 3, 1, 1)
 
-        self.lineEdit_15 = QLineEdit(self.groupBox_10)
-        self.lineEdit_15.setObjectName(u"lineEdit_15")
-        self.lineEdit_15.setEnabled(False)
+        self.POS_CURR_Y = QLineEdit(self.groupBox_10)
+        self.POS_CURR_Y.setObjectName(u"POS_CURR_Y")
+        self.POS_CURR_Y.setEnabled(False)
 
-        self.gridLayout_19.addWidget(self.lineEdit_15, 2, 2, 1, 1)
+        self.gridLayout_19.addWidget(self.POS_CURR_Y, 2, 2, 1, 1)
 
-        self.MIN_Y = QPushButton(self.groupBox_10)
-        self.MIN_Y.setObjectName(u"MIN_Y")
-        self.MIN_Y.setAutoFillBackground(False)
-        self.MIN_Y.setStyleSheet(u"background-color: rgb(197, 0, 0); color: white")
+        self.MIN_YAXIS = QPushButton(self.groupBox_10)
+        self.MIN_YAXIS.setObjectName(u"MIN_YAXIS")
+        self.MIN_YAXIS.setAutoFillBackground(False)
+        self.MIN_YAXIS.setStyleSheet(u"background-color: rgb(255, 0, 255); color: white")
 
-        self.gridLayout_19.addWidget(self.MIN_Y, 2, 5, 1, 1)
+        self.gridLayout_19.addWidget(self.MIN_YAXIS, 2, 5, 1, 1)
 
         self.lineEdit_16 = QLineEdit(self.groupBox_10)
         self.lineEdit_16.setObjectName(u"lineEdit_16")
@@ -92,12 +92,12 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_19.addWidget(self.lineEdit_16, 1, 3, 1, 1)
 
-        self.PLUS_Y = QPushButton(self.groupBox_10)
-        self.PLUS_Y.setObjectName(u"PLUS_Y")
-        self.PLUS_Y.setAutoFillBackground(False)
-        self.PLUS_Y.setStyleSheet(u"background-color: rgb(0, 170, 0); color: white")
+        self.PLUS_YAXIS = QPushButton(self.groupBox_10)
+        self.PLUS_YAXIS.setObjectName(u"PLUS_YAXIS")
+        self.PLUS_YAXIS.setAutoFillBackground(False)
+        self.PLUS_YAXIS.setStyleSheet(u"background-color: rgb(0, 0, 255); color: white")
 
-        self.gridLayout_19.addWidget(self.PLUS_Y, 2, 6, 1, 1)
+        self.gridLayout_19.addWidget(self.PLUS_YAXIS, 2, 6, 1, 1)
 
         self.lineEdit_10 = QLineEdit(self.groupBox_10)
         self.lineEdit_10.setObjectName(u"lineEdit_10")
@@ -136,16 +136,16 @@ class Ui_AMIGOpy(object):
         self.groupBox_8.setObjectName(u"groupBox_8")
         self.gridLayout_17 = QGridLayout(self.groupBox_8)
         self.gridLayout_17.setObjectName(u"gridLayout_17")
-        self.lineEdit_11 = QLineEdit(self.groupBox_8)
-        self.lineEdit_11.setObjectName(u"lineEdit_11")
-        self.lineEdit_11.setEnabled(False)
+        self.POS_CURR_A = QLineEdit(self.groupBox_8)
+        self.POS_CURR_A.setObjectName(u"POS_CURR_A")
+        self.POS_CURR_A.setEnabled(False)
 
-        self.gridLayout_17.addWidget(self.lineEdit_11, 3, 2, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_CURR_A, 3, 2, 1, 1)
 
-        self.lineEdit_20 = QLineEdit(self.groupBox_8)
-        self.lineEdit_20.setObjectName(u"lineEdit_20")
+        self.POS_DES_D_2 = QLineEdit(self.groupBox_8)
+        self.POS_DES_D_2.setObjectName(u"POS_DES_D_2")
 
-        self.gridLayout_17.addWidget(self.lineEdit_20, 6, 3, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_DES_D_2, 6, 3, 1, 1)
 
         self.STEP_Z = QComboBox(self.groupBox_8)
         self.STEP_Z.setObjectName(u"STEP_Z")
@@ -172,16 +172,16 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.PLUS_B, 4, 6, 1, 1)
 
-        self.lineEdit_19 = QLineEdit(self.groupBox_8)
-        self.lineEdit_19.setObjectName(u"lineEdit_19")
+        self.POS_DES_D = QLineEdit(self.groupBox_8)
+        self.POS_DES_D.setObjectName(u"POS_DES_D")
 
-        self.gridLayout_17.addWidget(self.lineEdit_19, 5, 3, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_DES_D, 5, 3, 1, 1)
 
-        self.lineEdit_14 = QLineEdit(self.groupBox_8)
-        self.lineEdit_14.setObjectName(u"lineEdit_14")
-        self.lineEdit_14.setEnabled(False)
+        self.POS_CURR_D = QLineEdit(self.groupBox_8)
+        self.POS_CURR_D.setObjectName(u"POS_CURR_D")
+        self.POS_CURR_D.setEnabled(False)
 
-        self.gridLayout_17.addWidget(self.lineEdit_14, 6, 2, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_CURR_D, 6, 2, 1, 1)
 
         self.MOVE_Z = QPushButton(self.groupBox_8)
         self.MOVE_Z.setObjectName(u"MOVE_Z")
@@ -191,10 +191,10 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.MOVE_Z, 1, 1, 1, 1)
 
-        self.lineEdit_17 = QLineEdit(self.groupBox_8)
-        self.lineEdit_17.setObjectName(u"lineEdit_17")
+        self.POS_DES_A = QLineEdit(self.groupBox_8)
+        self.POS_DES_A.setObjectName(u"POS_DES_A")
 
-        self.gridLayout_17.addWidget(self.lineEdit_17, 3, 3, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_DES_A, 3, 3, 1, 1)
 
         self.MIN_D = QPushButton(self.groupBox_8)
         self.MIN_D.setObjectName(u"MIN_D")
@@ -203,10 +203,10 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.MIN_D, 6, 5, 1, 1)
 
-        self.lineEdit_18 = QLineEdit(self.groupBox_8)
-        self.lineEdit_18.setObjectName(u"lineEdit_18")
+        self.POS_DES_B = QLineEdit(self.groupBox_8)
+        self.POS_DES_B.setObjectName(u"POS_DES_B")
 
-        self.gridLayout_17.addWidget(self.lineEdit_18, 4, 3, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_DES_B, 4, 3, 1, 1)
 
         self.lineEdit_2 = QLineEdit(self.groupBox_8)
         self.lineEdit_2.setObjectName(u"lineEdit_2")
@@ -240,11 +240,11 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.PLUS_D, 6, 6, 1, 1)
 
-        self.lineEdit_13 = QLineEdit(self.groupBox_8)
-        self.lineEdit_13.setObjectName(u"lineEdit_13")
-        self.lineEdit_13.setEnabled(False)
+        self.POS_CURR_C = QLineEdit(self.groupBox_8)
+        self.POS_CURR_C.setObjectName(u"POS_CURR_C")
+        self.POS_CURR_C.setEnabled(False)
 
-        self.gridLayout_17.addWidget(self.lineEdit_13, 5, 2, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_CURR_C, 5, 2, 1, 1)
 
         self.lineEdit_3 = QLineEdit(self.groupBox_8)
         self.lineEdit_3.setObjectName(u"lineEdit_3")
@@ -268,11 +268,11 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.PLUS_C, 5, 6, 1, 1)
 
-        self.lineEdit_12 = QLineEdit(self.groupBox_8)
-        self.lineEdit_12.setObjectName(u"lineEdit_12")
-        self.lineEdit_12.setEnabled(False)
+        self.POS_CURR_B = QLineEdit(self.groupBox_8)
+        self.POS_CURR_B.setObjectName(u"POS_CURR_B")
+        self.POS_CURR_B.setEnabled(False)
 
-        self.gridLayout_17.addWidget(self.lineEdit_12, 4, 2, 1, 1)
+        self.gridLayout_17.addWidget(self.POS_CURR_B, 4, 2, 1, 1)
 
         self.HOME_Z = QPushButton(self.groupBox_8)
         self.HOME_Z.setObjectName(u"HOME_Z")
@@ -305,6 +305,35 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_17.addWidget(self.lineEdit_8, 6, 0, 1, 2)
 
+        self.lineEdit_11 = QLineEdit(self.groupBox_8)
+        self.lineEdit_11.setObjectName(u"lineEdit_11")
+        self.lineEdit_11.setEnabled(False)
+
+        self.gridLayout_17.addWidget(self.lineEdit_11, 2, 0, 1, 2)
+
+        self.lineEdit_12 = QLineEdit(self.groupBox_8)
+        self.lineEdit_12.setObjectName(u"lineEdit_12")
+        self.lineEdit_12.setEnabled(False)
+
+        self.gridLayout_17.addWidget(self.lineEdit_12, 2, 2, 1, 1)
+
+        self.lineEdit_13 = QLineEdit(self.groupBox_8)
+        self.lineEdit_13.setObjectName(u"lineEdit_13")
+
+        self.gridLayout_17.addWidget(self.lineEdit_13, 2, 3, 1, 1)
+
+        self.MIN_ZAXIS = QPushButton(self.groupBox_8)
+        self.MIN_ZAXIS.setObjectName(u"MIN_ZAXIS")
+        self.MIN_ZAXIS.setStyleSheet(u"background-color: rgb(255, 0, 255); color: white")
+
+        self.gridLayout_17.addWidget(self.MIN_ZAXIS, 2, 5, 1, 1)
+
+        self.PLUS_ZAXIS = QPushButton(self.groupBox_8)
+        self.PLUS_ZAXIS.setObjectName(u"PLUS_ZAXIS")
+        self.PLUS_ZAXIS.setStyleSheet(u"background-color: rgb(0, 0, 255); color: white")
+
+        self.gridLayout_17.addWidget(self.PLUS_ZAXIS, 2, 6, 1, 1)
+
         self.gridLayout_17.setColumnStretch(0, 2)
         self.gridLayout_17.setColumnStretch(1, 2)
         self.gridLayout_17.setColumnStretch(2, 3)
@@ -318,30 +347,18 @@ class Ui_AMIGOpy(object):
         self.groupBox_9.setObjectName(u"groupBox_9")
         self.gridLayout_18 = QGridLayout(self.groupBox_9)
         self.gridLayout_18.setObjectName(u"gridLayout_18")
-        self.lineEdit_70 = QLineEdit(self.groupBox_9)
-        self.lineEdit_70.setObjectName(u"lineEdit_70")
-        self.lineEdit_70.setEnabled(False)
+        self.HOME_X = QPushButton(self.groupBox_9)
+        self.HOME_X.setObjectName(u"HOME_X")
+        self.HOME_X.setStyleSheet(u"background-color: rgb(170, 0, 255)")
 
-        self.gridLayout_18.addWidget(self.lineEdit_70, 1, 4, 1, 1)
+        self.gridLayout_18.addWidget(self.HOME_X, 1, 0, 1, 1)
 
-        self.lineEdit_68 = QLineEdit(self.groupBox_9)
-        self.lineEdit_68.setObjectName(u"lineEdit_68")
-        self.lineEdit_68.setEnabled(False)
+        self.PLUS_W = QPushButton(self.groupBox_9)
+        self.PLUS_W.setObjectName(u"PLUS_W")
+        self.PLUS_W.setAutoFillBackground(False)
+        self.PLUS_W.setStyleSheet(u"background-color: rgb(0, 170, 0); color: white")
 
-        self.gridLayout_18.addWidget(self.lineEdit_68, 3, 2, 1, 1)
-
-        self.lineEdit_66 = QLineEdit(self.groupBox_9)
-        self.lineEdit_66.setObjectName(u"lineEdit_66")
-        self.lineEdit_66.setEnabled(False)
-
-        self.gridLayout_18.addWidget(self.lineEdit_66, 1, 2, 1, 1)
-
-        self.PLUS_x = QPushButton(self.groupBox_9)
-        self.PLUS_x.setObjectName(u"PLUS_x")
-        self.PLUS_x.setAutoFillBackground(False)
-        self.PLUS_x.setStyleSheet(u"background-color: rgb(0, 170, 0); color: white")
-
-        self.gridLayout_18.addWidget(self.PLUS_x, 3, 5, 1, 1)
+        self.gridLayout_18.addWidget(self.PLUS_W, 4, 5, 1, 1)
 
         self.MIN_X = QPushButton(self.groupBox_9)
         self.MIN_X.setObjectName(u"MIN_X")
@@ -350,42 +367,13 @@ class Ui_AMIGOpy(object):
         self.MIN_X.setAutoFillBackground(False)
         self.MIN_X.setStyleSheet(u"background-color: rgb(197, 0, 0); ; color: white;")
 
-        self.gridLayout_18.addWidget(self.MIN_X, 2, 4, 1, 1)
+        self.gridLayout_18.addWidget(self.MIN_X, 3, 4, 1, 1)
 
-        self.lineEdit_65 = QLineEdit(self.groupBox_9)
-        self.lineEdit_65.setObjectName(u"lineEdit_65")
-        self.lineEdit_65.setEnabled(False)
+        self.lineEdit_9 = QLineEdit(self.groupBox_9)
+        self.lineEdit_9.setObjectName(u"lineEdit_9")
+        self.lineEdit_9.setEnabled(False)
 
-        self.gridLayout_18.addWidget(self.lineEdit_65, 1, 3, 1, 1)
-
-        self.MIN_x = QPushButton(self.groupBox_9)
-        self.MIN_x.setObjectName(u"MIN_x")
-        self.MIN_x.setAutoFillBackground(False)
-        self.MIN_x.setStyleSheet(u"background-color: rgb(197, 0, 0); color: white")
-
-        self.gridLayout_18.addWidget(self.MIN_x, 3, 4, 1, 1)
-
-        self.lineEdit_64 = QLineEdit(self.groupBox_9)
-        self.lineEdit_64.setObjectName(u"lineEdit_64")
-        self.lineEdit_64.setEnabled(False)
-
-        self.gridLayout_18.addWidget(self.lineEdit_64, 2, 2, 1, 1)
-
-        self.HOME_X = QPushButton(self.groupBox_9)
-        self.HOME_X.setObjectName(u"HOME_X")
-        self.HOME_X.setStyleSheet(u"background-color: rgb(170, 0, 255)")
-
-        self.gridLayout_18.addWidget(self.HOME_X, 1, 0, 1, 1)
-
-        self.lineEdit_71 = QLineEdit(self.groupBox_9)
-        self.lineEdit_71.setObjectName(u"lineEdit_71")
-
-        self.gridLayout_18.addWidget(self.lineEdit_71, 3, 3, 1, 1)
-
-        self.lineEdit_67 = QLineEdit(self.groupBox_9)
-        self.lineEdit_67.setObjectName(u"lineEdit_67")
-
-        self.gridLayout_18.addWidget(self.lineEdit_67, 2, 3, 1, 1)
+        self.gridLayout_18.addWidget(self.lineEdit_9, 4, 0, 1, 2)
 
         self.PLUS_X = QPushButton(self.groupBox_9)
         self.PLUS_X.setObjectName(u"PLUS_X")
@@ -394,7 +382,41 @@ class Ui_AMIGOpy(object):
         self.PLUS_X.setAutoFillBackground(False)
         self.PLUS_X.setStyleSheet(u"background-color: rgb(0, 170, 0); color: white")
 
-        self.gridLayout_18.addWidget(self.PLUS_X, 2, 5, 1, 1)
+        self.gridLayout_18.addWidget(self.PLUS_X, 3, 5, 1, 1)
+
+        self.lineEdit_66 = QLineEdit(self.groupBox_9)
+        self.lineEdit_66.setObjectName(u"lineEdit_66")
+        self.lineEdit_66.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.lineEdit_66, 1, 2, 1, 1)
+
+        self.POS_DES_W = QLineEdit(self.groupBox_9)
+        self.POS_DES_W.setObjectName(u"POS_DES_W")
+
+        self.gridLayout_18.addWidget(self.POS_DES_W, 4, 3, 1, 1)
+
+        self.POS_CURR_X = QLineEdit(self.groupBox_9)
+        self.POS_CURR_X.setObjectName(u"POS_CURR_X")
+        self.POS_CURR_X.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.POS_CURR_X, 3, 2, 1, 1)
+
+        self.lineEdit = QLineEdit(self.groupBox_9)
+        self.lineEdit.setObjectName(u"lineEdit")
+        self.lineEdit.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.lineEdit, 3, 0, 1, 2)
+
+        self.POS_DES_X = QLineEdit(self.groupBox_9)
+        self.POS_DES_X.setObjectName(u"POS_DES_X")
+
+        self.gridLayout_18.addWidget(self.POS_DES_X, 3, 3, 1, 1)
+
+        self.lineEdit_65 = QLineEdit(self.groupBox_9)
+        self.lineEdit_65.setObjectName(u"lineEdit_65")
+        self.lineEdit_65.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.lineEdit_65, 1, 3, 1, 1)
 
         self.STEP_X = QComboBox(self.groupBox_9)
         self.STEP_X.setObjectName(u"STEP_X")
@@ -409,17 +431,53 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_18.addWidget(self.MOVE_X, 1, 1, 1, 1)
 
-        self.lineEdit = QLineEdit(self.groupBox_9)
-        self.lineEdit.setObjectName(u"lineEdit")
-        self.lineEdit.setEnabled(False)
+        self.POS_CURR_W = QLineEdit(self.groupBox_9)
+        self.POS_CURR_W.setObjectName(u"POS_CURR_W")
+        self.POS_CURR_W.setEnabled(False)
 
-        self.gridLayout_18.addWidget(self.lineEdit, 2, 0, 1, 2)
+        self.gridLayout_18.addWidget(self.POS_CURR_W, 4, 2, 1, 1)
 
-        self.lineEdit_9 = QLineEdit(self.groupBox_9)
-        self.lineEdit_9.setObjectName(u"lineEdit_9")
-        self.lineEdit_9.setEnabled(False)
+        self.lineEdit_70 = QLineEdit(self.groupBox_9)
+        self.lineEdit_70.setObjectName(u"lineEdit_70")
+        self.lineEdit_70.setEnabled(False)
 
-        self.gridLayout_18.addWidget(self.lineEdit_9, 3, 0, 1, 2)
+        self.gridLayout_18.addWidget(self.lineEdit_70, 1, 4, 1, 1)
+
+        self.MIN_W = QPushButton(self.groupBox_9)
+        self.MIN_W.setObjectName(u"MIN_W")
+        self.MIN_W.setAutoFillBackground(False)
+        self.MIN_W.setStyleSheet(u"background-color: rgb(197, 0, 0); color: white")
+
+        self.gridLayout_18.addWidget(self.MIN_W, 4, 4, 1, 1)
+
+        self.lineEdit_14 = QLineEdit(self.groupBox_9)
+        self.lineEdit_14.setObjectName(u"lineEdit_14")
+        self.lineEdit_14.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.lineEdit_14, 2, 0, 1, 2)
+
+        self.lineEdit_15 = QLineEdit(self.groupBox_9)
+        self.lineEdit_15.setObjectName(u"lineEdit_15")
+        self.lineEdit_15.setEnabled(False)
+
+        self.gridLayout_18.addWidget(self.lineEdit_15, 2, 2, 1, 1)
+
+        self.lineEdit_17 = QLineEdit(self.groupBox_9)
+        self.lineEdit_17.setObjectName(u"lineEdit_17")
+
+        self.gridLayout_18.addWidget(self.lineEdit_17, 2, 3, 1, 1)
+
+        self.MIN_XAXIS = QPushButton(self.groupBox_9)
+        self.MIN_XAXIS.setObjectName(u"MIN_XAXIS")
+        self.MIN_XAXIS.setStyleSheet(u"background-color: rgb(255, 0, 255); color: white")
+
+        self.gridLayout_18.addWidget(self.MIN_XAXIS, 2, 4, 1, 1)
+
+        self.PLUS_XAXIS = QPushButton(self.groupBox_9)
+        self.PLUS_XAXIS.setObjectName(u"PLUS_XAXIS")
+        self.PLUS_XAXIS.setStyleSheet(u"background-color: rgb(0, 0, 255); color: white")
+
+        self.gridLayout_18.addWidget(self.PLUS_XAXIS, 2, 5, 1, 1)
 
         self.gridLayout_18.setColumnStretch(0, 2)
         self.gridLayout_18.setColumnStretch(1, 2)
@@ -430,7 +488,7 @@ class Ui_AMIGOpy(object):
 
         self.gridLayout_7.addWidget(self.groupBox_9, 1, 0, 1, 2)
 
-        self.gridLayout_7.setRowStretch(0, 1)
+        self.gridLayout_7.setRowStretch(0, 2)
         self.gridLayout_7.setRowStretch(1, 1)
         self.gridLayout_7.setRowStretch(2, 1)
         self.gridLayout_7.setColumnStretch(0, 2)
@@ -1767,57 +1825,67 @@ class Ui_AMIGOpy(object):
         self.groupBox.setTitle(QCoreApplication.translate("AMIGOpy", u"MOTION PLATFORM", None))
         self.groupBox_10.setTitle(QCoreApplication.translate("AMIGOpy", u"Y", None))
         self.HOME_Y.setText(QCoreApplication.translate("AMIGOpy", u"HOME Y", None))
-        self.lineEdit_21.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.lineEdit_15.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.MIN_Y.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
+        self.POS_DES_Y.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_Y.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.MIN_YAXIS.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
         self.lineEdit_16.setText(QCoreApplication.translate("AMIGOpy", u"DESIRED", None))
-        self.PLUS_Y.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
+        self.PLUS_YAXIS.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
         self.lineEdit_10.setText(QCoreApplication.translate("AMIGOpy", u"CURRENT", None))
         self.lineEdit_22.setText(QCoreApplication.translate("AMIGOpy", u"STEP", None))
         self.MOVE_Y.setText(QCoreApplication.translate("AMIGOpy", u"MOVE Y", None))
-        self.lineEdit_23.setText(QCoreApplication.translate("AMIGOpy", u"Y", None))
+        self.lineEdit_23.setText(QCoreApplication.translate("AMIGOpy", u"Y-axis", None))
         self.groupBox_8.setTitle(QCoreApplication.translate("AMIGOpy", u"Z", None))
-        self.lineEdit_11.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.lineEdit_20.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_A.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_DES_D_2.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.MIN_B.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
         self.lineEdit_4.setText(QCoreApplication.translate("AMIGOpy", u"STEP", None))
         self.PLUS_B.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
-        self.lineEdit_19.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.lineEdit_14.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_DES_D.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_D.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.MOVE_Z.setText(QCoreApplication.translate("AMIGOpy", u"MOVE ALL", None))
-        self.lineEdit_17.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_DES_A.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.MIN_D.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
-        self.lineEdit_18.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_DES_B.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.lineEdit_2.setText(QCoreApplication.translate("AMIGOpy", u"CURRENT", None))
         self.MIN_A.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
         self.MIN_C.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
         self.PLUS_D.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
-        self.lineEdit_13.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_C.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.lineEdit_3.setText(QCoreApplication.translate("AMIGOpy", u"DESIRED", None))
         self.PLUS_A.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
         self.PLUS_C.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
-        self.lineEdit_12.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_B.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.HOME_Z.setText(QCoreApplication.translate("AMIGOpy", u"HOME Z", None))
         self.lineEdit_5.setText(QCoreApplication.translate("AMIGOpy", u"A", None))
         self.lineEdit_6.setText(QCoreApplication.translate("AMIGOpy", u"B", None))
         self.lineEdit_7.setText(QCoreApplication.translate("AMIGOpy", u"C", None))
         self.lineEdit_8.setText(QCoreApplication.translate("AMIGOpy", u"D", None))
+        self.lineEdit_11.setText(QCoreApplication.translate("AMIGOpy", u"Z-axis", None))
+        self.lineEdit_12.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.lineEdit_13.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.MIN_ZAXIS.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
+        self.PLUS_ZAXIS.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
         self.groupBox_9.setTitle(QCoreApplication.translate("AMIGOpy", u"X", None))
-        self.lineEdit_70.setText(QCoreApplication.translate("AMIGOpy", u"STEP", None))
-        self.lineEdit_68.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.lineEdit_66.setText(QCoreApplication.translate("AMIGOpy", u"CURRENT", None))
-        self.PLUS_x.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
-        self.MIN_X.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
-        self.lineEdit_65.setText(QCoreApplication.translate("AMIGOpy", u"DESIRED", None))
-        self.MIN_x.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
-        self.lineEdit_64.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.HOME_X.setText(QCoreApplication.translate("AMIGOpy", u"HOME X", None))
-        self.lineEdit_71.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
-        self.lineEdit_67.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.PLUS_W.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
+        self.MIN_X.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
+        self.lineEdit_9.setText(QCoreApplication.translate("AMIGOpy", u"W", None))
         self.PLUS_X.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
-        self.MOVE_X.setText(QCoreApplication.translate("AMIGOpy", u"MOVE ALL", None))
+        self.lineEdit_66.setText(QCoreApplication.translate("AMIGOpy", u"CURRENT", None))
+        self.POS_DES_W.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.POS_CURR_X.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.lineEdit.setText(QCoreApplication.translate("AMIGOpy", u"X", None))
-        self.lineEdit_9.setText(QCoreApplication.translate("AMIGOpy", u"'x", None))
+        self.POS_DES_X.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.lineEdit_65.setText(QCoreApplication.translate("AMIGOpy", u"DESIRED", None))
+        self.MOVE_X.setText(QCoreApplication.translate("AMIGOpy", u"MOVE ALL", None))
+        self.POS_CURR_W.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.lineEdit_70.setText(QCoreApplication.translate("AMIGOpy", u"STEP", None))
+        self.MIN_W.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
+        self.lineEdit_14.setText(QCoreApplication.translate("AMIGOpy", u"X-axis", None))
+        self.lineEdit_15.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.lineEdit_17.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
+        self.MIN_XAXIS.setText(QCoreApplication.translate("AMIGOpy", u"-", None))
+        self.PLUS_XAXIS.setText(QCoreApplication.translate("AMIGOpy", u"+", None))
         self.groupBox_2.setTitle(QCoreApplication.translate("AMIGOpy", u"Rotation", None))
         self.lineEdit_51.setText(QCoreApplication.translate("AMIGOpy", u"0", None))
         self.lineEdit_49.setText(QCoreApplication.translate("AMIGOpy", u"YAW", None))

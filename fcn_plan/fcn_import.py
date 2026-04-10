@@ -178,6 +178,11 @@ def addColumns(self, dataframe):
                 end     = idxs[i+1]
                 dataframe.loc[start:end-1, "instance"] = i+1
 
+        if 'E' not in dataframe['mark'].unique():
+            idxs = dataframe[dataframe["mark"] == "P_max"].index
+            for i in idxs[1:]:
+                dataframe.loc[i-1, 'mark'] = 'E'
+
     if "instance" in dataframe.columns and 'cycle time' not in dataframe.columns:
         dataframe["cycle time"] = np.nan
 
