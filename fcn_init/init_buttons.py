@@ -1,6 +1,6 @@
 from PySide6.QtGui import QIcon
 # Import functions to attach to buttons
-from fcn_control.fcn_control    import setDuetIP, setPhOperFolder, step, home, move
+from fcn_control.fcn_control    import setDuetIP, setPhOperFolder, step, home, move, send_cmd
 from fcn_plan.fcn_create        import add_row, remove_row, createCurve
 from fcn_plan.fcn_import        import openCSVFile_BrCv
 from fcn_plan.fcn_edit          import scaleAmpl, shiftAmpl, zeroAmpl, clipAmpl, scaleFreq, \
@@ -19,6 +19,9 @@ def initialize_software_buttons(self):
 
     self.setPhOperFolder.clicked.connect(lambda: setPhOperFolder(self))
     self.setPhOperFolder.setStyleSheet("background-color: blue; color: white;")
+
+    self.sendCommandDUET.clicked.connect(lambda: send_cmd(self, None))
+    self.sendCommandDUET.setStyleSheet("background-color: violet; color: white;")
 
     self.gcodeRefresh.clicked.connect(lambda: setup_file_explorer(self))
     self.gcodeRefresh.setStyleSheet("background-color: orange; color: white;")

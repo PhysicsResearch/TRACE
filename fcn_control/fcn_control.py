@@ -3,7 +3,7 @@ import json, requests
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 
-def send_cmd(self, cmd):
+def send_cmd(self, cmd=None):
     """
     Function to send GCODE command through DUET HTTP API.
     The request has a time-out of 2 seconds to handle e.g.
@@ -11,13 +11,15 @@ def send_cmd(self, cmd):
     """
     self.duet_ip = self.DuetIPAddress.text()
 
+    if cmd is None:
+        cmd = self.duet_command.text()
+
     url = f'http://{self.duet_ip}/rr_gcode?gcode={cmd}'
 
     try:
         response = requests.get(url, timeout=2)
     except:
         QMessageBox.warning(self, "Duet Error", f"Failed to execute command {cmd} (maybe no connection?)")
-
 
 
 def home(self, ax):
