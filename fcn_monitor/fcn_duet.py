@@ -13,7 +13,7 @@ def get_curr_file(self, init=True):
 
     try:
         url = f'http://{self.duet_ip}/rr_fileinfo'
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=2)
         if response.status_code == 200:
             data = response.json()
             if data['err'] == 1:
@@ -36,7 +36,7 @@ def get_duet_status(self):
 
     try:
         url = f'http://{self.duet_ip}/rr_status?type=3'
-        response = requests.get(url)
+        response = requests.get(url, timeout=2)
         if response.status_code == 200:
             contents = response.json()
             data = {}
@@ -65,7 +65,7 @@ def pause_continue_GCODE(self, pause=True):
     try:
         code = "M25" if pause else "M24"
         url = f'http://{self.duet_ip}/rr_gcode'
-        response = requests.get(url, {'gcode': code})
+        response = requests.get(url, {'gcode': code}, timeout=2)
         if response.status_code != 200:
             print(f"Error pausing GCODE: {response.status_code}")
     except Exception as e:
@@ -88,6 +88,6 @@ def set_GCODE_speed(self, speed_factor=None):
     try:
         url = f'http://{self.duet_ip}/rr_gcode'
         code = f"M220 S{speed_factor}"
-        requests.get(url, {'gcode': code})
+        requests.get(url, {'gcode': code}, timeout=2)
     except Exception as e:
         print(f"Exception while sending GCODE: {e}")
