@@ -2,8 +2,7 @@ from PySide6.QtWidgets import QMessageBox
 
 def show_support_popup(self):
 
-    if self.tabModules.currentIndex() == 1:
-
+    if self.tabModules.currentIndex() == 3:
         if self.tabWidget_BrCv.currentIndex() == 0:
             QMessageBox.information(
                 self,
