@@ -96,6 +96,8 @@ def create_curve(self):
             ts = np.append(ts, t + np.max(ts) + time_step)
             ys = np.append(ys, y)
 
+    ys += np.sin(ts * np.pi * 5) * 1e-2
+
     # Display the created curve in the plot
     update_plot(self, ts, ys)
 
