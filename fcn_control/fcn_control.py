@@ -1,5 +1,5 @@
 
-import requests
+import json, requests
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 
@@ -99,16 +99,6 @@ def move(self, ax):
     send_cmd(self, "G90") # set absolute mode
 
     # Set current positions
-
-
-
-
-
-
-
-    
-
-    
     
 
 def setDuetIP(self):
@@ -116,6 +106,12 @@ def setDuetIP(self):
 
     url = f'http://{self.duet_ip}/rr_status?type=3'
     connected = False
+
+    data = {'duet_ip_address': self.duet_ip,
+            'move_folder': self.gcode_folder}
+    
+    with open('configuration.json', 'w') as f:
+        json.dump(data, f, indent=4)
 
     try:
         response = requests.get(url, timeout=3)
@@ -136,3 +132,9 @@ def setPhOperFolder(self):
     folder = QFileDialog.getExistingDirectory(self, options=options)
     self.gcode_folder = folder
     self.PhOperFolder.setText(self.gcode_folder)
+
+    data = {'duet_ip_address': self.duet_ip,
+            'move_folder': self.gcode_folder}
+    
+    with open('configuration.json', 'w') as f:
+        json.dump(data, f, indent=4)
