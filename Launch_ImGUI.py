@@ -4,7 +4,7 @@ os.environ.setdefault("QT_OPENGL", "software")  # safer on RDP/VM
 
 from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtGui import QSurfaceFormat
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QMenu
 # Force software GL (stable on many Windows setups)
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
 
@@ -26,6 +26,7 @@ from fcn_init.init_buttons          import initialize_software_buttons
 from fcn_init.init_list_menus       import populate_list_menus
 from fcn_plan.fcn_create            import create_curve
 from fcn_plan.fcn_edit              import init_edit, plotViewData_edit
+from fcn_control.fcn_filesystem     import setup_file_explorer, start_gcode, delete_recursively, load_directory
 
 class MyApp(QMainWindow, Ui_AMIGOpy): # or QWidget/Ui_Form, QDialog/Ui_Dialog, etc.
 
@@ -53,6 +54,44 @@ class MyApp(QMainWindow, Ui_AMIGOpy): # or QWidget/Ui_Form, QDialog/Ui_Dialog, e
         self.create_sample_freq.valueChanged.connect(lambda: create_curve(self))
 
         initializeMenuBar(self)
+
+        setup_file_explorer(self)
+        self.fileTreeView.doubleClicked.connect(self.on_item_double_clicked)
+        self.fileTreeView.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.fileTreeView.customContextMenuRequested.connect(self.open_context_menu)
+
+    def on_item_double_clicked(self, index):
+        item = self.model.itemFromIndex(index)
+
+        path = item.data(self.PATH_ROLE)
+        is_dir = item.data(self.IS_DIR_ROLE)
+
+        if is_dir:
+            load_directory(self, path)
+
+    def open_context_menu(self, position):
+        index = self.fileTreeView.indexAt(position)
+
+        if not index.isValid():
+            return # clicked empty space
+        
+        item = self.model.itemFromIndex(index)
+
+        path = item.data(self.PATH_ROLE)
+        is_dir = item.data(self.IS_DIR_ROLE)
+
+        menu = QMenu()
+
+        run_action = menu.addAction("Run") # Run action
+        delete_action = menu.addAction("Delete") # Delete action
+
+        action = menu.exec(self.fileTreeView.viewport().mapToGlobal(position))
+
+        if action == run_action:
+            start_gcode(self, item.data(self.PATH_ROLE))
+
+        if action == delete_action:
+            delete_recursively(self, path, is_dir)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+from PySide6.QtGui import QIcon
 # Import functions to attach to buttons
 from fcn_control.fcn_control    import setDuetIP, setPhOperFolder, step, home, move
 from fcn_plan.fcn_create        import add_row, remove_row, createCurve
@@ -6,6 +7,7 @@ from fcn_plan.fcn_edit          import scaleAmpl, shiftAmpl, zeroAmpl, clipAmpl,
                                         undoOperation, removeDrift, addDrift, cropRange, smoothAmpl
 from fcn_plan.fcn_export        import exportData, exportGCODE, calcStats, plotViewData
 from fcn_monitor.fcn_plotting   import update_axes, on_radiation_trigger_check
+from fcn_control.fcn_filesystem import setup_file_explorer, go_back, mkdir
 
 def initialize_software_buttons(self):
 
@@ -17,6 +19,14 @@ def initialize_software_buttons(self):
 
     self.setPhOperFolder.clicked.connect(lambda: setPhOperFolder(self))
     self.setPhOperFolder.setStyleSheet("background-color: blue; color: white;")
+
+    self.gcodeRefresh.clicked.connect(lambda: setup_file_explorer(self))
+    self.gcodeRefresh.setStyleSheet("background-color: orange; color: white;")
+    self.gcodeNewFolder.clicked.connect(lambda: mkdir(self))
+    self.gcodeNewFolder.setStyleSheet("background-color: blue; color:white")
+
+    self.treeViewBack.clicked.connect(lambda: go_back(self))
+    self.treeViewBack.setIcon(QIcon.fromTheme("go_up"))
 
     # HOME BUTTONS
     self.HOME_Z.clicked.connect(lambda: home(self, 'Z'))
