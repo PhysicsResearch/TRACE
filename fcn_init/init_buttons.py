@@ -31,6 +31,11 @@ def initialize_software_buttons(self):
     self.treeViewBack.clicked.connect(lambda: go_back(self))
     self.treeViewBack.setIcon(QIcon.fromTheme("go_up"))
 
+    self.emergencyButton_1.clicked.connect(lambda: send_cmd(self, 'M112'))
+    self.emergencyButton_2.clicked.connect(lambda: send_cmd(self, 'M112'))
+    self.emergencyButton_3.clicked.connect(lambda: send_cmd(self, 'M112'))
+    self.emergencyButton_4.clicked.connect(lambda: send_cmd(self, 'M112'))
+
     # HOME BUTTONS
     self.HOME_Z.clicked.connect(lambda: home(self, 'Z'))
     self.HOME_X.clicked.connect(lambda: home(self, 'X'))
