@@ -150,10 +150,10 @@ def exportGCODE(self):
 
     # Add random fluctuation to avoid zero values being skipped
     col = 'amplitude'
-    df["diff"] = df[col].diff().shift(-1)
-    for i in range(len(df[col]) - 1):
-        if df.loc[i, "diff"] < 1e-3:
-            df.loc[i, col] += np.random.choice([-1, 1], 1) * np.random.choice(list(range(1, 1000)), 1) * 1e-5
+
+    df['diff'] = df[col].diff().shift(-1)
+    # df.loc[df['diff'] < 1e-2, col] += np.sin(results['time'] * np.pi * 10) ** 2 * 2e-2
+    df.loc[df['diff'].abs() < 1e-2, col] += np.sin(results['time'] * np.pi * 12) ** 2 * 2e-2
 
     df.loc[df[col] < 0, col] = 0
     results[col] = df[col]
@@ -195,34 +195,6 @@ def exportGCODE(self):
     # Set recalculated velocity and speed after resampling
     df[f'{col}_vel'] = vel
     df[f'{col}_speed'] = speed
-    
-    # Remove timepoints with low speed, might smoothen phantom execution
-    if self.compress_speed.value() > 0:
-        df['keep'] = False
-
-        # Always keep the first and last points
-        df.loc[df.index[0], 'keep'] = True
-        df.loc[df.index[-1], 'keep'] = True
-
-        # Mark points with velocity above threshold
-        df.loc[df[f'{col}_speed'].abs() > self.compress_speed.value(), 'keep'] = True
-
-        # Also keep local extrema (changes in velocity sign)
-        vel_sign = np.sign(vel)
-        extrema = vel_sign.diff().fillna(0).ne(0)
-        df.loc[extrema, 'keep'] = True
-
-        # Filter to only the important points
-        df = df[df['keep']].copy()
-        df.drop(columns='keep', inplace=True)
-
-        # Calculate velocity, speed
-        vel = df[col].diff().shift(-1) / df[time_col].diff().shift(-1).dt.total_seconds()
-        vel.iloc[-1] = vel.iloc[-2]  # Copy the second last value to the last element
-        speed = abs(vel) * 60
-
-        df[f'{col}_vel'] = vel
-        df[f'{col}_speed'] = speed
 
     # Create G-code lines and write to file
     gcode_lines = ["G90"]  # Initialize G-code lines with absolute positioning command
@@ -235,7 +207,7 @@ def exportGCODE(self):
         else:
             speed = row['amplitude_speed'] * np.sqrt(len(axis_labels)) # speed in mm/min
         
-        gcode_line = f"G0 F{speed:.6f}" # Prepare G-code line
+        gcode_line = f"G1 F{speed:.6f}" # Prepare G-code line
         for j, col in enumerate(axis_labels):
             if col == 'Z':
                 Z = row['amplitude']
