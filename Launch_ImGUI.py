@@ -247,11 +247,13 @@ if __name__ == "__main__":
     app.setStyleSheet("""
         QMessageBox {
             background-color: #f5f5f5;
+            min-width: 580px;
         }
         QMessageBox QLabel {
             font-size: 18px;
             font-weight: bold;
-            min-width: 480px;
+            qproperty-alignment: 'AlignLeft | AlignVCenter';
+            qproperty-wordWrap: true;
             min-height: 80px;
             padding: 10px;
             color: #333333;

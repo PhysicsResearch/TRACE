@@ -215,6 +215,22 @@ def build_files_tab(self):
             border-right: 1px solid #cfd8dc;
             border-bottom: 2px solid #b0bec5;
         }
+        QScrollBar:vertical {
+            width: 40px;
+            background: #f5f5f5;
+            margin: 0px 0px 0px 0px;
+        }
+        QScrollBar::handle:vertical {
+            background: #bcbcbc;
+            min-height: 40px;
+            border-radius: 4px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: #9e9e9e;
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
     """)
     layout_main.addWidget(self.fileTreeView)
 

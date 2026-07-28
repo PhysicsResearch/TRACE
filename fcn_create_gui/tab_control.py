@@ -740,8 +740,6 @@ def build_platform_subtab(self):
         QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
     """)
     setattr(self, "HOME_ALL_PLATFORM", btn_home_all_plat)
-    from fcn_control.fcn_control import home
-    btn_home_all_plat.clicked.connect(lambda _c=False: home(self, 'ALL'))
     config_hlayout.addWidget(btn_home_all_plat)
 
     config_hlayout.addStretch()

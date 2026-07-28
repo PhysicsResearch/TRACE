@@ -229,7 +229,7 @@ def update_duet_status_ui(self, data=None):
             axes_homed = coords.get('axesHomed', [])
             xyz = coords.get('xyz', [])
 
-            # Update Cartesian Home button colors based on homed status (0=Not Homed -> RED, 1=Homed -> BLUE)
+            # Update Cartesian Home button colors based on homed status (0=Not Homed -> GREEN, 1=Homed -> BLUE)
             axis_map = [('X', 0), ('Y', 1), ('Z', 2)]
             all_homed = True
             for name, idx in axis_map:
@@ -239,17 +239,65 @@ def update_duet_status_ui(self, data=None):
                     all_homed = False
                 if btn is not None:
                     if is_homed:
-                        btn.setStyleSheet("background-color: blue; color: white; font-weight: bold; font-size: 14px; min-height: 40px; border-radius: 5px;")
+                        btn.setStyleSheet("""
+                            QPushButton {
+                                background-color: blue;
+                                color: white;
+                                font-weight: bold;
+                                font-size: 16px;
+                                min-height: 50px;
+                                border-radius: 6px;
+                            }
+                            QPushButton:hover {
+                                background-color: #1565c0;
+                            }
+                        """)
                     else:
-                        btn.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 14px; min-height: 40px; border-radius: 5px;")
+                        btn.setStyleSheet("""
+                            QPushButton {
+                                background-color: #2e7d32;
+                                color: white;
+                                font-weight: bold;
+                                font-size: 16px;
+                                min-height: 50px;
+                                border-radius: 6px;
+                            }
+                            QPushButton:hover {
+                                background-color: #1b5e20;
+                            }
+                        """)
 
             # Update Home ALL button colors
             btn_all = getattr(self, 'HOME_ALL', None)
             if btn_all is not None:
                 if all_homed:
-                    btn_all.setStyleSheet("background-color: blue; color: white; font-weight: bold; font-size: 14px; min-height: 40px; border-radius: 5px;")
+                    btn_all.setStyleSheet("""
+                        QPushButton {
+                            background-color: blue;
+                            color: white;
+                            font-weight: bold;
+                            font-size: 16px;
+                            min-height: 50px;
+                            border-radius: 6px;
+                        }
+                        QPushButton:hover {
+                            background-color: #1565c0;
+                        }
+                    """)
                 else:
-                    btn_all.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 14px; min-height: 40px; border-radius: 5px;")
+                    btn_all.setStyleSheet("""
+                        QPushButton {
+                            background-color: #2e7d32;
+                            color: white;
+                            font-weight: bold;
+                            font-size: 16px;
+                            min-height: 50px;
+                            border-radius: 6px;
+                        }
+                        QPushButton:hover {
+                            background-color: #1b5e20;
+                        }
+                    """)
 
             btn_plat_all = getattr(self, 'HOME_ALL_PLATFORM', None)
             if btn_plat_all is not None:
@@ -263,6 +311,7 @@ def update_duet_status_ui(self, data=None):
                             font-weight: bold;
                             font-size: 16px;
                             min-height: 45px;
+                            min-width: 140px;
                             border-radius: 6px;
                             border: none;
                         }
@@ -272,16 +321,17 @@ def update_duet_status_ui(self, data=None):
                 else:
                     btn_plat_all.setStyleSheet("""
                         QPushButton {
-                            background-color: red;
+                            background-color: #2e7d32;
                             color: white;
                             font-weight: bold;
                             font-size: 16px;
                             min-height: 45px;
+                            min-width: 140px;
                             border-radius: 6px;
                             border: none;
                         }
-                        QPushButton:hover { background-color: #d32f2f; }
-                        QPushButton:pressed { background-color: #c62828; padding-top: 3px; padding-left: 3px; }
+                        QPushButton:hover { background-color: #1b5e20; }
+                        QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
                     """)
 
             # Update current position displays for cartesian axes
@@ -1166,7 +1216,7 @@ def go_to_desired_positions(self):
     }
 
     # Apply translation & rotation about offset center
-    xc, yc, zc = off_lat, off_si, off_ap
+    xc, yc, zc = 0.0, 0.0, off_ap
     target_z = {}
     for name, (px, py, pz) in support_points.items():
         x1 = px - xc

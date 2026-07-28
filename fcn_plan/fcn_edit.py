@@ -322,19 +322,43 @@ def getDataframeFromTable(self):
         table = self.import_table_view
         
     # Extract data from the table widget
+    from PySide6.QtCore import Qt
     data = {}
+    
+    reverse_mapping = {
+        'Time (s)': 'time',
+        'Amplitude (mm)': 'amplitude',
+        'X (mm)': 'X',
+        'Y (mm)': 'Y',
+        'Z (mm)': 'Z',
+        'LAT (mm)': 'LAT',
+        'SI (mm)': 'SI',
+        'AP (mm)': 'AP',
+        'Roll (deg)': 'Roll',
+        'Pitch (deg)': 'Pitch',
+        'Yaw (deg)': 'Yaw',
+        'Command': 'Command'
+    }
+
     for col in range(table.columnCount()):
-        column_name = table.horizontalHeaderItem(col).text()
+        header_text = table.horizontalHeaderItem(col).text()
+        column_name = reverse_mapping.get(header_text, header_text)
         data[column_name] = []
         for row in range(0, table.rowCount()):
             item = table.item(row, col)
             if item:
-                try:
-                    data[column_name].append(float(item.text()))
-                except:
-                    data[column_name].append(item.text())
+                val = item.data(Qt.UserRole)
+                if val is not None:
+                    data[column_name].append(val)
+                else:
+                    try:
+                        data[column_name].append(float(item.text()))
+                    except:
+                        data[column_name].append(item.text())
 
     self.dfEdit = pd.DataFrame(data)
+    if 'time' in self.dfEdit.columns and 'timestamp' not in self.dfEdit.columns:
+        self.dfEdit['timestamp'] = self.dfEdit['time'] * 1000.0
     self.dfEdit_copy = self.dfEdit.copy()
     
     

@@ -4,24 +4,70 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QHeaderView
 from fcn_monitor.fcn_duet import get_clean_duet_ip, duet_request
 
 
+def on_header_section_clicked(self, logicalIndex):
+    """
+    Called when a column section in the file tree header is clicked.
+    Toggles sorting order and reloads the directory.
+    """
+    from PySide6.QtCore import Qt
+
+    if logicalIndex not in [0, 2]:
+        return  # Only sort by Name (0) and Last Modified (2)
+
+    current_col = getattr(self, 'sort_column', 0)
+    current_order = getattr(self, 'sort_order', Qt.AscendingOrder)
+
+    if current_col == logicalIndex:
+        new_order = Qt.DescendingOrder if current_order == Qt.AscendingOrder else Qt.AscendingOrder
+    else:
+        new_order = Qt.AscendingOrder
+
+    self.sort_column = logicalIndex
+    self.sort_order = new_order
+
+    header = self.fileTreeView.header()
+    if header:
+        header.setSortIndicator(logicalIndex, new_order)
+
+    if hasattr(self, 'current_directory'):
+        load_directory(self, self.current_directory)
+
+
 def setup_file_explorer(self):
     """
     Function to create multi-column file explorer tree model with Name, Size, and Date.
     Only reads directory if Duet is connected.
     """
+    from PySide6.QtCore import Qt
+
     self.model = QStandardItemModel()
     self.model.setHorizontalHeaderLabels(["Name", "Size", "Last Modified"])
 
     self.fileTreeView.setModel(self.model)
     self.fileTreeView.setRootIsDecorated(False)
 
-    # Configure Header column sizes
+    # Configure Header column sizes to be resizable (Interactive)
     header = self.fileTreeView.header()
     if header:
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.fileTreeView.setColumnWidth(0, 380)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        self.fileTreeView.setColumnWidth(0, 350)
+        self.fileTreeView.setColumnWidth(1, 100)
+        self.fileTreeView.setColumnWidth(2, 200)
+
+        # Set sort indicator properties
+        header.setSortIndicatorShown(True)
+        self.sort_column = getattr(self, 'sort_column', 0)
+        self.sort_order = getattr(self, 'sort_order', Qt.AscendingOrder)
+        header.setSortIndicator(self.sort_column, self.sort_order)
+
+        # Connect header clicked sort handler
+        try:
+            header.sectionClicked.disconnect()
+        except:
+            pass
+        header.sectionClicked.connect(lambda col: on_header_section_clicked(self, col))
 
     # Load root directory if connected
     load_directory(self, "/")
@@ -79,16 +125,30 @@ def load_directory(self, directory):
     # Get files/folders in directory
     items = get_files_for_dir(self, directory)
 
-    # Sort to display folders on top
-    def sort_key(entry):
-        is_dir = entry.get("type") == "d"
-        name = entry.get("name", "").lower()
-        return (not is_dir, name)
-    
-    items.sort(key=sort_key)
+    from PySide6.QtCore import Qt
+
+    sort_col = getattr(self, 'sort_column', 0)
+    sort_ord = getattr(self, 'sort_order', Qt.AscendingOrder)
+    reverse_sort = (sort_ord == Qt.DescendingOrder)
+
+    # Separate directories and files so directories stay on top
+    folders = [e for e in items if e.get("type") == "d"]
+    files = [e for e in items if e.get("type") != "d"]
+
+    if sort_col == 0:  # Sort by Name
+        folders.sort(key=lambda e: e.get("name", "").lower(), reverse=reverse_sort)
+        files.sort(key=lambda e: e.get("name", "").lower(), reverse=reverse_sort)
+    elif sort_col == 2:  # Sort by Date
+        folders.sort(key=lambda e: e.get("date", ""), reverse=reverse_sort)
+        files.sort(key=lambda e: e.get("date", ""), reverse=reverse_sort)
+    else:  # Unsortable / Default
+        folders.sort(key=lambda e: e.get("name", "").lower())
+        files.sort(key=lambda e: e.get("name", "").lower())
+
+    sorted_items = folders + files
 
     # Create multi-column row entries for files/folders
-    for entry in items:
+    for entry in sorted_items:
         row_items = create_row_items(self, entry, directory)
         root.appendRow(row_items)
 

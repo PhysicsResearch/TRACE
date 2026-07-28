@@ -318,6 +318,8 @@ def build_status_tab(self):
     self.statusCanvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     plot_content_layout.addWidget(self.statusCanvas, stretch=1)
 
+
+
     # Checkboxes stacked vertically in a single column (Right side of the graph)
     self.status_checks_container = QWidget(plot_box)
     v_checks_layout = QVBoxLayout(self.status_checks_container)
@@ -339,7 +341,10 @@ def build_status_tab(self):
         ('status_check_c', "Show 'c", '#ffb300'),
         ('status_check_Roll', "Show Roll", '#3f51b5'),
         ('status_check_Pitch', "Show Pitch", '#9e9d24'),
-        ('status_check_Yaw', "Show Yaw", '#673ab7')
+        ('status_check_Yaw', "Show Yaw", '#673ab7'),
+        ('status_check_LAT', "Show LAT", '#e65100'),
+        ('status_check_AP', "Show AP", '#1b5e20'),
+        ('status_check_SI', "Show SI", '#01579b')
     ]
 
     for attr, label, color in checkbox_specs:
@@ -353,6 +358,12 @@ def build_status_tab(self):
 
     plot_content_layout.addWidget(self.status_checks_container)
     plot_vlayout.addLayout(plot_content_layout)
+
+    # Add Navigation Toolbar for zoom and pan below the graph
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+    self.status_toolbar = NavigationToolbar(self.statusCanvas, self.tab_status)
+    self.status_toolbar.setStyleSheet("background-color: #f5f5f5; border: none; font-weight: bold;")
+    plot_vlayout.addWidget(self.status_toolbar)
 
     layout_main.addWidget(plot_box, stretch=1)
 

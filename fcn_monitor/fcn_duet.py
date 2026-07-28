@@ -79,7 +79,10 @@ def render_status_plot(self):
         ('status_check_c', "'c", "'c (mm)", '#ffb300'),
         ('status_check_Roll', 'Roll', 'Roll (deg)', '#3f51b5'),
         ('status_check_Pitch', 'Pitch', 'Pitch (deg)', '#9e9d24'),
-        ('status_check_Yaw', 'Yaw', 'Yaw (deg)', '#673ab7')
+        ('status_check_Yaw', 'Yaw', 'Yaw (deg)', '#673ab7'),
+        ('status_check_LAT', 'LAT', 'LAT (mm)', '#e65100'),
+        ('status_check_AP', 'AP', 'AP (mm)', '#1b5e20'),
+        ('status_check_SI', 'SI', 'SI (mm)', '#01579b')
     ]
 
     needs_legend_update = False
@@ -344,8 +347,8 @@ def get_positions_only_fast(self, ip):
                         let = str(ax["letter"]).strip()
                         user_pos = ax.get("userPosition", 0.0)
                         axis_positions[let] = user_pos
-                        if f"'{let}" in axis_positions:
-                            axis_positions[f"'{let}"] = user_pos
+                        axis_positions[let.lower()] = user_pos
+                        axis_positions[f"'{let.lower()}"] = user_pos
                 return axis_positions
     except Exception:
         pass
@@ -450,6 +453,20 @@ def update_status_fast(self):
         
         current_yaw = axis_positions['W']
 
+        # Calculate LAT, AP, SI
+        curr_lower_e = axis_positions.get("'e", 0.0)
+        curr_lower_f = axis_positions.get("'f", 0.0)
+        current_lat = (curr_lower_e + curr_lower_f) / 2.0
+
+        curr_lower_a = axis_positions.get("'a", 0.0)
+        axis_y_lo_name = "'c"
+        if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
+            axis_y_lo_name = "'b"
+        curr_lower_y_lo = axis_positions.get(axis_y_lo_name, axis_positions.get("'c", 0.0))
+        current_si = (curr_lower_a + curr_lower_y_lo) / 2.0
+
+        current_ap = (curr_a + curr_b + curr_c + curr_d) / 4.0
+
         if hasattr(self, 'statusPosRoll') and self.statusPosRoll:
             self.statusPosRoll.setText(f"Roll {current_roll:.2f}")
         if hasattr(self, 'statusPosPitch') and self.statusPosPitch:
@@ -463,7 +480,8 @@ def update_status_fast(self):
                 't': [], 'X': [], 'Y': [], 'Z': [],
                 'A': [], 'B': [], 'C': [], 'D': [],
                 "'e": [], "'f": [], "'a": [], "'c": [],
-                'Roll': [], 'Pitch': [], 'Yaw': []
+                'Roll': [], 'Pitch': [], 'Yaw': [],
+                'LAT': [], 'AP': [], 'SI': []
             }
 
         t_now = time.time()
@@ -486,6 +504,9 @@ def update_status_fast(self):
         self.status_plot_data['Roll'].append(current_roll)
         self.status_plot_data['Pitch'].append(current_pitch)
         self.status_plot_data['Yaw'].append(current_yaw)
+        self.status_plot_data['LAT'].append(current_lat)
+        self.status_plot_data['AP'].append(current_ap)
+        self.status_plot_data['SI'].append(current_si)
 
         # Cap history buffer at 500 points
         if len(self.status_plot_data['t']) > 500:

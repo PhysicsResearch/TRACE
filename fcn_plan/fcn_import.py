@@ -142,7 +142,8 @@ def addColumns(self, dataframe):
     time (in s), local maxima/minima, velocity/gradients"""
 
     # Add column with time in seconds
-    dataframe["time"] = pd.to_timedelta(dataframe["timestamp"], unit=self.import_time_unit.currentText())
+    unit_str = self.import_time_unit.currentText() if hasattr(self, 'import_time_unit') and self.import_time_unit is not None else 'ms'
+    dataframe["time"] = pd.to_timedelta(dataframe["timestamp"], unit=unit_str)
     dataframe["time"] = dataframe["time"].dt.total_seconds()
     time_step = dataframe.loc[1, "time"] - dataframe.loc[0, "time"]
 
@@ -206,6 +207,9 @@ def addColumns(self, dataframe):
 
 def loadTable(self, dataframe, header_line):
     """Function to populate the table view widget"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QHeaderView
+    
     # Clear the table before populating it
     if self.curve_origin == 'create':
         table = self.create_table_view
@@ -213,19 +217,55 @@ def loadTable(self, dataframe, header_line):
         table = self.import_table_view
     
     table.clear()
+    
+    # Hide row numbers
+    table.verticalHeader().setVisible(False)
+    
+    # Filter out timestamp
+    display_columns = [col for col in dataframe.columns if col != 'timestamp']
     table.setRowCount(dataframe.shape[0])
-    table.setColumnCount(dataframe.shape[1])
+    table.setColumnCount(len(display_columns))
+
+    header_units = {
+        'time': 'Time (s)',
+        'amplitude': 'Amplitude (mm)',
+        'X': 'X (mm)',
+        'Y': 'Y (mm)',
+        'Z': 'Z (mm)',
+        'LAT': 'LAT (mm)',
+        'SI': 'SI (mm)',
+        'AP': 'AP (mm)',
+        'Roll': 'Roll (deg)',
+        'Pitch': 'Pitch (deg)',
+        'Yaw': 'Yaw (deg)',
+        'Command': 'Command'
+    }
 
     # Set table headers
     if header_line >= 0:
-        table.setHorizontalHeaderLabels(dataframe.columns)
+        headers = [header_units.get(col, col) for col in display_columns]
+        table.setHorizontalHeaderLabels(headers)
     else:
-        table.setHorizontalHeaderLabels([f'C{i+1}' for i in range(dataframe.shape[1])])
+        table.setHorizontalHeaderLabels([f'C{i+1}' for i in range(len(display_columns))])
 
     # Populate the table with data
     for row in range(dataframe.shape[0]):
-        for col in range(dataframe.shape[1]):
-            table.setItem(row, col, QTableWidgetItem(str(dataframe.iat[row, col])))
+        for col, col_name in enumerate(display_columns):
+            val = dataframe.iat[row, dataframe.columns.get_loc(col_name)]
+            try:
+                float_val = float(val)
+                if col_name == 'timestamp':
+                    display_text = str(int(round(float_val)))
+                else:
+                    display_text = f"{float_val:.2f}"
+                item = QTableWidgetItem(display_text)
+                item.setData(Qt.UserRole, float_val)
+            except (ValueError, TypeError):
+                item = QTableWidgetItem(str(val))
+                item.setData(Qt.UserRole, val)
+            table.setItem(row, col, item)
+            
+    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
     # Clear and re-initialize variables       
     if hasattr(self, "dfEdit"):
