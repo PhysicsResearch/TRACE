@@ -5,6 +5,8 @@ def initialize_software_tables(self):
     This function initializes the tables in the software
       - Table to create analytical curves
     """
+    if not hasattr(self, 'create_table') or self.create_table is None:
+        return
 
     headers = ['Period', 'Amplitude']
     # Set number of columns
@@ -24,4 +26,3 @@ def initialize_software_tables(self):
     self.create_table.resizeColumnsToContents()
     self.create_table.resizeRowsToContents()
     self.create_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
