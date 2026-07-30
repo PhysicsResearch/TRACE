@@ -63,10 +63,13 @@ def setup_file_explorer(self):
         header.setSortIndicator(self.sort_column, self.sort_order)
 
         # Connect header clicked sort handler
-        try:
-            header.sectionClicked.disconnect()
-        except:
-            pass
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            try:
+                header.sectionClicked.disconnect()
+            except:
+                pass
         header.sectionClicked.connect(lambda col: on_header_section_clicked(self, col))
 
     # Load root directory if connected
@@ -383,6 +386,98 @@ def download_file(self, filepath):
         QMessageBox.critical(self, "Download Error", f"Failed to download file from Duet:\n{e}")
 
 
+def transfer_to_planning_action(self):
+    """
+    Downloads the selected G-code file from the Duet SD card directly into memory,
+    then parses it and imports it into the Planning tab.
+    """
+    if not getattr(self, 'duet_connected', False):
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before transferring files.")
+        return
+
+    indexes = self.fileTreeView.selectedIndexes()
+    if not indexes:
+        QMessageBox.information(self, "Transfer to Planning", "Please select a file to transfer.")
+        return
+
+    # Column 0 index
+    index = [i for i in indexes if i.column() == 0][0]
+    item = self.model.itemFromIndex(index)
+    if not item:
+        return
+
+    rel_path = item.data(role=self.PATH_ROLE)
+    is_dir = item.data(role=self.IS_DIR_ROLE)
+
+    if is_dir:
+        QMessageBox.warning(self, "Transfer to Planning", "Cannot transfer folders. Please select a file.")
+        return
+
+    import os
+    filename = os.path.basename(rel_path)
+    clean_path = rel_path.strip('/')
+    rrf_path = f"0:/gcodes/{clean_path}" if clean_path else "0:/gcodes"
+
+    from PySide6.QtWidgets import QProgressDialog
+    from PySide6.QtCore import Qt, QCoreApplication
+    import requests
+    import io
+
+    # 1. Start download with progress bar
+    progress = QProgressDialog(f"Downloading '{filename}' from Duet...", "Cancel", 0, 200, self)
+    progress.setWindowTitle("Transfer to Planning")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setValue(0)
+    progress.show()
+    QCoreApplication.processEvents()
+
+    ip = get_clean_duet_ip(self)
+    url = f"http://{ip}/rr_download"
+
+    try:
+        # Fetch file size using stream=True and shared session
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(url, params={'name': rrf_path}, timeout=10, stream=True)
+        response.raise_for_status()
+
+        # Try to get Content-Length from headers
+        total_size = int(response.headers.get('content-length', 0))
+        
+        # Read file chunks
+        gcode_bytes = bytearray()
+        bytes_read = 0
+
+        for chunk in response.iter_content(chunk_size=16384):
+            if progress.wasCanceled():
+                raise Exception("Transfer cancelled by user")
+            if chunk:
+                gcode_bytes.extend(chunk)
+                bytes_read += len(chunk)
+                
+                # First 50% (0 - 100 range) of progress bar is for downloading
+                percent = int((bytes_read / total_size) * 100) if total_size > 0 else 50
+                progress.setValue(int(percent))
+                QCoreApplication.processEvents()
+
+        gcode_content = gcode_bytes.decode('utf-8', errors='ignore')
+
+        # 2. Start importing from memory
+        progress.setLabelText("Parsing G-code and loading table...")
+        progress.setValue(100)
+        QCoreApplication.processEvents()
+
+        from fcn_plan.fcn_create import import_gcode_from_string
+        import_gcode_from_string(self, gcode_content, progress_dialog=progress, progress_offset=100)
+
+    except Exception as e:
+        progress.close()
+        if "cancelled by user" in str(e):
+            QMessageBox.information(self, "Transfer Cancelled", "Transfer to Planning was cancelled by the user.")
+        else:
+            QMessageBox.critical(self, "Transfer Error", f"Failed to transfer G-code:\n{e}")
+
+
 def download_selected_item(self):
     """
     Downloads the selected file in the tree view to the local computer.
@@ -415,14 +510,17 @@ def download_selected_item(self):
 def upload_file(self):
     """
     Prompts the user to select a G-code file from their local computer,
-    and uploads it to the current directory on the Duet SD card.
+    and uploads it to the current directory on the Duet SD card with a progress bar.
     """
     if not getattr(self, 'duet_connected', False):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
         return
 
-    from PySide6.QtWidgets import QFileDialog
+    from PySide6.QtWidgets import QFileDialog, QProgressDialog
+    from PySide6.QtCore import Qt, QCoreApplication
     import os
+    import io
+    import requests
 
     local_path, _ = QFileDialog.getOpenFileName(self, "Upload G-code File", "", "G-code Files (*.gcode *.g *._gcode);;All Files (*)")
     if not local_path:
@@ -436,18 +534,53 @@ def upload_file(self):
     url = f"http://{ip}/rr_upload"
 
     try:
+        # Read the file bytes
         with open(local_path, 'rb') as f:
             file_data = f.read()
+        total_size = len(file_data)
 
-        # Avoid proxy issues by setting trust_env=False
+        # Initialize progress dialog
+        progress = QProgressDialog(f"Uploading '{filename}' to Duet...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("Uploading File")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setValue(0)
+        progress.show()
+        QCoreApplication.processEvents()
+
+        def progress_callback(bytes_read, total):
+            if progress.wasCanceled():
+                raise Exception("Upload cancelled by user")
+            percent = int((bytes_read / total) * 100) if total > 0 else 0
+            progress.setValue(percent)
+            QCoreApplication.processEvents()
+
+        # Custom BytesIO wrapper to track reading progress
+        class ProgressIO(io.BytesIO):
+            def __init__(self, data_bytes, callback):
+                super().__init__(data_bytes)
+                self.callback = callback
+                self.total = len(data_bytes)
+                self.read_bytes = 0
+
+            def read(self, size=-1):
+                chunk = super().read(size)
+                self.read_bytes += len(chunk)
+                self.callback(self.read_bytes, self.total)
+                return chunk
+
+        progress_io = ProgressIO(file_data, progress_callback)
+
         session = requests.Session()
         session.trust_env = False
-        
-        # RRF expects POST request with raw data
-        response = session.post(url, params={'name': rrf_path}, data=file_data, timeout=15)
+        response = session.post(url, params={'name': rrf_path}, data=progress_io, timeout=20)
         response.raise_for_status()
 
+        progress.setValue(100)
         QMessageBox.information(self, "Upload Successful", f"File '{filename}' uploaded successfully to Duet!")
         load_directory(self, getattr(self, 'current_directory', '/'))
     except Exception as e:
-        QMessageBox.critical(self, "Upload Error", f"Failed to upload '{filename}':\n{e}")
+        progress.close()
+        if "cancelled by user" in str(e):
+            QMessageBox.information(self, "Upload Cancelled", f"Upload of '{filename}' was cancelled by the user.")
+        else:
+            QMessageBox.critical(self, "Upload Error", f"Failed to upload '{filename}':\n{e}")

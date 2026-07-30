@@ -216,10 +216,22 @@ def loadTable(self, dataframe, header_line):
     elif self.curve_origin == 'import':
         table = self.import_table_view
     
+    table.setUpdatesEnabled(False)
+    table.blockSignals(True)
     table.clear()
     
-    # Hide row numbers
+    # Hide row numbers and style table
     table.verticalHeader().setVisible(False)
+    table.verticalHeader().setDefaultSectionSize(32)
+    table.setStyleSheet("""
+        QTableWidget {
+            font-size: 15px;
+        }
+        QHeaderView::section {
+            font-weight: bold;
+            font-size: 15px;
+        }
+    """)
     
     # Filter out timestamp
     display_columns = [col for col in dataframe.columns if col != 'timestamp']
@@ -265,7 +277,16 @@ def loadTable(self, dataframe, header_line):
                 item.setData(Qt.UserRole, val)
             table.setItem(row, col, item)
             
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    # Set column resize modes: numeric columns are interactive (120px), last column stretches
+    header = table.horizontalHeader()
+    for col in range(table.columnCount() - 1):
+        header.setSectionResizeMode(col, QHeaderView.Interactive)
+        table.setColumnWidth(col, 120)
+    if table.columnCount() > 0:
+        header.setSectionResizeMode(table.columnCount() - 1, QHeaderView.Stretch)
+
+    table.blockSignals(False)
+    table.setUpdatesEnabled(True)
 
     # Clear and re-initialize variables       
     if hasattr(self, "dfEdit"):

@@ -10,7 +10,6 @@ from .tab_control import build_control_tab
 from .tab_status import build_status_tab
 from .tab_files import build_files_tab
 from .tab_planning import build_planning_tab
-from .tab_motion_verification import build_motion_verification_tab
 
 
 def create_gui(self):
@@ -33,9 +32,10 @@ def create_gui(self):
             font-size: 20px;
             padding: 10px 24px;
             min-height: 52px;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
         }
         QTabBar::tab:selected {
-            background-color: #ffffff;
             color: #1565c0;
             border-bottom: 4px solid #1565c0;
         }
@@ -47,14 +47,12 @@ def create_gui(self):
     self.tab_status = QWidget()
     self.tab_files = QWidget()
     self.tab_planning = QWidget()
-    self.tab_phantom_operation = QWidget()
 
     # Add tabs to tabModules with exact titles expected by software logic
     self.tabModules.addTab(self.tab_2, "Control")
     self.tabModules.addTab(self.tab_status, "Status")
     self.tabModules.addTab(self.tab_files, "Files")
     self.tabModules.addTab(self.tab_planning, "Planning")
-    self.tabModules.addTab(self.tab_phantom_operation, "Lung Phantom")
 
     # Track loaded main tabs for lazy loading
     self._loaded_tabs = set()
@@ -94,9 +92,6 @@ def on_main_tab_changed(self, index):
     elif index == 3:  # Planning Tab
         build_planning_tab(self)
         self._loaded_tabs.add(3)
-    elif index == 4:  # Lung Phantom Tab
-        build_motion_verification_tab(self)
-        self._loaded_tabs.add(4)
 
     # Re-bind software buttons after dynamic tab build
     from fcn_init.init_buttons import initialize_software_buttons

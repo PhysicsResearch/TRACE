@@ -11,6 +11,16 @@ def initialize_software_variables(self):
     self.lines      = {}
     self.plot_axes  = []
     
+    # Figures variables (moved from menu bar)
+    self.selected_font_size = 14
+    self.selected_legend_font_size = 14
+    self.selected_legend_on_off = "On"
+    self.selected_background = "Transparent"
+    self.selected_line_width = 2.0
+    self.selected_line_color = "Red" 
+    self.selected_point_size = 8
+    self.selected_point_color = "Blue"
+    
     try:
         with open('configuration.json', 'r') as f:
             data = json.load(f)

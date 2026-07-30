@@ -317,7 +317,10 @@ def getDataframeFromTable(self):
     """Extract data from tableWidget and convert to pandas.DataFrame"""
 
     if self.curve_origin == 'create':
-        table = self.create_table_view
+        # dfEdit is already fully updated and synchronized in background memory in high resolution.
+        # Bypassing here preserves full resolution.
+        return
+        
     elif self.curve_origin == 'import':
         table = self.import_table_view
         

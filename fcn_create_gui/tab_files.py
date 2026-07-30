@@ -89,6 +89,23 @@ def build_files_tab(self):
         }
     """)
 
+    self.gcodeToPlanning = QPushButton("To Planning", self.tab_files)
+    self.gcodeToPlanning.setMinimumHeight(50)
+    self.gcodeToPlanning.setStyleSheet("""
+        QPushButton {
+            background-color: #673ab7;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 16px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #512da8;
+        }
+    """)
+
     self.gcodeRefresh = QPushButton("Refresh", self.tab_files)
     self.gcodeRefresh.setMinimumHeight(50)
     self.gcodeRefresh.setStyleSheet("""
@@ -158,6 +175,7 @@ def build_files_tab(self):
     top_layout.addWidget(self.gcodeRun)
     top_layout.addWidget(self.gcodeUpload)
     top_layout.addWidget(self.gcodeDownload)
+    top_layout.addWidget(self.gcodeToPlanning)
     top_layout.addWidget(self.gcodeRefresh)
     top_layout.addWidget(self.gcodeNewFolder)
     top_layout.addWidget(self.gcodeDelete)

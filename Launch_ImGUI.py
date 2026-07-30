@@ -19,7 +19,6 @@ fmt.setStencilBufferSize(8)
 QSurfaceFormat.setDefaultFormat(fmt)
 
 from fcn_create_gui import create_gui
-from fcn_init.create_menu           import initializeMenuBar
 from fcn_init.ModulesTab_change     import set_fcn_tabModules_changed
 from fcn_init.init_variables        import initialize_software_variables
 from fcn_init.init_tables           import initialize_software_tables
@@ -46,7 +45,6 @@ class MyApp(QMainWindow):
         initialize_software_buttons(self)
 
         set_fcn_tabModules_changed(self)
-        initializeMenuBar(self)
 
         # Apply tactile pressed feedback (padding shift) and scale all QPushButton heights by 50%
         import re

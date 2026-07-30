@@ -7,7 +7,6 @@ from fcn_plan.fcn_import        import openCSVFile_BrCv
 from fcn_plan.fcn_edit          import scaleAmpl, shiftAmpl, zeroAmpl, clipAmpl, scaleFreq, \
                                         undoOperation, removeDrift, addDrift, cropRange, smoothAmpl
 from fcn_plan.fcn_export        import exportData, exportGCODE, calcStats, plotViewData
-from fcn_monitor.fcn_plotting   import update_axes, on_radiation_trigger_check
 from fcn_monitor.fcn_duet       import clear_status_plot_data
 from fcn_control.fcn_filesystem import setup_file_explorer, go_back, mkdir, delete_selected_item, download_selected_item, upload_file, run_selected_gcode_item
 
@@ -68,6 +67,10 @@ def initialize_software_buttons(self):
     if hasattr(self, 'gcodeDownload'):
         safe_connect(self.gcodeDownload, lambda: download_selected_item(self))
         self.gcodeDownload.setStyleSheet("background-color: #0288d1; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'gcodeToPlanning'):
+        from fcn_control.fcn_filesystem import transfer_to_planning_action
+        safe_connect(self.gcodeToPlanning, lambda: transfer_to_planning_action(self))
+        self.gcodeToPlanning.setStyleSheet("background-color: #673ab7; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
 
     if hasattr(self, 'treeViewBack'):
         safe_connect(self.treeViewBack, lambda: go_back(self))
@@ -123,7 +126,10 @@ def initialize_software_buttons(self):
         self.create_remove_row.setStyleSheet("background-color: red; color: white;")
     if hasattr(self, 'button_create_curve'):
         safe_connect(self.button_create_curve, lambda: createCurve(self))
-        self.button_create_curve.setStyleSheet("background-color: green; color: white;")
+
+    if hasattr(self, 'button_import_gcode'):
+        from fcn_plan.fcn_create import import_gcode_action
+        safe_connect(self.button_import_gcode, lambda: import_gcode_action(self))
 
     if hasattr(self, 'button_wait_radiation'):
         from fcn_plan.fcn_create import add_wait_radiation_action
@@ -173,13 +179,3 @@ def initialize_software_buttons(self):
         safe_connect(self.button_clip_cycles, lambda: cropRange(self))
     if hasattr(self, 'button_apply_smooth'):
         safe_connect(self.button_apply_smooth, lambda: smoothAmpl(self))
-    
-    # --- MONITORING ---
-    if hasattr(self, 'check_axis_X'):
-        safe_connect(self.check_axis_X, lambda: update_axes(self))
-    if hasattr(self, 'check_axis_Y'):
-        safe_connect(self.check_axis_Y, lambda: update_axes(self))
-    if hasattr(self, 'check_axis_Z'):
-        safe_connect(self.check_axis_Z, lambda: update_axes(self))
-    if hasattr(self, 'stop_until_radiation'):
-        safe_connect_state_changed(self.stop_until_radiation, lambda: on_radiation_trigger_check(self))

@@ -64,7 +64,7 @@ def generate_gcode_string(
 
             gcode_lines.append(f"G1 F{speed:.6f} X{X_new[i]:.6f} Y{Y_new[i]:.6f} Z{Z_new[i]:.6f}")
 
-    else: # Motion Platform
+    elif device == "Motion Platform":
         LAT_orig = columns_data["LAT"]
         SI_orig = columns_data["SI"]
         AP_orig = columns_data["AP"]
@@ -164,5 +164,38 @@ def generate_gcode_string(
                 f"G1 F{speed:.6f} A{A_new[i]:.6f} B{B_new[i]:.6f} C{C_new[i]:.6f} D{D_new[i]:.6f} "
                 f"'e{LAT_new[i]:.6f} 'f{LAT_new[i]:.6f} 'a{SI_new[i]:.6f} {axis_y_lo}{SI_new[i]:.6f}"
             )
+
+    else: # Other
+        new_data = {}
+        for col, arr in columns_data.items():
+            if col != "Command":
+                new_data[col] = np.interp(t_new, t_orig, arr)
+                
+        if max_limits and len(max_limits) > 0:
+            lim = max_limits[0]
+            for col in new_data:
+                if np.any(np.abs(new_data[col]) > lim):
+                    exceeds_limits = True
+
+        gcode_lines = ["G90"]
+        
+        for i in range(len(t_new)):
+            if i in new_commands_indices:
+                gcode_lines.append(new_commands_indices[i])
+            if i == 0:
+                speed = 1000.0
+            else:
+                dist_sq = 0.0
+                for col in new_data:
+                    diff = new_data[col][i] - new_data[col][i-1]
+                    dist_sq += diff * diff
+                dist = np.sqrt(dist_sq)
+                speed = dist * 60000.0
+                
+            axis_parts = []
+            for col in sorted(new_data.keys()):
+                axis_parts.append(f"{col}{new_data[col][i]:.6f}")
+            axis_str = " ".join(axis_parts)
+            gcode_lines.append(f"G1 F{speed:.6f} {axis_str}")
 
     return '\n'.join(gcode_lines), exceeds_limits

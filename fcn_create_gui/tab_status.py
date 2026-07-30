@@ -81,6 +81,16 @@ def build_status_tab(self):
     hdr_layout.addWidget(self.gcodePause)
     hdr_layout.addWidget(self.gcodeResume)
     hdr_layout.addWidget(self.gcodeStopJob)
+    
+    # Give some spacing from Stop button
+    hdr_layout.addSpacing(25)
+    
+    # Add Auto-release on trigger checkbox
+    self.check_auto_release = QCheckBox("Auto-release on trigger", self.card_status)
+    self.check_auto_release.setChecked(False)
+    self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
+    hdr_layout.addWidget(self.check_auto_release)
+    
     hdr_layout.addStretch()
     hdr_layout.addWidget(self.emergencyButton_2)
     card_layout.addLayout(hdr_layout)

@@ -21,14 +21,19 @@ def get_clean_duet_ip(self):
     return ip
 
 
+_shared_session = None
+
 def duet_request(url, params=None, timeout=4):
     """
     Send an HTTP GET request to Duet, bypassing Windows system environment proxies
     to avoid false connection timeouts when connecting to local IP addresses.
+    Uses a globally shared Session to reuse TCP connections (keep-alive) and prevent socket exhaustion.
     """
-    session = requests.Session()
-    session.trust_env = False  # Bypasses local network proxy interception
-    return session.get(url, params=params, timeout=timeout)
+    global _shared_session
+    if _shared_session is None:
+        _shared_session = requests.Session()
+        _shared_session.trust_env = False
+    return _shared_session.get(url, params=params, timeout=timeout)
 
 
 def clear_status_plot(self):
@@ -306,6 +311,13 @@ def update_status_tab_dashboard(self):
         probe = data.get("sensors", {}).get("probeValue", 0)
         if hasattr(self, 'statusProbe') and self.statusProbe:
             self.statusProbe.setText(f"Probe: {probe}")
+            
+        # Auto-release on trigger check: if paused (S), checkbox checked, and probe > 500, auto-resume
+        if status_code == 'S':
+            check_auto = getattr(self, 'check_auto_release', None)
+            if check_auto is not None and check_auto.isChecked() and probe > 500:
+                self.duet_status_code = 'R'  # Prevent double triggers
+                pause_continue_GCODE(self, pause=False)
 
         params = data.get("params", {})
         speed_factor = params.get("speedFactor", 100.0)
@@ -856,6 +868,7 @@ def duet_status_request(self, ip, timeout=5):
         elif mode == 'model':
             import json
             try:
+                # Query keys separately using the shared session to ensure compatibility with RRF3 standalone boards
                 url_move = f'http://{ip}/rr_model?key=move.axes&flags=d99'
                 res_move = duet_request(url_move, timeout=timeout)
                 move_json = res_move.json() if res_move.status_code == 200 else {}
@@ -864,7 +877,7 @@ def duet_status_request(self, ip, timeout=5):
                 if not isinstance(axes_list, list):
                     axes_list = []
                     
-                # Support pagination for move.axes (e.g. if next > 0)
+                # Support pagination for move.axes if present
                 next_index = move_json.get("next", 0) if isinstance(move_json, dict) else 0
                 pagination_errors = []
                 while next_index > 0:
@@ -878,29 +891,34 @@ def duet_status_request(self, ip, timeout=5):
                                 axes_list.extend(next_axes)
                             next_index = paginated_json.get("next", 0) if isinstance(paginated_json, dict) else 0
                         else:
-                            pagination_errors.append(f"Paginated request to {url_paginated} returned status {res_paginated.status_code}. Preview: {res_paginated.text[:200]}")
+                            pagination_errors.append(f"Paginated request to {url_paginated} returned status {res_paginated.status_code}.")
                             break
                     except Exception as p_ex:
                         pagination_errors.append(f"Paginated request to {url_paginated} raised exception: {p_ex}")
                         break
 
+                url_cm = f'http://{ip}/rr_model?key=move.currentMove&flags=d99'
+                res_cm = duet_request(url_cm, timeout=timeout)
+                cm_json = res_cm.json().get("result", {}) if res_cm.status_code == 200 else {}
+
                 url_state = f'http://{ip}/rr_model?key=state&flags=d99'
                 res_state = duet_request(url_state, timeout=timeout)
-                state_json = res_state.json() if res_state.status_code == 200 else {}
-                
+                state_json = res_state.json().get("result", {}) if res_state.status_code == 200 else {}
+
                 url_sensors = f'http://{ip}/rr_model?key=sensors&flags=d99'
                 res_sensors = duet_request(url_sensors, timeout=timeout)
-                sensors_json = res_sensors.json() if res_sensors.status_code == 200 else {}
+                sensors_json = res_sensors.json().get("result", {}) if res_sensors.status_code == 200 else {}
                 
                 url_job = f'http://{ip}/rr_model?key=job&flags=d99'
                 res_job = duet_request(url_job, timeout=timeout)
-                job_json = res_job.json() if res_job.status_code == 200 else {}
+                job_json = res_job.json().get("result", {}) if res_job.status_code == 200 else {}
 
                 # Dump raw responses for debugging
                 debug_data = {
                     "move_raw": move_json,
                     "axes_list_merged": axes_list,
                     "pagination_errors": pagination_errors,
+                    "current_move_raw": cm_json,
                     "state_raw": state_json,
                     "sensors_raw": sensors_json,
                     "job_raw": job_json
@@ -914,11 +932,12 @@ def duet_status_request(self, ip, timeout=5):
                 # Merge unwrapped results
                 om_data = {
                     "move": {
-                        "axes": axes_list
+                        "axes": axes_list,
+                        "currentMove": cm_json
                     },
-                    "state": state_json.get("result", {}) if isinstance(state_json, dict) else {},
-                    "sensors": sensors_json.get("result", {}) if isinstance(sensors_json, dict) else {},
-                    "job": job_json.get("result", {}) if isinstance(job_json, dict) else {}
+                    "state": state_json,
+                    "sensors": sensors_json,
+                    "job": job_json
                 }
                 
                 legacy_data = translate_machine_status_to_legacy(om_data)
@@ -944,9 +963,13 @@ def duet_status_request(self, ip, timeout=5):
             data, code = try_request(api_mode)
             if code == 200:
                 return data, 200
-        except Exception:
+            else:
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, f"Cached API mode '{api_mode}' failed with status {code}. Redetecting...", color="#ff3333")
+                self.duet_api_mode = None
+        except Exception as e:
             from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Cached API mode '{api_mode}' failed. Redetecting...", color="#ff3333")
+            log_to_duet_console(self, f"Cached API mode '{api_mode}' raised exception: {e}. Redetecting...", color="#ff3333")
             self.duet_api_mode = None
 
     # 2. Run fallback detection

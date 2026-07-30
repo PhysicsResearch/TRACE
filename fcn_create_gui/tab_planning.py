@@ -1,86 +1,35 @@
 """
 Planning Tab creation for TRACE GUI
-Constructs sub-tabs for Create, Import, Edit, and Export & visualize curves with lazy sub-tab loading.
+Constructs the curve creation workspace directly inside the main Planning tab.
 """
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QPushButton, QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox,
-    QCheckBox, QSlider, QTextEdit, QTableWidget, QTabWidget, QLabel
+    QCheckBox, QSlider, QTextEdit, QTableWidget, QLabel, QSplitter, QTabWidget, QStackedWidget
 )
 
 def build_planning_tab(self):
-    """Populate self.tab_planning with sub-tab widget container."""
-    layout_main = QVBoxLayout(self.tab_planning)
-    layout_main.setContentsMargins(5, 5, 5, 5)
-
-    self.tabWidget_BrCv = QTabWidget(self.tab_planning)
-    self.tabWidget_BrCv.setStyleSheet("""
-        QTabBar::tab {
-            font-weight: bold;
-            font-size: 15px;
-            padding: 8px 16px;
-        }
+    """Build 'Create' interface directly inside self.tab_planning."""
+    
+    # Apply larger styling for QGroupBox titles
+    self.tab_planning.setStyleSheet("""
         QGroupBox {
             font-weight: bold;
             font-size: 16px;
         }
     """)
-    
-    # Sub-tab pages (placeholders for lazy loading)
-    self.tab_create = QWidget()
-    self.tab_import = QWidget()
-    self.tab_edit = QWidget()
-    self.tab_export = QWidget()
 
-    self.tabWidget_BrCv.addTab(self.tab_create, "Create ")
-    self.tabWidget_BrCv.addTab(self.tab_import, "Import")
-    self.tabWidget_BrCv.addTab(self.tab_edit, "Edit")
-    self.tabWidget_BrCv.addTab(self.tab_export, "Export & visualize")
-
-    layout_main.addWidget(self.tabWidget_BrCv)
-
-    # Initialize sub-tab loaded tracking set
-    self._loaded_subtabs = set()
-
-    # Connect currentChanged for lazy loading of sub-tabs
-    self.tabWidget_BrCv.currentChanged.connect(lambda idx: on_subtab_changed(self, idx))
-
-    # Build initial sub-tab 0 ("Create") immediately
-    build_create_subtab(self)
-    self._loaded_subtabs.add(0)
-
-
-def on_subtab_changed(self, index):
-    """Lazy load sub-tabs inside Planning tab on first click."""
-    if index in self._loaded_subtabs:
-        return
-
-    if index == 1:
-        build_import_subtab(self)
-    elif index == 2:
-        build_edit_subtab(self)
-    elif index == 3:
-        build_export_subtab(self)
-
-    self._loaded_subtabs.add(index)
-
-
-def build_create_subtab(self):
-    """Build 'Create' sub-tab inside Planning."""
-    from PySide6.QtWidgets import QVBoxLayout, QDoubleSpinBox, QSplitter
-    from PySide6.QtCore import Qt
-
-    layout = QVBoxLayout(self.tab_create)
+    layout = QVBoxLayout(self.tab_planning)
     layout.setContentsMargins(5, 5, 5, 5)
 
     # Main vertical splitter (separates top graph and bottom settings/table)
-    main_splitter = QSplitter(Qt.Vertical, self.tab_create)
+    main_splitter = QSplitter(Qt.Vertical, self.tab_planning)
     layout.addWidget(main_splitter)
 
     # 1. Preview canvas area (Top panel)
-    self.create_plot_view = QWidget(self.tab_create)
+    self.create_plot_view = QWidget(self.tab_planning)
     plot_view_layout = QVBoxLayout(self.create_plot_view)
     plot_view_layout.setContentsMargins(0, 0, 0, 0)
     plot_view_layout.setSpacing(4)
@@ -99,12 +48,11 @@ def build_create_subtab(self):
     main_splitter.addWidget(self.create_plot_view)
 
     # 2. Bottom panel: horizontal splitter (separates settings and table)
-    bottom_splitter = QSplitter(Qt.Horizontal, self.tab_create)
+    bottom_splitter = QSplitter(Qt.Horizontal, self.tab_planning)
     main_splitter.addWidget(bottom_splitter)
 
     # Options Tab Widget (Bottom Left panel)
-    from PySide6.QtWidgets import QTabWidget, QStackedWidget
-    self.create_settings_tab_widget = QTabWidget(self.tab_create)
+    self.create_settings_tab_widget = QTabWidget(self.tab_planning)
     self.create_settings_tab_widget.setStyleSheet("QTabBar::tab { font-weight: bold; font-size: 13px; padding: 6px 12px; }")
     bottom_splitter.addWidget(self.create_settings_tab_widget)
 
@@ -137,7 +85,7 @@ def build_create_subtab(self):
     lbl_set_dev.setStyleSheet("font-weight: bold; font-size: 14px;")
     self.combo_settings_device = QComboBox(settings_tab_widget)
     self.combo_settings_device.setMinimumHeight(40)
-    self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform"])
+    self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform", "Other"])
     settings_tab_layout.addWidget(lbl_set_dev)
     settings_tab_layout.addWidget(self.combo_settings_device)
 
@@ -203,6 +151,15 @@ def build_create_subtab(self):
     self.settings_max_lim_yaw = add_platform_spinbox(platform_layout, "Max Lim. Yaw (deg):", 40.0, 2, 1)
     self.settings_stack.addWidget(platform_page)
 
+    # Page 2: Other device settings (simple info label)
+    other_page = QWidget(self.settings_stack)
+    other_layout = QVBoxLayout(other_page)
+    other_lbl = QLabel("Custom G-code axes mode active.\nEuclidean velocity scaling will be used.", other_page)
+    other_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1565c0;")
+    other_layout.addWidget(other_lbl)
+    other_layout.addStretch()
+    self.settings_stack.addWidget(other_page)
+
     # Connect settings dropdown selection to stack switch
     def update_settings_device_sync(text):
         self.combo_device.blockSignals(True)
@@ -234,7 +191,7 @@ def build_create_subtab(self):
     # 1. Device Type, Axis, Function Type (Row 0)
     self.combo_device = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_device.setMinimumHeight(40)
-    self.combo_device.addItems(["Lung Phantom", "Motion Platform"])
+    self.combo_device.addItems(["Lung Phantom", "Motion Platform", "Other"])
     add_field("Device Type:", self.combo_device, 0, 0)
 
     self.combo_axis = QComboBox(self.groupBox_BrCv_createCurve)
@@ -252,8 +209,13 @@ def build_create_subtab(self):
         device = self.combo_device.currentText()
         if device == "Lung Phantom":
             self.combo_axis.addItems(["X", "Y", "Z"])
-        else:
+        elif device == "Motion Platform":
             self.combo_axis.addItems(["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"])
+        else: # Other
+            # Add all columns present in self.dfEdit excluding timestamp, time, Command
+            exclude_cols = {'timestamp', 'time', 'Command'}
+            cols = [col for col in getattr(self, 'dfEdit', type('Mock', (), {'columns': []})()).columns if col not in exclude_cols]
+            self.combo_axis.addItems(cols)
         
         # Synchronize Settings tab dropdown & stack view
         if hasattr(self, 'combo_settings_device'):
@@ -263,8 +225,10 @@ def build_create_subtab(self):
         if hasattr(self, 'settings_stack'):
             if device == "Lung Phantom":
                 self.settings_stack.setCurrentIndex(0)
-            else:
+            elif device == "Motion Platform":
                 self.settings_stack.setCurrentIndex(1)
+            else:
+                self.settings_stack.setCurrentIndex(2)
         
         from fcn_plan.fcn_create import initialize_default_curve_data
         initialize_default_curve_data(self)
@@ -329,6 +293,10 @@ def build_create_subtab(self):
 
     self.combo_axis.currentTextChanged.connect(update_axis_labels_and_state)
 
+    # Action layout for Add Curve and Import G-code buttons
+    create_buttons_layout = QHBoxLayout()
+    create_buttons_layout.setSpacing(15)
+
     self.button_create_curve = QPushButton("Add Curve", self.groupBox_BrCv_createCurve)
     self.button_create_curve.setMinimumHeight(45)
     self.button_create_curve.setStyleSheet("""
@@ -343,7 +311,25 @@ def build_create_subtab(self):
             background-color: #1b5e20;
         }
     """)
-    gb_layout.addWidget(self.button_create_curve)
+
+    self.button_import_gcode = QPushButton("Import G-code", self.groupBox_BrCv_createCurve)
+    self.button_import_gcode.setMinimumHeight(45)
+    self.button_import_gcode.setStyleSheet("""
+        QPushButton {
+            background-color: #0d47a1;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #0a3780;
+        }
+    """)
+
+    create_buttons_layout.addWidget(self.button_create_curve)
+    create_buttons_layout.addWidget(self.button_import_gcode)
+    gb_layout.addLayout(create_buttons_layout)
 
     # 6. Wait Radiation Section
     wait_rad_layout = QHBoxLayout()
@@ -449,7 +435,9 @@ def build_create_subtab(self):
     gb_layout.addStretch()
 
     # Table View (Bottom Right panel)
-    self.create_table_view = QTableWidget(self.tab_create)
+    self.create_table_view = QTableWidget(self.tab_planning)
+    from fcn_plan.fcn_create import on_table_item_changed
+    self.create_table_view.itemChanged.connect(lambda item: on_table_item_changed(self, item))
     bottom_splitter.addWidget(self.create_table_view)
 
     # Set splitter initial sizes (e.g. 50% top, 50% bottom; 30% settings, 70% table)
@@ -458,198 +446,3 @@ def build_create_subtab(self):
 
     # Initial trigger to populate axis and default curve data
     update_axis_dropdown()
-
-
-def build_import_subtab(self):
-    """Build 'Import' sub-tab inside Planning."""
-    layout = QGridLayout(self.tab_import)
-
-    self.groupBox_BrCv_importCSV = QGroupBox("CSV Import Parameters", self.tab_import)
-    gb_layout = QGridLayout(self.groupBox_BrCv_importCSV)
-
-    gb_layout.addWidget(QLabel("Delimiter:"), 0, 0)
-    self.import_delimiter = QComboBox(self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_delimiter, 0, 1)
-
-    gb_layout.addWidget(QLabel("Header Line:"), 1, 0)
-    self.import_header_line = QSpinBox(self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_header_line, 1, 1)
-
-    gb_layout.addWidget(QLabel("Skip Lines:"), 2, 0)
-    self.import_skip_lines = QSpinBox(self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_skip_lines, 2, 1)
-
-    gb_layout.addWidget(QLabel("Time Unit:"), 3, 0)
-    self.import_time_unit = QComboBox(self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_time_unit, 3, 1)
-
-    self.import_flip = QCheckBox("Flip Signal", self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_flip, 4, 0, 1, 2)
-
-    self.import_button = QPushButton("Import CSV", self.groupBox_BrCv_importCSV)
-    gb_layout.addWidget(self.import_button, 5, 0, 1, 2)
-
-    layout.addWidget(self.groupBox_BrCv_importCSV, 0, 0)
-
-    # Preview Text & Table
-    self.import_text_view = QTextEdit(self.tab_import)
-    self.import_table_view = QTableWidget(self.tab_import)
-
-    layout.addWidget(self.import_text_view, 0, 1)
-    layout.addWidget(self.import_table_view, 1, 0, 1, 2)
-
-
-def build_edit_subtab(self):
-    """Build 'Edit' sub-tab inside Planning."""
-    layout = QGridLayout(self.tab_edit)
-
-    # Editing Plot Canvas
-    self.edit_ax_view = QWidget(self.tab_edit)
-    layout.addWidget(self.edit_ax_view, 0, 0, 1, 4)
-
-    # Range Sliders
-    layout.addWidget(QLabel("X Min:"), 1, 0)
-    self.slider_edit_xmin = QSlider(Qt.Horizontal, self.tab_edit)
-    layout.addWidget(self.slider_edit_xmin, 1, 1)
-
-    layout.addWidget(QLabel("X Max:"), 1, 2)
-    self.slider_edit_xmax = QSlider(Qt.Horizontal, self.tab_edit)
-    layout.addWidget(self.slider_edit_xmax, 1, 3)
-
-    # Operations Groups
-    # 1. Drift Group
-    self.groupBox_drift = QGroupBox("Drift Adjustment", self.tab_edit)
-    d_layout = QGridLayout(self.groupBox_drift)
-    self.value_drift = QDoubleSpinBox(self.groupBox_drift)
-    self.button_add_drift = QPushButton("Add Drift", self.groupBox_drift)
-    self.button_remove_drift = QPushButton("Remove Drift", self.groupBox_drift)
-    d_layout.addWidget(self.value_drift, 0, 0, 1, 2)
-    d_layout.addWidget(self.button_add_drift, 1, 0)
-    d_layout.addWidget(self.button_remove_drift, 1, 1)
-    layout.addWidget(self.groupBox_drift, 2, 0)
-
-    # 2. Breathhold Group
-    self.breathhold_BrCv = QGroupBox("Breathhold", self.tab_edit)
-    bh_layout = QGridLayout(self.breathhold_BrCv)
-    self.breathholdDuration = QDoubleSpinBox(self.breathhold_BrCv)
-    self.button_breath_hold = QPushButton("Apply Breathhold", self.breathhold_BrCv)
-    self.closest_max = QCheckBox("Closest Max", self.breathhold_BrCv)
-    self.closest_min = QCheckBox("Closest Min", self.breathhold_BrCv)
-    bh_layout.addWidget(self.breathholdDuration, 0, 0, 1, 2)
-    bh_layout.addWidget(self.closest_max, 1, 0)
-    bh_layout.addWidget(self.closest_min, 1, 1)
-    bh_layout.addWidget(self.button_breath_hold, 2, 0, 1, 2)
-    layout.addWidget(self.breathhold_BrCv, 2, 1)
-
-    # 3. Amplitude & Frequency Ops Group
-    self.groupBox_operations = QGroupBox("Scaling & Shifting", self.tab_edit)
-    op_layout = QGridLayout(self.groupBox_operations)
-    
-    self.value_ampl_sf = QDoubleSpinBox(self.groupBox_operations)
-    self.button_scale_ampl = QPushButton("Scale Ampl", self.groupBox_operations)
-    op_layout.addWidget(self.value_ampl_sf, 0, 0)
-    op_layout.addWidget(self.button_scale_ampl, 0, 1)
-
-    self.value_ampl_shift = QDoubleSpinBox(self.groupBox_operations)
-    self.button_shift_ampl = QPushButton("Shift Ampl", self.groupBox_operations)
-    op_layout.addWidget(self.value_ampl_shift, 1, 0)
-    op_layout.addWidget(self.button_shift_ampl, 1, 1)
-
-    self.button_zero_ampl = QPushButton("Zero Min", self.groupBox_operations)
-    self.button_clip_ampl = QPushButton("Clip Ampl", self.groupBox_operations)
-    self.value_ampl_min = QDoubleSpinBox(self.groupBox_operations)
-    self.value_ampl_max = QDoubleSpinBox(self.groupBox_operations)
-    op_layout.addWidget(self.value_ampl_min, 2, 0)
-    op_layout.addWidget(self.value_ampl_max, 2, 1)
-    op_layout.addWidget(self.button_zero_ampl, 3, 0)
-    op_layout.addWidget(self.button_clip_ampl, 3, 1)
-
-    self.value_freq_sf = QDoubleSpinBox(self.groupBox_operations)
-    self.button_scale_freq = QPushButton("Scale Freq", self.groupBox_operations)
-    op_layout.addWidget(self.value_freq_sf, 4, 0)
-    op_layout.addWidget(self.button_scale_freq, 4, 1)
-
-    layout.addWidget(self.groupBox_operations, 2, 2)
-
-    # 4. Smoothing Group
-    self.groupBox_smoothing = QGroupBox("Smoothing", self.tab_edit)
-    sm_layout = QGridLayout(self.groupBox_smoothing)
-    self.smooth_method = QComboBox(self.groupBox_smoothing)
-    self.smooth_kernel = QSpinBox(self.groupBox_smoothing)
-    self.threshFourierSlider = QSlider(Qt.Horizontal, self.groupBox_smoothing)
-    self.threshFourierValue = QLineEdit(self.groupBox_smoothing)
-    self.button_apply_smooth = QPushButton("Apply Smooth", self.groupBox_smoothing)
-    sm_layout.addWidget(QLabel("Method:"), 0, 0)
-    sm_layout.addWidget(self.smooth_method, 0, 1)
-    sm_layout.addWidget(QLabel("Kernel:"), 1, 0)
-    sm_layout.addWidget(self.smooth_kernel, 1, 1)
-    sm_layout.addWidget(QLabel("Fourier Cutoff:"), 2, 0)
-    sm_layout.addWidget(self.threshFourierSlider, 2, 1)
-    sm_layout.addWidget(self.threshFourierValue, 3, 0)
-    sm_layout.addWidget(self.button_apply_smooth, 3, 1)
-    layout.addWidget(self.groupBox_smoothing, 2, 3)
-
-    # Undo & Crop Buttons
-    self.edit_undo = QPushButton("Undo", self.tab_edit)
-    self.edit_undo.setStyleSheet("background-color: red; color: white;")
-    self.button_clip_cycles = QPushButton("Crop Range", self.tab_edit)
-
-    layout.addWidget(self.edit_undo, 3, 0, 1, 2)
-    layout.addWidget(self.button_clip_cycles, 3, 2, 1, 2)
-
-
-def build_export_subtab(self):
-    """Build 'Export & visualize' sub-tab inside Planning."""
-    layout = QGridLayout(self.tab_export)
-
-    # Export Plot View
-    self.plot_view = QWidget(self.tab_export)
-    layout.addWidget(self.plot_view, 0, 0, 1, 2)
-
-    # Stats Group
-    self.groupBox_7 = QGroupBox("Statistics", self.tab_export)
-    st_layout = QVBoxLayout(self.groupBox_7)
-    self.calcStats = QPushButton("Calculate Stats", self.groupBox_7)
-    st_layout.addWidget(self.calcStats)
-    layout.addWidget(self.groupBox_7, 1, 0)
-
-    # Export Parameters Group
-    self.export_BrCv = QGroupBox("Export Parameters", self.tab_export)
-    ex_layout = QGridLayout(self.export_BrCv)
-
-    ex_layout.addWidget(QLabel("Filename:"), 0, 0)
-    self.export_filename = QLineEdit(self.export_BrCv)
-    ex_layout.addWidget(self.export_filename, 0, 1)
-
-    self.interp_export = QCheckBox("Interpolate", self.export_BrCv)
-    self.interp_export_value = QDoubleSpinBox(self.export_BrCv)
-    ex_layout.addWidget(self.interp_export, 1, 0)
-    ex_layout.addWidget(self.interp_export_value, 1, 1)
-
-    ex_layout.addWidget(QLabel("Compress Speed:"), 2, 0)
-    self.compress_speed = QDoubleSpinBox(self.export_BrCv)
-    ex_layout.addWidget(self.compress_speed, 2, 1)
-
-    ex_layout.addWidget(QLabel("Repeat Copies:"), 3, 0)
-    self.n_copy_curve = QSpinBox(self.export_BrCv)
-    ex_layout.addWidget(self.n_copy_curve, 3, 1)
-
-    self.exportCSV = QPushButton("Export CSV", self.export_BrCv)
-    self.exportGCODE = QPushButton("Export G-code", self.export_BrCv)
-    ex_layout.addWidget(self.exportCSV, 4, 0)
-    ex_layout.addWidget(self.exportGCODE, 4, 1)
-
-    layout.addWidget(self.export_BrCv, 1, 1)
-
-    # Plot Controls
-    ctrl_layout = QHBoxLayout()
-    self.plot_acq = QCheckBox("Show Acquisition", self.tab_export)
-    self.plot_peaks = QCheckBox("Show Peaks", self.tab_export)
-    self.plot_xaxis = QComboBox(self.tab_export)
-
-    ctrl_layout.addWidget(self.plot_acq)
-    ctrl_layout.addWidget(self.plot_peaks)
-    ctrl_layout.addWidget(QLabel("X-Axis:"))
-    ctrl_layout.addWidget(self.plot_xaxis)
-
-    layout.addLayout(ctrl_layout, 2, 0, 1, 2)
