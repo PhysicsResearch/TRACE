@@ -327,8 +327,24 @@ def build_planning_tab(self):
         }
     """)
 
+    self.button_clear_all = QPushButton("Clear All", self.groupBox_BrCv_createCurve)
+    self.button_clear_all.setMinimumHeight(45)
+    self.button_clear_all.setStyleSheet("""
+        QPushButton {
+            background-color: #c62828;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #b71c1c;
+        }
+    """)
+
     create_buttons_layout.addWidget(self.button_create_curve)
     create_buttons_layout.addWidget(self.button_import_gcode)
+    create_buttons_layout.addWidget(self.button_clear_all)
     gb_layout.addLayout(create_buttons_layout)
 
     # 6. Wait Radiation Section

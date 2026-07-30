@@ -384,12 +384,12 @@ def create_curve(self):
     # 1. Expand limits if t_end is greater than current maximum time in the dataframe
     t_max = self.dfEdit['time'].max()
     if t_end > t_max:
-        # Detect active step dynamically from existing time steps, fallback to 0.01
-        step = 0.01
+        # Detect active step dynamically from existing time steps, fallback to 0.001
+        step = 0.001
         if len(self.dfEdit) > 1:
             step = self.dfEdit['time'].iat[1] - self.dfEdit['time'].iat[0]
             if step <= 0:
-                step = 0.01
+                step = 0.001
 
         new_t = np.arange(t_max + step, t_end + step/2.0, step)
         if len(new_t) > 0:
@@ -735,23 +735,64 @@ def upload_gcode_to_duet_action(self):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
         return
 
+    polling_active = False
+    fast_active = False
+    original_connected_state = True
     try:
+        # Temporarily set duet_connected to False and stop timers to completely inhibit concurrent polling requests
+        self.duet_connected = False
+        
+        if hasattr(self, 'status_polling_timer') and self.status_polling_timer.isActive():
+            self.status_polling_timer.stop()
+            polling_active = True
+        if hasattr(self, 'status_fast_timer') and self.status_fast_timer.isActive():
+            self.status_fast_timer.stop()
+            fast_active = True
+
         gcode_content, default_name = generate_planned_gcode(self)
         if not gcode_content:
             return
 
-        # Prompt for target name on Duet
-        filename, ok = QInputDialog.getText(
-            self, 
-            "Upload Name", 
-            "Enter target filename on Duet:", 
-            QLineEdit.Normal, 
-            default_name
-        )
-        if not ok or not filename.strip():
+        # Prompt for target name on Duet (touchscreen-friendly sizing & styling)
+        from PySide6.QtWidgets import QWidget
+        parent_widget = self if (isinstance(self, QWidget) and not type(self).__name__.endswith('Mock')) else None
+        dialog = QInputDialog(parent_widget)
+        dialog.setWindowTitle("Upload Name")
+        dialog.setLabelText("Enter target filename on Duet:")
+        dialog.setTextValue(default_name)
+        dialog.setInputMode(QInputDialog.TextInput)
+        dialog.setMinimumWidth(1260)
+        dialog.setMinimumHeight(200)
+        dialog.setStyleSheet("""
+            QInputDialog {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 1260px;
+            }
+            QLabel {
+                font-size: 18px;
+                min-height: 40px;
+            }
+            QLineEdit {
+                font-size: 18px;
+                min-height: 45px;
+                min-width: 1190px;
+                padding: 6px;
+            }
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 45px;
+                border-radius: 4px;
+            }
+        """)
+        
+        ok = dialog.exec()
+        if not ok or not dialog.textValue().strip():
             return
 
-        filename = filename.strip()
+        filename = dialog.textValue().strip()
         rrf_path = f"0:/gcodes/{filename}"
 
         ip = get_clean_duet_ip(self)
@@ -760,50 +801,69 @@ def upload_gcode_to_duet_action(self):
         gcode_bytes = gcode_content.encode('utf-8')
         total_size = len(gcode_bytes)
 
-        # Initialize progress dialog
-        progress = QProgressDialog("Uploading G-code to Duet...", "Cancel", 0, 100, self)
+        # Initialize progress dialog (touchscreen-friendly sizing & styling)
+        progress = QProgressDialog("Uploading G-code to Duet...", "Cancel", 0, 100, parent_widget)
         progress.setWindowTitle("Uploading to Duet")
         progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumWidth(550)
+        progress.setMinimumHeight(180)
+        progress.setStyleSheet("""
+            QProgressDialog {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLabel {
+                font-size: 18px;
+                min-height: 40px;
+            }
+            QProgressBar {
+                text-align: center;
+                font-size: 18px;
+                font-weight: bold;
+                height: 35px;
+                border-radius: 4px;
+            }
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 45px;
+                border-radius: 4px;
+            }
+        """)
         progress.setValue(0)
         progress.show()
         QCoreApplication.processEvents()
 
-        def progress_callback(bytes_read, total):
-            if progress.wasCanceled():
-                raise Exception("Upload cancelled by user")
-            percent = int((bytes_read / total) * 100) if total > 0 else 0
-            progress.setValue(percent)
-            QCoreApplication.processEvents()
+        # Update progress to show sending phase
+        progress.setValue(30)
+        QCoreApplication.processEvents()
 
-        # Custom BytesIO wrapper to track reading progress
-        class ProgressIO(io.BytesIO):
-            def __init__(self, data_bytes, callback):
-                super().__init__(data_bytes)
-                self.callback = callback
-                self.total = len(data_bytes)
-                self.read_bytes = 0
-
-            def read(self, size=-1):
-                chunk = super().read(size)
-                self.read_bytes += len(chunk)
-                self.callback(self.read_bytes, self.total)
-                return chunk
-
-        progress_io = ProgressIO(gcode_bytes, progress_callback)
-
+        # Create a fresh, temporary connection session to upload the raw bytes, avoiding stale socket reuse in the shared pool
         session = requests.Session()
         session.trust_env = False
-        response = session.post(url, params={'name': rrf_path}, data=progress_io, timeout=20)
-        response.raise_for_status()
+        try:
+            response = session.post(url, params={'name': rrf_path}, data=gcode_bytes, timeout=30)
+            response.raise_for_status()
+        finally:
+            session.close()
 
         progress.setValue(100)
-        QMessageBox.information(self, "Upload Successful", f"G-code '{filename}' uploaded successfully to Duet root gcodes folder!")
+        QMessageBox.information(parent_widget, "Upload Successful", f"G-code '{filename}' uploaded successfully to Duet root gcodes folder!")
 
     except Exception as e:
+        if 'progress' in locals():
+            progress.close()
         if "cancelled by user" in str(e):
-            QMessageBox.information(self, "Upload Cancelled", "G-code upload was cancelled by the user.")
+            QMessageBox.information(parent_widget, "Upload Cancelled", "G-code upload was cancelled by the user.")
         else:
-            QMessageBox.critical(self, "Upload Error", f"Failed to upload G-code to Duet:\n{str(e)}")
+            QMessageBox.critical(parent_widget, "Upload Error", f"Failed to upload G-code to Duet:\n{str(e)}")
+    finally:
+        self.duet_connected = original_connected_state
+        if polling_active and hasattr(self, 'status_polling_timer'):
+            self.status_polling_timer.start()
+        if fast_active and hasattr(self, 'status_fast_timer'):
+            self.status_fast_timer.start()
 
 
 def add_wait_radiation_action(self):
@@ -967,6 +1027,110 @@ def clear_usr_pauses_action(self):
     getDataframeFromTable(self)
     trigger_plot_update(self)
 
+
+def clear_all_action(self):
+    """
+    Clears all curve data by setting all coordinate axis values to 0.0 and clearing commands in self.dfEdit.
+    """
+    if not hasattr(self, 'dfEdit') or self.dfEdit is None:
+        return
+
+    exclude_cols = {'timestamp', 'time'}
+    for col in self.dfEdit.columns:
+        if col not in exclude_cols:
+            if col == 'Command':
+                self.dfEdit['Command'] = ""
+            else:
+                self.dfEdit[col] = 0.0
+
+    # Save reference
+    device = self.combo_device.currentText()
+    if device == "Lung Phantom":
+        self.dfEdit_lung_phantom = self.dfEdit
+    elif device == "Motion Platform":
+        self.dfEdit_motion_platform = self.dfEdit
+    else:
+        self.dfEdit_other = self.dfEdit
+
+    # Reload table & plot
+    loadTable_create(self, self.dfEdit)
+    from .fcn_edit import getDataframeFromTable
+    getDataframeFromTable(self)
+    trigger_plot_update(self)
+
+
+def _reverse_motion_platform_kinematics(self, df):
+    """
+    Reverse-maps actuator G-code columns (A, B, C, D, 'e, 'f, 'a, 'c/'b)
+    back to Motion Platform DOFs (LAT, SI, AP, Roll, Pitch, Yaw).
+    """
+    import numpy as np
+
+    A = df['A'].values
+    B = df['B'].values
+    C = df['C'].values
+    D = df['D'].values
+
+    # LAT from 'e and 'f (average)
+    lat_cols = [c for c in df.columns if c in ["'e", "'f"]]
+    if lat_cols:
+        LAT = np.mean([df[c].values for c in lat_cols], axis=0)
+    else:
+        LAT = np.zeros(len(df))
+
+    # SI from 'a, 'c, 'b (average)
+    si_cols = [c for c in df.columns if c in ["'a", "'c", "'b"]]
+    if si_cols:
+        SI = np.mean([df[c].values for c in si_cols], axis=0)
+    else:
+        SI = np.zeros(len(df))
+
+    # Read platform dimensions from settings, default to 100.0
+    try:
+        lat_dim = float(self.input_plat_lat.text().strip())
+    except Exception:
+        lat_dim = 100.0
+    try:
+        si_dim = float(self.input_plat_si.text().strip())
+    except Exception:
+        si_dim = 100.0
+    try:
+        off_ap = float(self.input_offset_ap.text().strip())
+    except Exception:
+        off_ap = 0.0
+
+    # Pitch: D - A = si_dim * sin(p), where p = -pitch_rad
+    sin_p = np.clip((D - A) / si_dim, -1.0, 1.0)
+    p_rad = np.arcsin(sin_p)
+    Pitch = -np.degrees(p_rad)
+
+    # Roll: A - B = lat_dim * sin(roll) * cos(p)
+    cos_p = np.cos(p_rad)
+    cos_p_safe = np.where(np.abs(cos_p) < 1e-10, 1.0, cos_p)
+    sin_r = np.clip((A - B) / (lat_dim * cos_p_safe), -1.0, 1.0)
+    Roll = np.degrees(np.arcsin(sin_r))
+
+    # AP: mean of actuators, corrected for rotation center offset
+    cos_r = np.cos(np.radians(Roll))
+    AP = (A + B + C + D) / 4.0 - off_ap * (1.0 - cos_r * cos_p)
+
+    # Yaw = 0 (not recoverable from actuator heights)
+    Yaw = np.zeros(len(df))
+
+    result = pd.DataFrame({
+        'timestamp': df['timestamp'].values,
+        'time': df['time'].values,
+        'LAT': LAT,
+        'SI': SI,
+        'AP': AP,
+        'Roll': Roll,
+        'Pitch': Pitch,
+        'Yaw': Yaw,
+        'Command': df['Command'].values
+    })
+    return result
+
+
 def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress_offset=0):
     """
     Parses GCODE content from a string and populates the planning workspace.
@@ -992,6 +1156,32 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         progress = QProgressDialog("Loading G-code...", "Cancel", 0, num_lines, self)
         progress.setWindowTitle("Importing G-code")
         progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumWidth(550)
+        progress.setMinimumHeight(180)
+        progress.setStyleSheet("""
+            QProgressDialog {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLabel {
+                font-size: 18px;
+                min-height: 40px;
+            }
+            QProgressBar {
+                text-align: center;
+                font-size: 18px;
+                font-weight: bold;
+                height: 35px;
+                border-radius: 4px;
+            }
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 45px;
+                border-radius: 4px;
+            }
+        """)
         progress.setValue(0)
         progress.show()
         QCoreApplication.processEvents()
@@ -1000,6 +1190,11 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
     data_rows = []
     current_commands = []
     cancelled = False
+
+    current_time = 0.0
+    current_dwell = 0.0
+    current_feedrate = 1000.0
+    last_vals = {}
 
     for line_idx, line in enumerate(lines):
         if line_idx % 500 == 0:
@@ -1020,8 +1215,35 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
             row_data = {}
             matches = pattern.findall(line)
             for axis, val in matches:
-                if axis not in ['F', 'G']:
+                if axis == 'F':
+                    current_feedrate = float(val)
+                elif axis != 'G':
                     row_data[axis] = float(val)
+            
+            # Calculate distance from last position to compute dt
+            dist_sq = 0.0
+            has_movement = False
+            for axis, val in row_data.items():
+                prev_val = last_vals.get(axis, None)
+                if prev_val is not None:
+                    diff = val - prev_val
+                    dist_sq += diff * diff
+                    has_movement = True
+            
+            dist = np.sqrt(dist_sq) if has_movement else 0.0
+            dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
+            
+            current_time += dt
+            
+            for axis, val in row_data.items():
+                last_vals[axis] = val
+                
+            for axis, val in last_vals.items():
+                if axis not in row_data:
+                    row_data[axis] = val
+            
+            row_data['time'] = current_time
+            row_data['timestamp'] = current_time * 1000.0
             
             if current_commands:
                 row_data['Command'] = " ; ".join(current_commands)
@@ -1030,6 +1252,18 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
                 row_data['Command'] = ""
             
             data_rows.append(row_data)
+        elif line.startswith('G4'):
+            p_match = re.search(r'[pP](\d+)', line)
+            if p_match:
+                ms = float(p_match.group(1))
+                dwell_sec = ms / 1000.0
+                current_time += dwell_sec
+                if last_vals:
+                    dwell_row = {axis: val for axis, val in last_vals.items()}
+                    dwell_row['time'] = current_time
+                    dwell_row['timestamp'] = current_time * 1000.0
+                    dwell_row['Command'] = ""
+                    data_rows.append(dwell_row)
         elif line.startswith('M'):
             current_commands.append(line)
 
@@ -1043,13 +1277,36 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
 
     df = pd.DataFrame(data_rows)
     for col in df.columns:
-        if col != 'Command':
+        if col not in ['Command', 'time', 'timestamp']:
             df[col] = df[col].ffill().bfill().fillna(0.0)
 
-    n_points = len(df)
-    times = np.arange(n_points) * 0.001
-    df.insert(0, 'time', times)
-    df.insert(0, 'timestamp', times * 1000.0)
+    # Resample onto a uniform 10ms grid
+    t_max = df['time'].max()
+    if t_max > 0.0:
+        t_grid = np.arange(0.0, t_max + 0.005, 0.01)
+        resampled_data = {
+            'timestamp': t_grid * 1000.0,
+            'time': t_grid
+        }
+        exclude_cols = {'timestamp', 'time', 'Command'}
+        axis_cols_raw = [c for c in df.columns if c not in exclude_cols]
+        for c in axis_cols_raw:
+            resampled_data[c] = np.interp(t_grid, df['time'].values, df[c].values)
+        resampled_data['Command'] = [""] * len(t_grid)
+
+        if 'Command' in df.columns:
+            for idx, row in df.iterrows():
+                cmd = str(row['Command']).strip()
+                if cmd:
+                    t_val = row['time']
+                    grid_idx = np.argmin(np.abs(t_grid - t_val))
+                    resampled_data['Command'][grid_idx] = cmd
+
+        df = pd.DataFrame(resampled_data)
+
+    # Ensure time and timestamp are the first columns
+    cols = ['timestamp', 'time'] + [col for col in df.columns if col not in ['timestamp', 'time']]
+    df = df[cols]
 
     exclude_cols = {'timestamp', 'time', 'Command'}
     axis_cols = sorted(col for col in df.columns if col not in exclude_cols)
@@ -1058,6 +1315,12 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         device = "Lung Phantom"
         self.dfEdit_lung_phantom = df
         self.dfEdit = self.dfEdit_lung_phantom
+    elif 'A' in axis_cols and 'B' in axis_cols and 'C' in axis_cols and 'D' in axis_cols:
+        device = "Motion Platform"
+        df = _reverse_motion_platform_kinematics(self, df)
+        self.dfEdit_motion_platform = df
+        self.dfEdit = self.dfEdit_motion_platform
+        axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']
     else:
         device = "Other"
         self.dfEdit_other = df
@@ -1074,6 +1337,8 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
     if hasattr(self, 'settings_stack'):
         if device == "Lung Phantom":
             self.settings_stack.setCurrentIndex(0)
+        elif device == "Motion Platform":
+            self.settings_stack.setCurrentIndex(1)
         else:
             self.settings_stack.setCurrentIndex(2)
 
@@ -1138,11 +1403,37 @@ def import_gcode_action(self):
             QMessageBox.warning(self, "Import Warning", "Selected G-code file is empty.")
             return
 
-        # Initialize progress dialog
+        # Initialize progress dialog (touchscreen-friendly sizing & styling)
         progress = QProgressDialog("Loading G-code file...", "Cancel", 0, num_lines, self)
         progress.setWindowTitle("Importing G-code")
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(0)  # Show immediately
+        progress.setMinimumWidth(550)
+        progress.setMinimumHeight(180)
+        progress.setStyleSheet("""
+            QProgressDialog {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLabel {
+                font-size: 18px;
+                min-height: 40px;
+            }
+            QProgressBar {
+                text-align: center;
+                font-size: 18px;
+                font-weight: bold;
+                height: 35px;
+                border-radius: 4px;
+            }
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 45px;
+                border-radius: 4px;
+            }
+        """)
         progress.setValue(0)
 
         # Pattern to match axis value: axis_name followed by float
@@ -1152,6 +1443,11 @@ def import_gcode_action(self):
         current_commands = []
         cancelled = False
         
+        current_time = 0.0
+        current_dwell = 0.0
+        current_feedrate = 1000.0
+        last_vals = {}
+
         with open(file_path, 'r') as f:
             for line_idx, line in enumerate(f):
                 # Update progress bar and process events to keep Cancel button responsive
@@ -1171,8 +1467,36 @@ def import_gcode_action(self):
                     row_data = {}
                     matches = pattern.findall(line)
                     for axis, val in matches:
-                        if axis not in ['F', 'G']:  # Ignore Feedrate and G command type
+                        if axis == 'F':
+                            current_feedrate = float(val)
+                        elif axis != 'G':  # Ignore G command type
                             row_data[axis] = float(val)
+                    
+                    # Calculate distance from last position to compute dt
+                    dist_sq = 0.0
+                    has_movement = False
+                    for axis, val in row_data.items():
+                        prev_val = last_vals.get(axis, None)
+                        if prev_val is not None:
+                            diff = val - prev_val
+                            dist_sq += diff * diff
+                            has_movement = True
+                    
+                    dist = np.sqrt(dist_sq) if has_movement else 0.0
+                    dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
+                    
+                    # Update current time
+                    current_time += dt
+                    
+                    for axis, val in row_data.items():
+                        last_vals[axis] = val
+                        
+                    for axis, val in last_vals.items():
+                        if axis not in row_data:
+                            row_data[axis] = val
+                    
+                    row_data['time'] = current_time
+                    row_data['timestamp'] = current_time * 1000.0
                     
                     # Attach any accumulated commands to this row
                     if current_commands:
@@ -1182,6 +1506,18 @@ def import_gcode_action(self):
                         row_data['Command'] = ""
                     
                     data_rows.append(row_data)
+                elif line.startswith('G4'):
+                    p_match = re.search(r'[pP](\d+)', line)
+                    if p_match:
+                        ms = float(p_match.group(1))
+                        dwell_sec = ms / 1000.0
+                        current_time += dwell_sec
+                        if last_vals:
+                            dwell_row = {axis: val for axis, val in last_vals.items()}
+                            dwell_row['time'] = current_time
+                            dwell_row['timestamp'] = current_time * 1000.0
+                            dwell_row['Command'] = ""
+                            data_rows.append(dwell_row)
                 elif line.startswith('M'):
                     # Store command to attach to the next G1 row
                     current_commands.append(line)
@@ -1199,14 +1535,38 @@ def import_gcode_action(self):
         
         # Fill missing values in axes
         for col in df.columns:
-            if col != 'Command':
+            if col not in ['Command', 'time', 'timestamp']:
                 df[col] = df[col].ffill().bfill().fillna(0.0)
+
+        # Resample onto a uniform 10ms grid
+        t_max = df['time'].max()
+        if t_max > 0.0:
+            t_grid = np.arange(0.0, t_max + 0.005, 0.01)
+            resampled_data = {
+                'timestamp': t_grid * 1000.0,
+                'time': t_grid
+            }
+            exclude_cols = {'timestamp', 'time', 'Command'}
+            axis_cols_raw = [c for c in df.columns if c not in exclude_cols]
+            for c in axis_cols_raw:
+                resampled_data[c] = np.interp(t_grid, df['time'].values, df[c].values)
+            resampled_data['Command'] = [""] * len(t_grid)
+
+            if 'Command' in df.columns:
+                for idx, row in df.iterrows():
+                    cmd = str(row['Command']).strip()
+                    if cmd:
+                        t_val = row['time']
+                        grid_idx = np.argmin(np.abs(t_grid - t_val))
+                        resampled_data['Command'][grid_idx] = cmd
+
+            df = pd.DataFrame(resampled_data)
                 
-        # Compute time
+        # Ensure time and timestamp are the first columns
+        cols = ['timestamp', 'time'] + [col for col in df.columns if col not in ['timestamp', 'time']]
+        df = df[cols]
+
         n_points = len(df)
-        times = np.arange(n_points) * 0.001
-        df.insert(0, 'time', times)
-        df.insert(0, 'timestamp', times * 1000.0)
 
         # Set maximum for progress dialog to cover both parsing and table loading
         progress.setMaximum(num_lines + n_points)
@@ -1220,6 +1580,12 @@ def import_gcode_action(self):
             device = "Lung Phantom"
             self.dfEdit_lung_phantom = df
             self.dfEdit = self.dfEdit_lung_phantom
+        elif 'A' in axis_cols and 'B' in axis_cols and 'C' in axis_cols and 'D' in axis_cols:
+            device = "Motion Platform"
+            df = _reverse_motion_platform_kinematics(self, df)
+            self.dfEdit_motion_platform = df
+            self.dfEdit = self.dfEdit_motion_platform
+            axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']
         else:
             device = "Other"
             self.dfEdit_other = df
@@ -1238,6 +1604,8 @@ def import_gcode_action(self):
         if hasattr(self, 'settings_stack'):
             if device == "Lung Phantom":
                 self.settings_stack.setCurrentIndex(0)
+            elif device == "Motion Platform":
+                self.settings_stack.setCurrentIndex(1)
             else:
                 self.settings_stack.setCurrentIndex(2)
 

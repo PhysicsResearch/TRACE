@@ -230,7 +230,40 @@ def mkdir(self):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before creating directories.")
         return
 
-    folder_name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
+    # Prompt for folder name (touchscreen-friendly sizing & styling)
+    from PySide6.QtWidgets import QWidget
+    parent_widget = self if (isinstance(self, QWidget) and not type(self).__name__.endswith('Mock')) else None
+    dialog = QInputDialog(parent_widget)
+    dialog.setWindowTitle("New Folder")
+    dialog.setLabelText("Folder Name:")
+    dialog.setInputMode(QInputDialog.TextInput)
+    dialog.setMinimumWidth(600)
+    dialog.setMinimumHeight(200)
+    dialog.setStyleSheet("""
+        QInputDialog {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        QLabel {
+            font-size: 18px;
+            min-height: 40px;
+        }
+        QLineEdit {
+            font-size: 18px;
+            min-height: 45px;
+            padding: 6px;
+        }
+        QPushButton {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 120px;
+            min-height: 45px;
+            border-radius: 4px;
+        }
+    """)
+
+    ok = dialog.exec()
+    folder_name = dialog.textValue()
     if ok and folder_name.strip():
         ip = get_clean_duet_ip(self)
         curr = getattr(self, 'current_directory', '/').strip('/')
@@ -242,9 +275,9 @@ def mkdir(self):
             if response.status_code == 200:
                 load_directory(self, getattr(self, 'current_directory', '/'))
             else:
-                QMessageBox.warning(self, "Error", f"Failed to create directory (HTTP {response.status_code})")
+                QMessageBox.warning(parent_widget, "Error", f"Failed to create directory (HTTP {response.status_code})")
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to create directory: {e}")
+            QMessageBox.warning(parent_widget, "Error", f"Failed to create directory: {e}")
 
 
 def delete_selected_item(self):
@@ -361,29 +394,78 @@ def download_file(self, filepath):
     # Get local destination filename from QFileDialog
     filename = filepath.split('/')[-1]
     
-    from PySide6.QtWidgets import QFileDialog
+    from PySide6.QtWidgets import QFileDialog, QProgressDialog
+    from PySide6.QtCore import Qt, QCoreApplication
     dest_path, _ = QFileDialog.getSaveFileName(self, "Download File to Computer", filename, "All Files (*)")
     if not dest_path:
         return # user cancelled
+
+    # Initialize progress dialog
+    progress = QProgressDialog(f"Downloading '{filename}' to computer...", "Cancel", 0, 100, self)
+    progress.setWindowTitle("Downloading File")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumWidth(550)
+    progress.setMinimumHeight(180)
+    progress.setStyleSheet("""
+        QProgressDialog {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        QLabel {
+            font-size: 18px;
+            min-height: 40px;
+        }
+        QProgressBar {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            height: 35px;
+            border-radius: 4px;
+        }
+        QPushButton {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 120px;
+            min-height: 45px;
+            border-radius: 4px;
+        }
+    """)
+    progress.setValue(0)
+    progress.show()
+    QCoreApplication.processEvents()
 
     ip = get_clean_duet_ip(self)
     url = f"http://{ip}/rr_download"
 
     try:
-        # Avoid proxy issues by setting trust_env=False
-        session = requests.Session()
-        session.trust_env = False
+        from fcn_monitor.fcn_duet import get_shared_session
+        session = get_shared_session()
         response = session.get(url, params={'name': rrf_path}, timeout=10, stream=True)
         response.raise_for_status()
 
+        # Try to get Content-Length from headers
+        total_size = int(response.headers.get('content-length', 0))
+        bytes_written = 0
+
         with open(dest_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=16384):
+                if progress.wasCanceled():
+                    raise Exception("Download cancelled by user")
                 if chunk:
                     f.write(chunk)
+                    bytes_written += len(chunk)
+                    percent = int((bytes_written / total_size) * 100) if total_size > 0 else 50
+                    progress.setValue(percent)
+                    QCoreApplication.processEvents()
 
+        progress.setValue(100)
         QMessageBox.information(self, "Download Complete", f"File downloaded successfully to:\n{dest_path}")
     except Exception as e:
-        QMessageBox.critical(self, "Download Error", f"Failed to download file from Duet:\n{e}")
+        progress.close()
+        if "cancelled by user" in str(e):
+            QMessageBox.information(self, "Download Cancelled", "Download was cancelled by the user.")
+        else:
+            QMessageBox.critical(self, "Download Error", f"Failed to download file from Duet:\n{e}")
 
 
 def transfer_to_planning_action(self):
@@ -418,15 +500,49 @@ def transfer_to_planning_action(self):
     clean_path = rel_path.strip('/')
     rrf_path = f"0:/gcodes/{clean_path}" if clean_path else "0:/gcodes"
 
+    # Ensure Planning tab is loaded
+    if 3 not in getattr(self, '_loaded_tabs', set()):
+        from fcn_create_gui.tab_planning import build_planning_tab
+        build_planning_tab(self)
+        self._loaded_tabs.add(3)
+        from fcn_init.init_buttons import initialize_software_buttons
+        initialize_software_buttons(self)
+
     from PySide6.QtWidgets import QProgressDialog
     from PySide6.QtCore import Qt, QCoreApplication
     import requests
     import io
 
-    # 1. Start download with progress bar
+    # 1. Start download with progress bar (touchscreen-friendly sizing & styling)
     progress = QProgressDialog(f"Downloading '{filename}' from Duet...", "Cancel", 0, 200, self)
     progress.setWindowTitle("Transfer to Planning")
     progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumWidth(550)
+    progress.setMinimumHeight(180)
+    progress.setStyleSheet("""
+        QProgressDialog {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        QLabel {
+            font-size: 18px;
+            min-height: 40px;
+        }
+        QProgressBar {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            height: 35px;
+            border-radius: 4px;
+        }
+        QPushButton {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 120px;
+            min-height: 45px;
+            border-radius: 4px;
+        }
+    """)
     progress.setValue(0)
     progress.show()
     QCoreApplication.processEvents()
@@ -436,8 +552,8 @@ def transfer_to_planning_action(self):
 
     try:
         # Fetch file size using stream=True and shared session
-        session = requests.Session()
-        session.trust_env = False
+        from fcn_monitor.fcn_duet import get_shared_session
+        session = get_shared_session()
         response = session.get(url, params={'name': rrf_path}, timeout=10, stream=True)
         response.raise_for_status()
 
@@ -539,10 +655,36 @@ def upload_file(self):
             file_data = f.read()
         total_size = len(file_data)
 
-        # Initialize progress dialog
+        # Initialize progress dialog (touchscreen-friendly sizing & styling)
         progress = QProgressDialog(f"Uploading '{filename}' to Duet...", "Cancel", 0, 100, self)
         progress.setWindowTitle("Uploading File")
         progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumWidth(550)
+        progress.setMinimumHeight(180)
+        progress.setStyleSheet("""
+            QProgressDialog {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QLabel {
+                font-size: 18px;
+                min-height: 40px;
+            }
+            QProgressBar {
+                text-align: center;
+                font-size: 18px;
+                font-weight: bold;
+                height: 35px;
+                border-radius: 4px;
+            }
+            QPushButton {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 45px;
+                border-radius: 4px;
+            }
+        """)
         progress.setValue(0)
         progress.show()
         QCoreApplication.processEvents()
@@ -570,8 +712,8 @@ def upload_file(self):
 
         progress_io = ProgressIO(file_data, progress_callback)
 
-        session = requests.Session()
-        session.trust_env = False
+        from fcn_monitor.fcn_duet import get_shared_session
+        session = get_shared_session()
         response = session.post(url, params={'name': rrf_path}, data=progress_io, timeout=20)
         response.raise_for_status()
 

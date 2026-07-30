@@ -35,8 +35,8 @@ def initialize_software_buttons(self):
         safe_connect(self.setDuetIP, lambda: setDuetIP(self))
         self.setDuetIP.setStyleSheet("background-color: blue; color: white; font-weight: bold; font-size: 17px; padding: 6px 18px; border-radius: 4px;")
     if hasattr(self, 'connect_status'):
-        self.connect_status.setStyleSheet("QRadioButton::unchecked:pressed" "{" "background-color : red" "}")
-        self.connect_status.setText('Not connected')
+        from fcn_control.fcn_control import update_connection_status_ui
+        update_connection_status_ui(self, getattr(self, 'duet_connected', False))
 
     if hasattr(self, 'setPhOperFolder'):
         safe_connect(self.setPhOperFolder, lambda: setPhOperFolder(self))
@@ -146,6 +146,10 @@ def initialize_software_buttons(self):
     if hasattr(self, 'button_clear_user'):
         from fcn_plan.fcn_create import clear_usr_pauses_action
         safe_connect(self.button_clear_user, lambda: clear_usr_pauses_action(self))
+
+    if hasattr(self, 'button_clear_all'):
+        from fcn_plan.fcn_create import clear_all_action
+        safe_connect(self.button_clear_all, lambda: clear_all_action(self))
 
     if hasattr(self, 'import_button'):
         safe_connect(self.import_button, lambda: openCSVFile_BrCv(self))

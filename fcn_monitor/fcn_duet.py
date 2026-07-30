@@ -23,17 +23,26 @@ def get_clean_duet_ip(self):
 
 _shared_session = None
 
+def get_shared_session():
+    """
+    Exposes the globally shared persistent session to ensure connection reuse (keep-alive)
+    across status polling and files tab uploads/downloads.
+    """
+    global _shared_session
+    if _shared_session is None:
+        _shared_session = requests.Session()
+        _shared_session.trust_env = False
+    return _shared_session
+
+
 def duet_request(url, params=None, timeout=4):
     """
     Send an HTTP GET request to Duet, bypassing Windows system environment proxies
     to avoid false connection timeouts when connecting to local IP addresses.
     Uses a globally shared Session to reuse TCP connections (keep-alive) and prevent socket exhaustion.
     """
-    global _shared_session
-    if _shared_session is None:
-        _shared_session = requests.Session()
-        _shared_session.trust_env = False
-    return _shared_session.get(url, params=params, timeout=timeout)
+    session = get_shared_session()
+    return session.get(url, params=params, timeout=timeout)
 
 
 def clear_status_plot(self):

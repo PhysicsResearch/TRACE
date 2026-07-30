@@ -137,7 +137,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "A",
-                "machinePosition": 10.0,
+                "machinePosition": 19.101,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -151,9 +151,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 19200,
+                "stepPos": 36674,
                 "stepsPerMm": 1920.0,
-                "userPosition": 10.0,
+                "userPosition": 19.088,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -178,7 +178,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "B",
-                "machinePosition": 10.0,
+                "machinePosition": 19.101,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -192,9 +192,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 19200,
+                "stepPos": 36674,
                 "stepsPerMm": 1920.0,
-                "userPosition": 10.0,
+                "userPosition": 19.088,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -219,7 +219,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "C",
-                "machinePosition": 10.0,
+                "machinePosition": 19.101,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -233,9 +233,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 19200,
+                "stepPos": 36674,
                 "stepsPerMm": 1920.0,
-                "userPosition": 10.0,
+                "userPosition": 19.088,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -260,7 +260,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "D",
-                "machinePosition": 10.0,
+                "machinePosition": 19.101,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -274,9 +274,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 19200,
+                "stepPos": 36674,
                 "stepsPerMm": 1920.0,
-                "userPosition": 10.0,
+                "userPosition": 19.088,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -385,7 +385,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "e",
-                "machinePosition": 0,
+                "machinePosition": 10.0,
                 "max": 100.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -399,9 +399,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 0,
+                "stepPos": 19200,
                 "stepsPerMm": 1920.0,
-                "userPosition": 0,
+                "userPosition": 10.0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -426,7 +426,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "f",
-                "machinePosition": 0,
+                "machinePosition": 10.0,
                 "max": 100.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -440,9 +440,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 0,
+                "stepPos": 19200,
                 "stepsPerMm": 1920.0,
-                "userPosition": 0,
+                "userPosition": 10.0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -594,7 +594,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "A",
-            "machinePosition": 10.0,
+            "machinePosition": 19.101,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -608,9 +608,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 19200,
+            "stepPos": 36674,
             "stepsPerMm": 1920.0,
-            "userPosition": 10.0,
+            "userPosition": 19.088,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -635,7 +635,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "B",
-            "machinePosition": 10.0,
+            "machinePosition": 19.101,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -649,9 +649,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 19200,
+            "stepPos": 36674,
             "stepsPerMm": 1920.0,
-            "userPosition": 10.0,
+            "userPosition": 19.088,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -676,7 +676,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "C",
-            "machinePosition": 10.0,
+            "machinePosition": 19.101,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -690,9 +690,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 19200,
+            "stepPos": 36674,
             "stepsPerMm": 1920.0,
-            "userPosition": 10.0,
+            "userPosition": 19.088,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -717,7 +717,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "D",
-            "machinePosition": 10.0,
+            "machinePosition": 19.101,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -731,9 +731,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 19200,
+            "stepPos": 36674,
             "stepsPerMm": 1920.0,
-            "userPosition": 10.0,
+            "userPosition": 19.088,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -842,7 +842,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "e",
-            "machinePosition": 0,
+            "machinePosition": 10.0,
             "max": 100.0,
             "maxProbed": false,
             "microstepping": {
@@ -856,9 +856,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 0,
+            "stepPos": 19200,
             "stepsPerMm": 1920.0,
-            "userPosition": 0,
+            "userPosition": 10.0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -883,7 +883,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "f",
-            "machinePosition": 0,
+            "machinePosition": 10.0,
             "max": 100.0,
             "maxProbed": false,
             "microstepping": {
@@ -897,9 +897,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 0,
+            "stepPos": 19200,
             "stepsPerMm": 1920.0,
-            "userPosition": 0,
+            "userPosition": 10.0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -930,7 +930,7 @@
         "logLevel": "off",
         "machineMode": "FFF",
         "macroRestarted": false,
-        "msUpTime": 977,
+        "msUpTime": 559,
         "nextTool": -1,
         "powerFailScript": "",
         "previousTool": -1,
@@ -960,18 +960,18 @@
                     0,
                     0,
                     0,
-                    9.984,
-                    9.984,
-                    9.984,
-                    9.984,
                     0,
                     0,
                     0,
-                    0
+                    0,
+                    0,
+                    0,
+                    0.287,
+                    0.287
                 ],
                 "extruderPos": 0,
                 "fanPwm": 0,
-                "feedRate": 1884.9,
+                "feedRate": 321.3,
                 "ioBits": 0,
                 "toolNumber": -1
             },
@@ -1056,9 +1056,9 @@
                 "toolNumber": -1
             }
         ],
-        "status": "idle",
-        "time": "2026-07-30T16:11:14",
-        "upTime": 1201
+        "status": "processing",
+        "time": "2026-07-30T17:15:13",
+        "upTime": 5041
     },
     "sensors_raw": {
         "analog": [],
@@ -1164,20 +1164,28 @@
         ]
     },
     "job_raw": {
+        "build": {
+            "currentObject": -1,
+            "m486Names": false,
+            "m486Numbers": false,
+            "objects": []
+        },
+        "duration": 20,
         "file": {
             "customInfo": {},
             "filament": [],
+            "fileName": "0:/gcodes/planned_motion_platform_LAT_constant5.gcode",
             "height": 0,
-            "lastModified": "2026-07-30T13:39:08",
+            "lastModified": "2026-07-30T17:14:46",
             "layerHeight": 0,
             "numLayers": 0,
-            "size": 6156805,
+            "size": 4536859,
             "thumbnails": []
         },
-        "filePosition": 0,
-        "lastDuration": 120,
-        "lastFileName": "0:/gcodes/test_geiger_wait_user.gcode",
-        "lastWarmUpDuration": 0,
-        "timesLeft": {}
+        "filePosition": 86151,
+        "pauseDuration": 0,
+        "rawExtrusion": 0,
+        "timesLeft": {},
+        "warmUpDuration": 0
     }
 }

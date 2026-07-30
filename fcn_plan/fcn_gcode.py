@@ -18,7 +18,15 @@ def generate_gcode_string(
     Supports both "Lung Phantom" and "Motion Platform" devices.
     """
     t_max = t_orig.max()
-    t_new = np.arange(0.0, t_max + 0.0005, 0.001)
+    
+    # Dynamically detect time step dt of the original curve
+    if len(t_orig) > 1:
+        dt = t_orig[1] - t_orig[0]
+        if dt <= 0.0:
+            dt = 0.001
+    else:
+        dt = 0.001
+    t_new = np.arange(0.0, t_max + dt / 2.0, dt)
 
     # Map any wait radiation commands to the closest time index in t_new
     commands_dict = {}
@@ -49,20 +57,68 @@ def generate_gcode_string(
             exceeds_limits = True
 
         gcode_lines = ["G90"]
+        last_x, last_y, last_z = X_new[0], Y_new[0], Z_new[0]
+        dwell_accum = 0.0
+        last_pos_written_idx = 0
 
-        for i in range(len(t_new)):
+        # Output first point
+        gcode_lines.append(f"G1 F1000.000000 X{last_x:.6f} Y{last_y:.6f} Z{last_z:.6f}")
+
+        def flush_dwell():
+            nonlocal dwell_accum
+            if dwell_accum > 0.0:
+                ms = int(round(dwell_accum * 1000.0))
+                if ms > 0:
+                    gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+
+        for i in range(1, len(t_new)):
             if i in new_commands_indices:
+                flush_dwell()
                 gcode_lines.append(new_commands_indices[i])
-            if i == 0:
-                speed = 1000.0
-            else:
-                dx = X_new[i] - X_new[i-1]
-                dy = Y_new[i] - Y_new[i-1]
-                dz = Z_new[i] - Z_new[i-1]
-                dist = np.sqrt(dx*dx + dy*dy + dz*dz)
-                speed = dist * 60000.0
 
-            gcode_lines.append(f"G1 F{speed:.6f} X{X_new[i]:.6f} Y{Y_new[i]:.6f} Z{Z_new[i]:.6f}")
+            dx_from_last = X_new[i] - last_x
+            dy_from_last = Y_new[i] - last_y
+            dz_from_last = Z_new[i] - last_z
+            max_diff = max(abs(dx_from_last), abs(dy_from_last), abs(dz_from_last))
+
+            # Distinguish between truly stationary and decimated steps
+            is_stationary = (X_new[i] == X_new[i-1]) and (Y_new[i] == Y_new[i-1]) and (Z_new[i] == Z_new[i-1])
+
+            if is_stationary:
+                dwell_accum += (t_new[i] - t_new[i-1])
+            elif max_diff < 0.01:
+                # Decimated step (skip G1, don't accumulate dwell)
+                pass
+            else:
+                # Calculate dt_elapsed BEFORE flushing dwell_accum
+                dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx] - dwell_accum)
+                flush_dwell()
+                dx = X_new[i] - last_x
+                dy = Y_new[i] - last_y
+                dz = Z_new[i] - last_z
+                dist = np.sqrt(dx*dx + dy*dy + dz*dz)
+                
+                speed = (dist / dt_elapsed) * 60.0
+                if speed < 0.1:
+                    speed = 0.1
+
+                gcode_lines.append(f"G1 F{speed:.6f} X{X_new[i]:.6f} Y{Y_new[i]:.6f} Z{Z_new[i]:.6f}")
+                last_x, last_y, last_z = X_new[i], Y_new[i], Z_new[i]
+                last_pos_written_idx = i
+
+        dt_elapsed = max(0.001, t_new[-1] - t_new[last_pos_written_idx] - dwell_accum)
+        flush_dwell()
+        if last_pos_written_idx < len(t_new) - 1:
+            idx = len(t_new) - 1
+            dx = X_new[idx] - last_x
+            dy = Y_new[idx] - last_y
+            dz = Z_new[idx] - last_z
+            dist = np.sqrt(dx*dx + dy*dy + dz*dz)
+            speed = (dist / dt_elapsed) * 60.0
+            if speed < 0.1:
+                speed = 0.1
+            gcode_lines.append(f"G1 F{speed:.6f} X{X_new[idx]:.6f} Y{Y_new[idx]:.6f} Z{Z_new[idx]:.6f}")
 
     elif device == "Motion Platform":
         LAT_orig = columns_data["LAT"]
@@ -141,28 +197,96 @@ def generate_gcode_string(
             D_new[i] = target_z['D']
 
         gcode_lines = ["G90"]
+        last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[0], B_new[0], C_new[0], D_new[0], LAT_new[0], SI_new[0]
+        dwell_accum = 0.0
+        last_pos_written_idx = 0
 
-        for i in range(len(t_new)):
+        # Output first point
+        gcode_lines.append(
+            f"G1 F1000.000000 A{last_A:.6f} B{last_B:.6f} C{last_C:.6f} D{last_D:.6f} "
+            f"'e{last_LAT:.6f} 'f{last_LAT:.6f} 'a{last_SI:.6f} {axis_y_lo}{last_SI:.6f}"
+        )
+
+        def flush_dwell():
+            nonlocal dwell_accum
+            if dwell_accum > 0.0:
+                ms = int(round(dwell_accum * 1000.0))
+                if ms > 0:
+                    gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+
+        for i in range(1, len(t_new)):
             if i in new_commands_indices:
+                flush_dwell()
                 gcode_lines.append(new_commands_indices[i])
-            if i == 0:
-                speed = 1000.0
+
+            dA_from_last = A_new[i] - last_A
+            dB_from_last = B_new[i] - last_B
+            dC_from_last = C_new[i] - last_C
+            dD_from_last = D_new[i] - last_D
+            dLAT_from_last = LAT_new[i] - last_LAT
+            dSI_from_last = SI_new[i] - last_SI
+            max_diff = max(abs(dA_from_last), abs(dB_from_last), abs(dC_from_last), abs(dD_from_last), abs(dLAT_from_last), abs(dSI_from_last))
+
+            # Distinguish between truly stationary and decimated steps
+            is_stationary = (
+                LAT_new[i] == LAT_new[i-1] and
+                SI_new[i] == SI_new[i-1] and
+                AP_new[i] == AP_new[i-1] and
+                Roll_new[i] == Roll_new[i-1] and
+                Pitch_new[i] == Pitch_new[i-1] and
+                Yaw_new[i] == Yaw_new[i-1]
+            )
+
+            if is_stationary:
+                dwell_accum += (t_new[i] - t_new[i-1])
+            elif max_diff < 0.01:
+                # Decimated step
+                pass
             else:
-                dA = A_new[i] - A_new[i-1]
-                dB = B_new[i] - B_new[i-1]
-                dC = C_new[i] - C_new[i-1]
-                dD = D_new[i] - D_new[i-1]
-                de = LAT_new[i] - LAT_new[i-1]
-                df = LAT_new[i] - LAT_new[i-1]
-                da = SI_new[i] - SI_new[i-1]
-                dc = SI_new[i] - SI_new[i-1]
+                # Calculate dt_elapsed BEFORE flushing dwell_accum
+                dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx] - dwell_accum)
+                flush_dwell()
+                dA = A_new[i] - last_A
+                dB = B_new[i] - last_B
+                dC = C_new[i] - last_C
+                dD = D_new[i] - last_D
+                de = LAT_new[i] - last_LAT
+                df = LAT_new[i] - last_LAT
+                da = SI_new[i] - last_SI
+                dc = SI_new[i] - last_SI
                 
                 dist = np.sqrt(dA*dA + dB*dB + dC*dC + dD*dD + de*de + df*df + da*da + dc*dc)
-                speed = dist * 60000.0
+                speed = (dist / dt_elapsed) * 60.0
+                if speed < 0.1:
+                    speed = 0.1
 
+                gcode_lines.append(
+                    f"G1 F{speed:.6f} A{A_new[i]:.6f} B{B_new[i]:.6f} C{C_new[i]:.6f} D{D_new[i]:.6f} "
+                    f"'e{LAT_new[i]:.6f} 'f{LAT_new[i]:.6f} 'a{SI_new[i]:.6f} {axis_y_lo}{SI_new[i]:.6f}"
+                )
+                last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[i], B_new[i], C_new[i], D_new[i], LAT_new[i], SI_new[i]
+                last_pos_written_idx = i
+
+        dt_elapsed = max(0.001, t_new[-1] - t_new[last_pos_written_idx] - dwell_accum)
+        flush_dwell()
+        if last_pos_written_idx < len(t_new) - 1:
+            idx = len(t_new) - 1
+            dA = A_new[idx] - last_A
+            dB = B_new[idx] - last_B
+            dC = C_new[idx] - last_C
+            dD = D_new[idx] - last_D
+            de = LAT_new[idx] - last_LAT
+            df = LAT_new[idx] - last_LAT
+            da = SI_new[idx] - last_SI
+            dc = SI_new[idx] - last_SI
+            dist = np.sqrt(dA*dA + dB*dB + dC*dC + dD*dD + de*de + df*df + da*da + dc*dc)
+            speed = (dist / dt_elapsed) * 60.0
+            if speed < 0.1:
+                speed = 0.1
             gcode_lines.append(
-                f"G1 F{speed:.6f} A{A_new[i]:.6f} B{B_new[i]:.6f} C{C_new[i]:.6f} D{D_new[i]:.6f} "
-                f"'e{LAT_new[i]:.6f} 'f{LAT_new[i]:.6f} 'a{SI_new[i]:.6f} {axis_y_lo}{SI_new[i]:.6f}"
+                f"G1 F{speed:.6f} A{A_new[idx]:.6f} B{B_new[idx]:.6f} C{C_new[idx]:.6f} D{D_new[idx]:.6f} "
+                f"'e{LAT_new[idx]:.6f} 'f{LAT_new[idx]:.6f} 'a{SI_new[idx]:.6f} {axis_y_lo}{SI_new[idx]:.6f}"
             )
 
     else: # Other
@@ -178,23 +302,76 @@ def generate_gcode_string(
                     exceeds_limits = True
 
         gcode_lines = ["G90"]
-        
-        for i in range(len(t_new)):
+        last_vals = {col: new_data[col][0] for col in new_data}
+        dwell_accum = 0.0
+        last_pos_written_idx = 0
+
+        # Output first point
+        axis_parts = []
+        for col in sorted(new_data.keys()):
+            axis_parts.append(f"{col}{last_vals[col]:.6f}")
+        axis_str = " ".join(axis_parts)
+        gcode_lines.append(f"G1 F1000.000000 {axis_str}")
+
+        def flush_dwell():
+            nonlocal dwell_accum
+            if dwell_accum > 0.0:
+                ms = int(round(dwell_accum * 1000.0))
+                if ms > 0:
+                    gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+
+        for i in range(1, len(t_new)):
             if i in new_commands_indices:
+                flush_dwell()
                 gcode_lines.append(new_commands_indices[i])
-            if i == 0:
-                speed = 1000.0
+
+            max_diff = max(abs(new_data[col][i] - last_vals[col]) for col in new_data)
+
+            is_stationary = all(new_data[col][i] == new_data[col][i-1] for col in new_data)
+
+            if is_stationary:
+                dwell_accum += (t_new[i] - t_new[i-1])
+            elif max_diff < 0.01:
+                # Decimated step
+                pass
             else:
+                # Calculate dt_elapsed BEFORE flushing dwell_accum
+                dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx] - dwell_accum)
+                flush_dwell()
                 dist_sq = 0.0
                 for col in new_data:
-                    diff = new_data[col][i] - new_data[col][i-1]
+                    diff = new_data[col][i] - last_vals[col]
                     dist_sq += diff * diff
                 dist = np.sqrt(dist_sq)
-                speed = dist * 60000.0
-                
+                speed = (dist / dt_elapsed) * 60.0
+                if speed < 0.1:
+                    speed = 0.1
+
+                axis_parts = []
+                for col in sorted(new_data.keys()):
+                    axis_parts.append(f"{col}{new_data[col][i]:.6f}")
+                axis_str = " ".join(axis_parts)
+                gcode_lines.append(f"G1 F{speed:.6f} {axis_str}")
+                for col in new_data:
+                    last_vals[col] = new_data[col][i]
+                last_pos_written_idx = i
+
+        dt_elapsed = max(0.001, t_new[-1] - t_new[last_pos_written_idx] - dwell_accum)
+        flush_dwell()
+        if last_pos_written_idx < len(t_new) - 1:
+            idx = len(t_new) - 1
+            dist_sq = 0.0
+            for col in new_data:
+                diff = new_data[col][idx] - last_vals[col]
+                dist_sq += diff * diff
+            dist = np.sqrt(dist_sq)
+            speed = (dist / dt_elapsed) * 60.0
+            if speed < 0.1:
+                speed = 0.1
             axis_parts = []
             for col in sorted(new_data.keys()):
-                axis_parts.append(f"{col}{new_data[col][i]:.6f}")
+                axis_parts.append(f"{col}{new_data[col][idx]:.6f}")
             axis_str = " ".join(axis_parts)
             gcode_lines.append(f"G1 F{speed:.6f} {axis_str}")
 
