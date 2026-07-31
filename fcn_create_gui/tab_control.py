@@ -20,18 +20,27 @@ def build_control_tab(self):
     layout_main.setContentsMargins(6, 6, 6, 6)
     layout_main.setSpacing(6)
 
-    # --- 1. TOP CONFIGURATION BAR (Height 40px, 17px bold Connect text) ---
-    top_bar_layout = QHBoxLayout()
-    top_bar_layout.setContentsMargins(4, 4, 4, 4)
-    top_bar_layout.setSpacing(10)
+    # --- 1. TOP CONFIGURATION BAR (Height 55px) ---
+    self.top_bar_frame = QFrame(self.tab_2)
+    self.top_bar_frame.setObjectName("top_bar_frame")
+    self.top_bar_frame.setStyleSheet("""
+        QFrame#top_bar_frame {
+            background-color: #ffebee;
+            border: 2px solid #d32f2f;
+            border-radius: 8px;
+        }
+    """)
+    top_bar_layout = QHBoxLayout(self.top_bar_frame)
+    top_bar_layout.setContentsMargins(10, 6, 10, 6)
+    top_bar_layout.setSpacing(12)
 
-    label_ip = QLabel("Duet IP:", self.tab_2)
-    label_ip.setStyleSheet("font-weight: bold; font-size: 14px;")
+    label_ip = QLabel("Duet IP:", self.top_bar_frame)
+    label_ip.setStyleSheet("font-weight: bold; font-size: 15px;")
     
-    self.DuetIPAddress = QLineEdit(self.tab_2)
+    self.DuetIPAddress = QLineEdit(self.top_bar_frame)
     self.DuetIPAddress.setText("192.168.0.1")
     self.DuetIPAddress.setMaximumWidth(140)
-    self.DuetIPAddress.setMinimumHeight(55)
+    self.DuetIPAddress.setMinimumHeight(45)
     self.DuetIPAddress.setStyleSheet("""
         QLineEdit {
             font-weight: bold;
@@ -39,36 +48,41 @@ def build_control_tab(self):
             padding: 4px 8px;
             border: 1px solid #b0bec5;
             border-radius: 4px;
+            background-color: #ffffff;
         }
     """)
     register_touch_line_edit(self, self.DuetIPAddress, label_name="Duet IP Address")
  
-    self.setDuetIP = QPushButton("Connect", self.tab_2)
-    self.setDuetIP.setMinimumHeight(55)
-    self.setDuetIP.setMinimumWidth(180)
+    self.setDuetIP = QPushButton("Connect", self.top_bar_frame)
+    self.setDuetIP.setMinimumHeight(45)
+    self.setDuetIP.setMinimumWidth(160)
     self.setDuetIP.setStyleSheet("""
         QPushButton {
-            background-color: blue;
+            background-color: #1976d2;
             color: white;
             font-weight: bold;
             font-size: 17px;
             padding: 6px 18px;
-            border-radius: 4px;
+            border-radius: 6px;
         }
+        QPushButton:hover { background-color: #1565c0; }
     """)
     
-    self.connect_status = QRadioButton("Status: Not connected", self.tab_2)
-    self.connect_status.setEnabled(False)
-    self.connect_status.setChecked(False)
-    self.connect_status.setMinimumHeight(40)
+    self.connect_status = QLabel("NOT CONNECTED", self.top_bar_frame)
+    self.connect_status.setAlignment(Qt.AlignCenter)
+    self.connect_status.setMinimumHeight(45)
     self.connect_status.setStyleSheet("""
-        QRadioButton { font-weight: bold; color: red; font-size: 18px; }
-        QRadioButton::indicator { width: 22px; height: 22px; border-radius: 11px; }
-        QRadioButton::indicator:checked { background-color: #00e676; border: 1px solid #00c853; }
-        QRadioButton::indicator:unchecked { background-color: #ff5252; border: 1px solid #d50000; }
+        QLabel {
+            background-color: #d32f2f;
+            color: white;
+            font-weight: bold;
+            font-size: 17px;
+            padding: 6px 20px;
+            border-radius: 6px;
+        }
     """)
  
-    self.check_touchscreen = QCheckBox("Touchscreen Mode", self.tab_2)
+    self.check_touchscreen = QCheckBox("Touchscreen Mode", self.top_bar_frame)
     self.check_touchscreen.setMinimumHeight(42)
     self.check_touchscreen.setStyleSheet("""
         QCheckBox {
@@ -99,45 +113,59 @@ def build_control_tab(self):
     self.check_touchscreen.stateChanged.connect(lambda: __import__('fcn_control.fcn_control', fromlist=['save_configuration']).save_configuration(self))
  
     # Emergency Stop Button 1
-    self.emergencyButton_1 = QPushButton("Emergency STOP", self.tab_2)
-    self.emergencyButton_1.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 16px; border-radius: 6px;")
-    self.emergencyButton_1.setMinimumHeight(55)
-    self.emergencyButton_1.setMinimumWidth(220)
+    self.emergencyButton_1 = QPushButton("Emergency STOP", self.top_bar_frame)
+    self.emergencyButton_1.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; font-size: 16px; border-radius: 6px;")
+    self.emergencyButton_1.setMinimumHeight(45)
+    self.emergencyButton_1.setMinimumWidth(200)
     top_bar_layout.addWidget(self.emergencyButton_1)
 
-    layout_main.addLayout(top_bar_layout)
+    layout_main.addWidget(self.top_bar_frame)
 
     # --- 2. SUB-TABS: LUNG PHANTOM, PLATFORM & IND. MOTORS ---
     self.tabWidget = QTabWidget(self.tab_2)
     self.tabWidget.setStyleSheet("""
         QTabBar::tab {
             font-weight: bold;
-            font-size: 18px;
-            padding: 8px 20px;
-            min-height: 44px;
+            font-size: 16px;
+            color: #424242;
+            padding: 8px 22px;
+            min-height: 40px;
+            margin-right: 4px;
+            background-color: transparent;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        QTabBar::tab:hover {
+            color: #1976d2;
+            background-color: #f5f5f5;
         }
         QTabBar::tab:selected {
-            background-color: #ffffff;
             color: #1565c0;
-            border-bottom: 3px solid #1565c0;
+            font-size: 20px;
+            font-weight: bold;
+            border-bottom: 4px solid #1565c0;
+            background-color: transparent;
         }
-        QTabWidget::pane { border: 1px solid #cfd8dc; border-radius: 4px; }
+        QTabWidget::pane {
+            border: 1px solid #cfd8dc;
+            border-radius: 4px;
+            background-color: #ffffff;
+        }
     """)
     
     # Sub-Tab 0: Lung Phantom
     self.tab = QWidget()
     build_motion_platform_subtab(self)
-    self.tabWidget.addTab(self.tab, "Lung Phantom")
+    self.tabWidget.addTab(self.tab, "LUNG PHANTOM")
 
     # Sub-Tab 1: Platform (2 axes per row with 50px tall buttons)
     self.tab_platform = QWidget()
     build_platform_subtab(self)
-    self.tabWidget.addTab(self.tab_platform, "Platform")
+    self.tabWidget.addTab(self.tab_platform, "PLATFORM")
 
     # Sub-Tab 2: Ind. Motors
     self.tab_4 = QWidget()
     build_external_motors_subtab(self)
-    self.tabWidget.addTab(self.tab_4, "Ind. Motors")
+    self.tabWidget.addTab(self.tab_4, "IND. MOTORS")
 
     layout_main.addWidget(self.tabWidget)
 
@@ -297,12 +325,15 @@ def build_motion_platform_subtab(self):
     
     button_style = """
         QPushButton {
-            background-color: blue;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 16px;
             min-height: 50px;
             border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #b71c1c;
         }
     """
 
@@ -328,7 +359,7 @@ def build_motion_platform_subtab(self):
                 padding: 4px 8px;
             }
         """)
-        setattr(self, f"POS_CURR_{axis}", curr_pos)
+        setattr(self, f"POS_CURR_{axis}_LUNG", curr_pos)
         grid.addWidget(curr_pos, row_idx, 1)
 
         # 3. Target Pos
@@ -345,20 +376,20 @@ def build_motion_platform_subtab(self):
                 padding: 4px 8px;
             }
         """)
-        setattr(self, f"POS_DES_{axis}", des_pos)
+        setattr(self, f"POS_DES_{axis}_LUNG", des_pos)
         register_touch_line_edit(self, des_pos, label_name=f"Target Pos {name}")
         grid.addWidget(des_pos, row_idx, 2)
 
         # 4. Minus Jog Button (50px height)
         btn_min = QPushButton(f"- {name}", table_frame)
         btn_min.setStyleSheet(button_style)
-        setattr(self, f"MIN_{axis}", btn_min)
+        setattr(self, f"MIN_{axis}_LUNG", btn_min)
         grid.addWidget(btn_min, row_idx, 3)
 
         # 5. Plus Jog Button (50px height)
         btn_plus = QPushButton(f"+ {name}", table_frame)
         btn_plus.setStyleSheet(button_style)
-        setattr(self, f"PLUS_{axis}", btn_plus)
+        setattr(self, f"PLUS_{axis}_LUNG", btn_plus)
         grid.addWidget(btn_plus, row_idx, 4)
 
         # 6. Home Axis Button (50px height)
@@ -461,7 +492,7 @@ def build_platform_subtab(self):
 
     button_style = """
         QPushButton {
-            background-color: blue;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 16px;
@@ -470,10 +501,10 @@ def build_platform_subtab(self):
             border: none;
         }
         QPushButton:hover {
-            background-color: #1a73e8;
+            background-color: #b71c1c;
         }
         QPushButton:pressed {
-            background-color: #0d47a1;
+            background-color: #8e0000;
             padding-top: 3px;
             padding-left: 3px;
         }
@@ -691,15 +722,15 @@ def build_platform_subtab(self):
     self.btn_go_to.setMinimumWidth(140)
     self.btn_go_to.setStyleSheet("""
         QPushButton {
-            background-color: blue;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 16px;
             border-radius: 6px;
             border: none;
         }
-        QPushButton:hover { background-color: #1a73e8; }
-        QPushButton:pressed { background-color: #0d47a1; padding-top: 3px; padding-left: 3px; }
+        QPushButton:hover { background-color: #b71c1c; }
+        QPushButton:pressed { background-color: #8e0000; padding-top: 3px; padding-left: 3px; }
     """)
     self.btn_go_to.clicked.connect(lambda: __import__('fcn_control.fcn_control', fromlist=['go_to_desired_positions']).go_to_desired_positions(self))
     config_hlayout.addWidget(self.btn_go_to)
@@ -710,15 +741,15 @@ def build_platform_subtab(self):
     self.btn_go_to_center.setMinimumWidth(140)
     self.btn_go_to_center.setStyleSheet("""
         QPushButton {
-            background-color: blue;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 16px;
             border-radius: 6px;
             border: none;
         }
-        QPushButton:hover { background-color: #1a73e8; }
-        QPushButton:pressed { background-color: #0d47a1; padding-top: 3px; padding-left: 3px; }
+        QPushButton:hover { background-color: #b71c1c; }
+        QPushButton:pressed { background-color: #8e0000; padding-top: 3px; padding-left: 3px; }
     """)
     self.btn_go_to_center.clicked.connect(lambda: __import__('fcn_control.fcn_control', fromlist=['go_to_center']).go_to_center(self))
     config_hlayout.addWidget(self.btn_go_to_center)
@@ -876,7 +907,7 @@ def build_external_motors_subtab(self):
     self.btn_move_ext.setMinimumHeight(44)
     self.btn_move_ext.setStyleSheet("""
         QPushButton {
-            background-color: #1565c0;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 14px;
@@ -889,7 +920,7 @@ def build_external_motors_subtab(self):
     self.btn_home_ext.setMinimumHeight(44)
     self.btn_home_ext.setStyleSheet("""
         QPushButton {
-            background-color: #d32f2f;
+            background-color: #2e7d32;
             color: white;
             font-weight: bold;
             font-size: 14px;
@@ -915,7 +946,7 @@ def build_external_motors_subtab(self):
 
     jog_btn_style = """
         QPushButton {
-            background-color: blue;
+            background-color: #d32f2f;
             color: white;
             font-weight: bold;
             font-size: 15px;

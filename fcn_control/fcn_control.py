@@ -20,6 +20,102 @@ def log_to_duet_console(self, text, color=None):
             sb.setValue(sb.maximum())
 
 
+def is_axis_homed(self, axis_key):
+    """
+    Evaluates whether the given axis or platform degree of freedom is homed.
+    """
+    if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
+        return False
+
+    h = self.ext_axes_homed
+    key = str(axis_key).upper().strip()
+
+    if key in ['XAXIS', 'LAT', 'X']:
+        return bool(h.get('X', False) or (h.get("'e", False) and h.get("'f", False)))
+    elif key in ['YAXIS', 'SI', 'Y']:
+        return bool(h.get('Y', False) or (h.get("'a", False) and (h.get("'c", False) or h.get("'b", False))))
+    elif key in ['ZAXIS', 'AP', 'Z']:
+        return bool(h.get('Z', False) or (h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)))
+    elif key in ['ROLL']:
+        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('U', False))
+    elif key in ['PITCH']:
+        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('V', False))
+    elif key in ['YAW']:
+        return bool(h.get('W', False) or h.get('YAW', False))
+    else:
+        if axis_key in h:
+            return bool(h[axis_key])
+        if key in h:
+            return bool(h[key])
+        return False
+
+
+def update_moving_button_styles(self):
+    """
+    Dynamically sets the background color of all motion buttons:
+    - RED (#d32f2f) if the corresponding axis is NOT homed.
+    - GREEN (#2e7d32) if the corresponding axis IS homed.
+    """
+    style_red = """
+        QPushButton {
+            background-color: #d32f2f;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 44px;
+            border-radius: 6px;
+            border: none;
+        }
+        QPushButton:hover { background-color: #b71c1c; }
+        QPushButton:pressed { background-color: #8e0000; padding-top: 3px; padding-left: 3px; }
+    """
+
+    style_green = """
+        QPushButton {
+            background-color: #2e7d32;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 44px;
+            border-radius: 6px;
+            border: none;
+        }
+        QPushButton:hover { background-color: #1b5e20; }
+        QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
+    """
+
+    # 1. Platform & Lung Phantom jog buttons
+    axis_keys = ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']
+    for ax_key in axis_keys:
+        homed = is_axis_homed(self, ax_key)
+        target_style = style_green if homed else style_red
+
+        for btn_prefix in ['MIN_', 'PLUS_']:
+            for suffix in ['', '_LUNG']:
+                btn = getattr(self, f"{btn_prefix}{ax_key}{suffix}", None)
+                if btn is not None:
+                    btn.setStyleSheet(target_style)
+
+    # 2. Ind. Motors tab shared jog & move buttons
+    selected_ext = getattr(self, 'selected_ext_axis', 'A')
+    ext_homed = is_axis_homed(self, selected_ext)
+    ext_style = style_green if ext_homed else style_red
+
+    if hasattr(self, 'btn_ext_jog_min') and self.btn_ext_jog_min:
+        self.btn_ext_jog_min.setStyleSheet(ext_style)
+    if hasattr(self, 'btn_ext_jog_plus') and self.btn_ext_jog_plus:
+        self.btn_ext_jog_plus.setStyleSheet(ext_style)
+    if hasattr(self, 'btn_move_ext') and self.btn_move_ext:
+        self.btn_move_ext.setStyleSheet(ext_style)
+
+    # 3. Go to ... and Go to center buttons
+    all_plat_homed = (is_axis_homed(self, 'XAXIS') and is_axis_homed(self, 'YAXIS') and is_axis_homed(self, 'ZAXIS'))
+    if hasattr(self, 'btn_go_to') and self.btn_go_to:
+        self.btn_go_to.setStyleSheet(style_green if all_plat_homed else style_red)
+    if hasattr(self, 'btn_go_to_center') and self.btn_go_to_center:
+        self.btn_go_to_center.setStyleSheet(style_green if all_plat_homed else style_red)
+
+
 def refresh_external_axis_styles(self):
     """
     Evaluates and applies the 4 explicit visual states for all 11 axis selector buttons:
@@ -95,6 +191,8 @@ def refresh_external_axis_styles(self):
                 btn.setStyleSheet(style_unhomed_unselected)
                 btn.setChecked(False)
 
+    update_moving_button_styles(self)
+
 
 def select_external_axis(self, axis_name):
     """
@@ -133,6 +231,15 @@ def step_selected_ext_axis(self, plus=True):
     using the global step size.
     """
     axis = getattr(self, 'selected_ext_axis', 'A')
+    if not getattr(self, 'duet_connected', False):
+        log_to_duet_console(self, f"Error: Cannot move axis {axis}. Not connected to Duet.", color="#ff3333")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
+        return
+
+    if not is_axis_homed(self, axis):
+        log_to_duet_console(self, f"Error: Cannot move axis {axis}. Please home the axis first!", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move axis {axis}.\nPlease home the axis first!")
+        return
     step(self, axis, plus=plus)
 
 
@@ -141,6 +248,15 @@ def move_selected_ext_axis(self):
     Moves the currently selected individual motor axis to target position.
     """
     axis = getattr(self, 'selected_ext_axis', 'A')
+    if not getattr(self, 'duet_connected', False):
+        log_to_duet_console(self, f"Error: Cannot move axis {axis}. Not connected to Duet.", color="#ff3333")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
+        return
+
+    if not is_axis_homed(self, axis):
+        log_to_duet_console(self, f"Error: Cannot move axis {axis}. Please home the axis first!", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move axis {axis}.\nPlease home the axis first!")
+        return
     val_str = self.POS_DES_EXT.text().strip() if hasattr(self, 'POS_DES_EXT') else "0.0"
     try:
         val = float(val_str)
@@ -512,12 +628,16 @@ def update_duet_status_ui(self, data=None):
             if hasattr(self, 'POS_CURR_YAXIS') and self.POS_CURR_YAXIS:
                 self.POS_CURR_YAXIS.setText(f"{h_si:.3f}")
 
-            # Automatically synchronize target fields with current positions if not focused
+            # Automatically synchronize current & target fields for all tabs (Platform & Lung Phantom)
             for ax_name in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-                curr_f = getattr(self, f"POS_CURR_{ax_name}", None)
-                des_f = getattr(self, f"POS_DES_{ax_name}", None)
-                if curr_f is not None and des_f is not None and not des_f.hasFocus():
-                    des_f.setText(curr_f.text())
+                master_curr = getattr(self, f"POS_CURR_{ax_name}", None)
+                for suffix in ['', '_LUNG']:
+                    curr_f = getattr(self, f"POS_CURR_{ax_name}{suffix}", None)
+                    des_f = getattr(self, f"POS_DES_{ax_name}{suffix}", None)
+                    if curr_f is not None and master_curr is not None and curr_f != master_curr:
+                        curr_f.setText(master_curr.text())
+                    if curr_f is not None and des_f is not None and not des_f.hasFocus():
+                        des_f.setText(curr_f.text())
 
             refresh_external_axis_styles(self)
 
@@ -530,27 +650,58 @@ def update_duet_status_ui(self, data=None):
 
 def update_connection_status_ui(self, connected=False):
     """
-    Updates the UI connection indicator light (Green when connected, Red when disconnected).
+    Updates the top bar and connection indicator:
+    - RED and 'NOT CONNECTED' when disconnected.
+    - GREEN and 'Connected' when connected.
     """
+    status_text = "Connected" if connected else "NOT CONNECTED"
+
+    # 1. Update Window Title
+    if hasattr(self, 'setWindowTitle'):
+        self.setWindowTitle(f"TRACE - {status_text}")
+
+    # 2. Update connect_status widget
     if hasattr(self, 'connect_status') and self.connect_status:
-        if connected:
-            self.connect_status.setChecked(True)
-            self.connect_status.setText('Status: Connected')
-            self.connect_status.setStyleSheet("""
-                QRadioButton { font-weight: bold; color: green; font-size: 18px; }
-                QRadioButton::indicator { width: 22px; height: 22px; border-radius: 11px; }
-                QRadioButton::indicator:checked { background-color: #00e676; border: 1px solid #00c853; }
-                QRadioButton::indicator:unchecked { background-color: #ff5252; border: 1px solid #d50000; }
+        if hasattr(self.connect_status, 'setChecked'):
+            self.connect_status.setChecked(connected)
+            self.connect_status.setText(status_text)
+            color_css = "color: #2e7d32;" if connected else "color: #d32f2f;"
+            self.connect_status.setStyleSheet(f"""
+                QRadioButton {{
+                    font-weight: bold;
+                    font-size: 17px;
+                    padding: 6px 14px;
+                    {color_css}
+                }}
+                QRadioButton::indicator {{ width: 20px; height: 20px; border-radius: 10px; }}
+                QRadioButton::indicator:checked {{ background-color: #2e7d32; border: 1px solid #1b5e20; }}
+                QRadioButton::indicator:unchecked {{ background-color: #d32f2f; border: 1px solid #b71c1c; }}
             """)
         else:
-            self.connect_status.setChecked(False)
-            self.connect_status.setText('Status: Not connected')
-            self.connect_status.setStyleSheet("""
-                QRadioButton { font-weight: bold; color: red; font-size: 18px; }
-                QRadioButton::indicator { width: 22px; height: 22px; border-radius: 11px; }
-                QRadioButton::indicator:checked { background-color: #00e676; border: 1px solid #00c853; }
-                QRadioButton::indicator:unchecked { background-color: #ff5252; border: 1px solid #d50000; }
+            self.connect_status.setText(status_text)
+            bg_color = "#2e7d32" if connected else "#d32f2f"
+            self.connect_status.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color};
+                    color: white;
+                    font-weight: bold;
+                    font-size: 17px;
+                    padding: 6px 20px;
+                    border-radius: 6px;
+                }}
             """)
+
+    # 3. Update top_bar_frame container
+    if hasattr(self, 'top_bar_frame') and self.top_bar_frame:
+        bg_bar = "#e8f5e9" if connected else "#ffebee"
+        border_bar = "#2e7d32" if connected else "#d32f2f"
+        self.top_bar_frame.setStyleSheet(f"""
+            QFrame#top_bar_frame {{
+                background-color: {bg_bar};
+                border: 2px solid {border_bar};
+                border-radius: 8px;
+            }}
+        """)
 
 
 def send_cmd(self, cmd=None):
@@ -620,6 +771,16 @@ def step(self, ax, plus=True):
     Function to move axes step-wise using the global step size selected by the user.
     Applies to all cartesian, platform (Roll, Pitch, Yaw), and individual motor axes (A, B, C, D, X, Y, Z, 'a, 'c, 'e, 'f).
     """
+    if not getattr(self, 'duet_connected', False):
+        log_to_duet_console(self, f"Error: Cannot move {ax}. Not connected to Duet.", color="#ff3333")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
+        return
+
+    if not is_axis_homed(self, ax):
+        log_to_duet_console(self, f"Error: Cannot move {ax}. Please home the axis first!", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {ax}.\nPlease home the axis first!")
+        return
+
     step_val = getattr(self, 'global_step_val', 1.0)
     if not plus:
         step_val *= -1
@@ -830,8 +991,22 @@ def move(self, ax):
     Execute absolute move requests by calculating the relative delta from current position.
     This relative delta is applied to all paired actuators, preserving any existing rotation/offset.
     """
+    if not getattr(self, 'duet_connected', False):
+        log_to_duet_console(self, f"Error: Cannot move {ax}. Not connected to Duet.", color="#ff3333")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
+        return
+
+    if not is_axis_homed(self, ax):
+        log_to_duet_console(self, f"Error: Cannot move {ax}. Please home the axis first!", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {ax}.\nPlease home the axis first!")
+        return
+
     des_field = getattr(self, f"POS_DES_{ax}", None)
+    if des_field is None or not des_field.text().strip():
+        des_field = getattr(self, f"POS_DES_{ax}_LUNG", None)
     curr_field = getattr(self, f"POS_CURR_{ax}", None)
+    if curr_field is None or not curr_field.text().strip():
+        curr_field = getattr(self, f"POS_CURR_{ax}_LUNG", None)
     
     if des_field is None or curr_field is None:
         return
@@ -845,13 +1020,6 @@ def move(self, ax):
 
     delta = target_val - current_val
     if abs(delta) < 0.0001:
-        return
-
-    # Check connection
-    if not getattr(self, 'duet_connected', False):
-        log_to_duet_console(self, "Error: Not connected to Duet.", color="#ff3333")
-        from PyQt5.QtWidgets import QMessageBox
-        QMessageBox.warning(self, "Connection Warning", "Not connected to Duet. Please connect first.")
         return
 
     # Generate and send command
@@ -1145,9 +1313,15 @@ def go_to_desired_positions(self):
     """
     if not getattr(self, 'duet_connected', False):
         log_to_duet_console(self, "Error: Not connected to Duet.", color="#ff3333")
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, "Connection Warning", "Not connected to Duet. Please connect first.")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
+
+    # Check homing state of platform axes
+    for ax_check in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
+        if not is_axis_homed(self, ax_check):
+            log_to_duet_console(self, f"Error: Cannot move platform. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
+            QMessageBox.warning(self, "Axis Not Homed", f"Cannot move platform.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
+            return
 
     # 1. Retrieve target translations & rotations
     try:
@@ -1290,9 +1464,15 @@ def go_to_center(self):
     """
     if not getattr(self, 'duet_connected', False):
         log_to_duet_console(self, "Error: Not connected to Duet.", color="#ff3333")
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.warning(self, "Connection Warning", "Not connected to Duet. Please connect first.")
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
+
+    # Check homing state of platform axes
+    for ax_check in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
+        if not is_axis_homed(self, ax_check):
+            log_to_duet_console(self, f"Error: Cannot move platform to center. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
+            QMessageBox.warning(self, "Axis Not Homed", f"Cannot move to center.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
+            return
 
     # 1. Update target position input fields in UI to center values
     for ax, val in [('XAXIS', '25.000'), ('YAXIS', '25.000'), ('ZAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:

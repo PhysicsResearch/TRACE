@@ -92,12 +92,13 @@ def initialize_software_buttons(self):
 
     # STEP BUTTONS (Cartesian & Platform axes)
     for axis in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-        b_min = getattr(self, f'MIN_{axis}', None)
-        b_plus = getattr(self, f'PLUS_{axis}', None)
-        if b_min is not None:
-            safe_connect(b_min, lambda _c=False, a=axis: step(self, a, plus=False))
-        if b_plus is not None:
-            safe_connect(b_plus, lambda _c=False, a=axis: step(self, a, plus=True))
+        for suffix in ['', '_LUNG']:
+            b_min = getattr(self, f'MIN_{axis}{suffix}', None)
+            b_plus = getattr(self, f'PLUS_{axis}{suffix}', None)
+            if b_min is not None:
+                safe_connect(b_min, lambda _c=False, a=axis: step(self, a, plus=False))
+            if b_plus is not None:
+                safe_connect(b_plus, lambda _c=False, a=axis: step(self, a, plus=True))
 
     # REMODELED INDIVIDUAL MOTORS SHARED CONTROLS
     if hasattr(self, 'btn_ext_jog_min') and self.btn_ext_jog_min:
@@ -111,9 +112,10 @@ def initialize_software_buttons(self):
 
     # TARGET POSITION CONFIRMATION (Return key)
     for axis_key in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-        field = getattr(self, f'POS_DES_{axis_key}', None)
-        if field is not None:
-            safe_connect_return(field, lambda _a=axis_key: move(self, _a))
+        for suffix in ['', '_LUNG']:
+            field = getattr(self, f'POS_DES_{axis_key}{suffix}', None)
+            if field is not None:
+                safe_connect_return(field, lambda _a=axis_key: move(self, _a))
     if hasattr(self, 'POS_DES_EXT') and self.POS_DES_EXT:
         safe_connect_return(self.POS_DES_EXT, lambda: move_selected_ext_axis(self))
 
