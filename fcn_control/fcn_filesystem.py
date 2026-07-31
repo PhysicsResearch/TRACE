@@ -712,17 +712,42 @@ def upload_file(self):
 
         progress_io = ProgressIO(file_data, progress_callback)
 
+        # ── Stop background polling so no other HTTP request reaches Duet during upload ──
+        polling_was_active = False
+        fast_was_active = False
+        if hasattr(self, 'status_polling_timer') and self.status_polling_timer.isActive():
+            self.status_polling_timer.stop()
+            polling_was_active = True
+        if hasattr(self, 'status_fast_timer') and self.status_fast_timer.isActive():
+            self.status_fast_timer.stop()
+            fast_was_active = True
+
+        # Close the shared session's TCP connection pool so Duet's single-connection
+        # HTTP server has a free slot for our upload POST.
         from fcn_monitor.fcn_duet import get_shared_session
-        session = get_shared_session()
-        response = session.post(url, params={'name': rrf_path}, data=progress_io, timeout=20)
-        response.raise_for_status()
+        get_shared_session().close()
+
+        # Use a fresh, dedicated session for the upload
+        upload_session = requests.Session()
+        upload_session.trust_env = False
+        try:
+            response = upload_session.post(url, params={'name': rrf_path}, data=progress_io, timeout=20)
+            response.raise_for_status()
+        finally:
+            upload_session.close()
 
         progress.setValue(100)
         QMessageBox.information(self, "Upload Successful", f"File '{filename}' uploaded successfully to Duet!")
         load_directory(self, getattr(self, 'current_directory', '/'))
     except Exception as e:
-        progress.close()
+        if 'progress' in locals():
+            progress.close()
         if "cancelled by user" in str(e):
             QMessageBox.information(self, "Upload Cancelled", f"Upload of '{filename}' was cancelled by the user.")
         else:
             QMessageBox.critical(self, "Upload Error", f"Failed to upload '{filename}':\n{e}")
+    finally:
+        if 'polling_was_active' in locals() and polling_was_active and hasattr(self, 'status_polling_timer'):
+            self.status_polling_timer.start()
+        if 'fast_was_active' in locals() and fast_was_active and hasattr(self, 'status_fast_timer'):
+            self.status_fast_timer.start()

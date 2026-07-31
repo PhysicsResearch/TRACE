@@ -240,6 +240,7 @@ def update_status_tab_dashboard(self):
     if not getattr(self, 'duet_connected', False):
         return
 
+
     if not hasattr(self, 'statusBadgeLabel') or self.statusBadgeLabel is None:
         return
 

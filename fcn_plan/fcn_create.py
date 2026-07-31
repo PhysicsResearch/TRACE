@@ -722,147 +722,163 @@ def export_gcode_action(self):
 
 def upload_gcode_to_duet_action(self):
     """
-    Generates G-code string from the active curve, prompts for a target name on Duet,
-    and uploads it to '0:/gcodes/' with a progress bar and cancel option.
+    Generates G-code string from the active curve and uploads it directly to Duet SD card (0:/gcodes/).
+    Writes G-code to a temp file, stops background polling, then uploads using the shared session
+    (same code path as the Files tab upload_file).
     """
-    from PySide6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog, QLineEdit
-    from PySide6.QtCore import Qt, QCoreApplication
-    from fcn_monitor.fcn_duet import get_clean_duet_ip, duet_request
-    import requests
-    import io
-
     if not getattr(self, 'duet_connected', False):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
         return
 
-    polling_active = False
-    fast_active = False
-    original_connected_state = True
+    from PySide6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog, QWidget
+    from PySide6.QtCore import Qt, QCoreApplication
+    from fcn_monitor.fcn_duet import get_clean_duet_ip, get_shared_session
+    import io
+    import time
+
+    gcode_content, default_name = generate_planned_gcode(self)
+    if not gcode_content:
+        return
+
+    # Prompt for target name on Duet
+    parent_widget = self if (isinstance(self, QWidget) and not type(self).__name__.endswith('Mock')) else None
+    dialog = QInputDialog(parent_widget)
+    dialog.setWindowTitle("Upload Name")
+    dialog.setLabelText("Enter target filename on Duet:")
+    dialog.setTextValue(default_name)
+    dialog.setInputMode(QInputDialog.TextInput)
+    dialog.setMinimumWidth(1260)
+    dialog.setMinimumHeight(200)
+    dialog.setStyleSheet("""
+        QInputDialog {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 1260px;
+        }
+        QLabel {
+            font-size: 18px;
+            min-height: 40px;
+        }
+        QLineEdit {
+            font-size: 18px;
+            min-height: 45px;
+            min-width: 1190px;
+            padding: 6px;
+        }
+        QPushButton {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 120px;
+            min-height: 45px;
+            border-radius: 4px;
+        }
+    """)
+
+    ok = dialog.exec()
+    if not ok or not dialog.textValue().strip():
+        return
+
+    filename = dialog.textValue().strip()
+    rrf_path = f"0:/gcodes/{filename}"
+
+    ip = get_clean_duet_ip(self)
+    url = f"http://{ip}/rr_upload"
+
+    file_data = gcode_content.encode('utf-8')
+
+    # ── Stop background polling to prevent concurrent HTTP requests to Duet ──
+    polling_was_active = False
+    fast_was_active = False
+    if hasattr(self, 'status_polling_timer') and self.status_polling_timer.isActive():
+        self.status_polling_timer.stop()
+        polling_was_active = True
+    if hasattr(self, 'status_fast_timer') and self.status_fast_timer.isActive():
+        self.status_fast_timer.stop()
+        fast_was_active = True
+
+    # Process pending events to flush any in-flight timer callbacks
+    QCoreApplication.processEvents()
+    # Small delay to let any active HTTP request on the shared session complete
+    time.sleep(0.3)
+
+    # Initialize progress dialog
+    progress = QProgressDialog(f"Uploading '{filename}' to Duet...", "Cancel", 0, 100, parent_widget)
+    progress.setWindowTitle("Uploading to Duet")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumWidth(550)
+    progress.setMinimumHeight(180)
+    progress.setStyleSheet("""
+        QProgressDialog {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        QLabel {
+            font-size: 18px;
+            min-height: 40px;
+        }
+        QProgressBar {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            height: 35px;
+            border-radius: 4px;
+        }
+        QPushButton {
+            font-size: 18px;
+            font-weight: bold;
+            min-width: 120px;
+            min-height: 45px;
+            border-radius: 4px;
+        }
+    """)
+    progress.setValue(0)
+    progress.show()
+    QCoreApplication.processEvents()
+
+    def progress_callback(bytes_read, total):
+        if progress.wasCanceled():
+            raise Exception("Upload cancelled by user")
+        percent = int((bytes_read / total) * 100) if total > 0 else 0
+        progress.setValue(percent)
+        QCoreApplication.processEvents()
+
+    class ProgressIO(io.BytesIO):
+        def __init__(self, data_bytes, callback):
+            super().__init__(data_bytes)
+            self.callback = callback
+            self.total = len(data_bytes)
+            self.read_bytes = 0
+
+        def read(self, size=-1):
+            chunk = super().read(size)
+            self.read_bytes += len(chunk)
+            self.callback(self.read_bytes, self.total)
+            return chunk
+
+    progress_io = ProgressIO(file_data, progress_callback)
+
     try:
-        # Temporarily set duet_connected to False and stop timers to completely inhibit concurrent polling requests
-        self.duet_connected = False
-        
-        if hasattr(self, 'status_polling_timer') and self.status_polling_timer.isActive():
-            self.status_polling_timer.stop()
-            polling_active = True
-        if hasattr(self, 'status_fast_timer') and self.status_fast_timer.isActive():
-            self.status_fast_timer.stop()
-            fast_active = True
-
-        gcode_content, default_name = generate_planned_gcode(self)
-        if not gcode_content:
-            return
-
-        # Prompt for target name on Duet (touchscreen-friendly sizing & styling)
-        from PySide6.QtWidgets import QWidget
-        parent_widget = self if (isinstance(self, QWidget) and not type(self).__name__.endswith('Mock')) else None
-        dialog = QInputDialog(parent_widget)
-        dialog.setWindowTitle("Upload Name")
-        dialog.setLabelText("Enter target filename on Duet:")
-        dialog.setTextValue(default_name)
-        dialog.setInputMode(QInputDialog.TextInput)
-        dialog.setMinimumWidth(1260)
-        dialog.setMinimumHeight(200)
-        dialog.setStyleSheet("""
-            QInputDialog {
-                font-size: 18px;
-                font-weight: bold;
-                min-width: 1260px;
-            }
-            QLabel {
-                font-size: 18px;
-                min-height: 40px;
-            }
-            QLineEdit {
-                font-size: 18px;
-                min-height: 45px;
-                min-width: 1190px;
-                padding: 6px;
-            }
-            QPushButton {
-                font-size: 18px;
-                font-weight: bold;
-                min-width: 120px;
-                min-height: 45px;
-                border-radius: 4px;
-            }
-        """)
-        
-        ok = dialog.exec()
-        if not ok or not dialog.textValue().strip():
-            return
-
-        filename = dialog.textValue().strip()
-        rrf_path = f"0:/gcodes/{filename}"
-
-        ip = get_clean_duet_ip(self)
-        url = f"http://{ip}/rr_upload"
-
-        gcode_bytes = gcode_content.encode('utf-8')
-        total_size = len(gcode_bytes)
-
-        # Initialize progress dialog (touchscreen-friendly sizing & styling)
-        progress = QProgressDialog("Uploading G-code to Duet...", "Cancel", 0, 100, parent_widget)
-        progress.setWindowTitle("Uploading to Duet")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumWidth(550)
-        progress.setMinimumHeight(180)
-        progress.setStyleSheet("""
-            QProgressDialog {
-                font-size: 18px;
-                font-weight: bold;
-            }
-            QLabel {
-                font-size: 18px;
-                min-height: 40px;
-            }
-            QProgressBar {
-                text-align: center;
-                font-size: 18px;
-                font-weight: bold;
-                height: 35px;
-                border-radius: 4px;
-            }
-            QPushButton {
-                font-size: 18px;
-                font-weight: bold;
-                min-width: 120px;
-                min-height: 45px;
-                border-radius: 4px;
-            }
-        """)
-        progress.setValue(0)
-        progress.show()
-        QCoreApplication.processEvents()
-
-        # Update progress to show sending phase
-        progress.setValue(30)
-        QCoreApplication.processEvents()
-
-        # Create a fresh, temporary connection session to upload the raw bytes, avoiding stale socket reuse in the shared pool
-        session = requests.Session()
-        session.trust_env = False
-        try:
-            response = session.post(url, params={'name': rrf_path}, data=gcode_bytes, timeout=30)
-            response.raise_for_status()
-        finally:
-            session.close()
+        # Use the shared session — same code path as the Files tab upload_file
+        session = get_shared_session()
+        print(f"[UPLOAD DEBUG] Using shared session, uploading to {url} name={rrf_path}, data size={len(file_data)} bytes")
+        response = session.post(url, params={'name': rrf_path}, data=progress_io, timeout=30)
+        print(f"[UPLOAD DEBUG] Response status: {response.status_code}, body: {response.text[:200]}")
+        response.raise_for_status()
 
         progress.setValue(100)
         QMessageBox.information(parent_widget, "Upload Successful", f"G-code '{filename}' uploaded successfully to Duet root gcodes folder!")
-
     except Exception as e:
-        if 'progress' in locals():
-            progress.close()
+        print(f"[UPLOAD DEBUG] Upload exception: {type(e).__name__}: {e}")
+        progress.close()
         if "cancelled by user" in str(e):
             QMessageBox.information(parent_widget, "Upload Cancelled", "G-code upload was cancelled by the user.")
         else:
             QMessageBox.critical(parent_widget, "Upload Error", f"Failed to upload G-code to Duet:\n{str(e)}")
     finally:
-        self.duet_connected = original_connected_state
-        if polling_active and hasattr(self, 'status_polling_timer'):
+        # Restart polling timers
+        if polling_was_active and hasattr(self, 'status_polling_timer'):
             self.status_polling_timer.start()
-        if fast_active and hasattr(self, 'status_fast_timer'):
+        if fast_was_active and hasattr(self, 'status_fast_timer'):
             self.status_fast_timer.start()
 
 
