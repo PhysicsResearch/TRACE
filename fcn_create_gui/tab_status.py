@@ -151,14 +151,17 @@ def build_status_tab(self):
     top_right_box = QHBoxLayout()
     top_right_box.setContentsMargins(0, 0, 0, 0)
     
-    sf_hlayout = QHBoxLayout()
-    sf_hlayout.setSpacing(4)
+    sf_container = QWidget(self.card_status)
+    sf_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    sf_hlayout = QHBoxLayout(sf_container)
+    sf_hlayout.setContentsMargins(0, 0, 0, 0)
+    sf_hlayout.setSpacing(6)
     sf_hlayout.addWidget(label_sf)
     sf_hlayout.addWidget(self.labelSf)
     sf_hlayout.addWidget(self.minSf)
     sf_hlayout.addWidget(self.plusSf)
 
-    top_right_box.addLayout(sf_hlayout)
+    top_right_box.addWidget(sf_container)
     top_right_box.addSpacing(25)
 
     # Add Auto release and Auto pause checkboxes
@@ -349,6 +352,28 @@ def build_status_tab(self):
     self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.txt)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
 
+    # Time interval control (placed between checkbox and clear plot button)
+    lbl_time_interval = QLabel("Time interval (s):", plot_box)
+    lbl_time_interval.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
+
+    self.input_time_interval = QLineEdit("60", plot_box)
+    self.input_time_interval.setFixedWidth(65)
+    self.input_time_interval.setStyleSheet("""
+        QLineEdit {
+            background-color: #ffffff;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            padding: 4px 6px;
+            color: #1565c0;
+        }
+    """)
+    from PySide6.QtGui import QIntValidator
+    self.input_time_interval.setValidator(QIntValidator(5, 86400, self.input_time_interval))
+    register_touch_line_edit(self, self.input_time_interval, label_name="Time Interval (s)")
+    self.input_time_interval.textChanged.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
+
     self.button_clear_plot = QPushButton("Clear Plot Data", plot_box)
     self.button_clear_plot.setMinimumHeight(36)
     self.button_clear_plot.setStyleSheet("background-color: #757575; color: white; font-weight: bold; font-size: 14px; padding: 6px 15px; border-radius: 4px;")
@@ -357,6 +382,8 @@ def build_status_tab(self):
     log_layout.addWidget(self.PhOperFolder, stretch=1)
     log_layout.addWidget(self.setPhOperFolder)
     log_layout.addWidget(self.check_record_log)
+    log_layout.addWidget(lbl_time_interval)
+    log_layout.addWidget(self.input_time_interval)
     log_layout.addWidget(self.button_clear_plot)
 
     plot_vlayout.addLayout(log_layout)

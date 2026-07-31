@@ -151,13 +151,26 @@ def render_status_plot(self):
     for key in stale_keys:
         self.status_plot_lines.pop(key, None)
 
-    # Dynamically update and auto-scroll live data if current view is near the live right edge (within 15s)
+    # Parse user-configured time window interval (default 60s)
+    time_win = 60.0
+    if hasattr(self, 'input_time_interval') and self.input_time_interval is not None:
+        try:
+            val = float(self.input_time_interval.text().strip())
+            if val > 0:
+                time_win = val
+        except ValueError:
+            time_win = 60.0
+
+    # Dynamically update and auto-scroll live data respecting configured time window
     curr_xlim = self.ax_status.get_xlim()
     is_at_live_edge = (max_x - curr_xlim[1]) < 15.0 or curr_xlim[1] <= curr_xlim[0] or (curr_xlim[0] == 0.0 and curr_xlim[1] == 1.0)
 
     if is_at_live_edge:
-        if min_x < max_x:
-            self.ax_status.set_xlim(min_x, max_x)
+        if max_x > 0:
+            x_start = max(0.0, max_x - time_win)
+            x_end = max_x if max_x > time_win else max(max_x, time_win)
+            if x_start < x_end:
+                self.ax_status.set_xlim(x_start, x_end)
         if min_y < max_y:
             pad = (max_y - min_y) * 0.1 if max_y != min_y else 1.0
             self.ax_status.set_ylim(min_y - pad, max_y + pad)
