@@ -1,8 +1,41 @@
 import json
 import requests
 from datetime import datetime
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
 from fcn_monitor.fcn_duet import get_clean_duet_ip, duet_request, duet_status_request
+
+
+class ConnectionWorker(QThread):
+    finished_signal = Signal(bool, object, str)
+
+    def __init__(self, main_win, ip):
+        super().__init__(main_win)
+        self.main_win = main_win
+        self.ip = ip
+        self.is_cancelled = False
+
+    def cancel(self):
+        self.is_cancelled = True
+
+    def run(self):
+        connected = False
+        error_msg = ""
+        data = None
+
+        try:
+            data, status_code = duet_status_request(self.main_win, self.ip, timeout=4)
+            if self.is_cancelled:
+                return
+            if status_code == 200:
+                connected = True
+            else:
+                error_msg = f"HTTP status {status_code}"
+        except Exception as e:
+            error_msg = str(e)
+
+        if not self.is_cancelled:
+            self.finished_signal.emit(connected, data, error_msg)
 
 
 def log_to_duet_console(self, text, color=None):
@@ -23,6 +56,7 @@ def log_to_duet_console(self, text, color=None):
 def is_axis_homed(self, axis_key):
     """
     Evaluates whether the given axis or platform degree of freedom is homed.
+    Strictly separates Cartesian Lung Phantom axes (X, Y, Z) from Motion Platform degrees of freedom (LAT, SI, AP).
     """
     if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
         return False
@@ -30,12 +64,21 @@ def is_axis_homed(self, axis_key):
     h = self.ext_axes_homed
     key = str(axis_key).upper().strip()
 
-    if key in ['XAXIS', 'LAT', 'X']:
-        return bool(h.get('X', False) or (h.get("'e", False) and h.get("'f", False)))
-    elif key in ['YAXIS', 'SI', 'Y']:
-        return bool(h.get('Y', False) or (h.get("'a", False) and (h.get("'c", False) or h.get("'b", False))))
-    elif key in ['ZAXIS', 'AP', 'Z']:
-        return bool(h.get('Z', False) or (h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)))
+    # Cartesian Lung Phantom axes (strictly X, Y, Z)
+    if key in ['X', 'LUNG_X']:
+        return bool(h.get('X', False))
+    elif key in ['Y', 'LUNG_Y']:
+        return bool(h.get('Y', False))
+    elif key in ['Z', 'LUNG_Z']:
+        return bool(h.get('Z', False))
+
+    # Motion Platform degrees of freedom (driven by platform motors 'e, 'f, 'a, 'c/'b, A, B, C, D)
+    elif key in ['LAT', 'XAXIS']:
+        return bool((h.get("'e", False) and h.get("'f", False)) or h.get('LAT', False))
+    elif key in ['SI', 'YAXIS']:
+        return bool((h.get("'a", False) and (h.get("'c", False) or h.get("'b", False))) or h.get('SI', False))
+    elif key in ['AP', 'ZAXIS']:
+        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('AP', False))
     elif key in ['ROLL']:
         return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('U', False))
     elif key in ['PITCH']:
@@ -61,8 +104,8 @@ def update_moving_button_styles(self):
             background-color: #d32f2f;
             color: white;
             font-weight: bold;
-            font-size: 16px;
-            min-height: 44px;
+            font-size: 20px;
+            min-height: 45px;
             border-radius: 6px;
             border: none;
         }
@@ -75,8 +118,8 @@ def update_moving_button_styles(self):
             background-color: #2e7d32;
             color: white;
             font-weight: bold;
-            font-size: 16px;
-            min-height: 44px;
+            font-size: 20px;
+            min-height: 45px;
             border-radius: 6px;
             border: none;
         }
@@ -345,12 +388,12 @@ def update_duet_status_ui(self, data=None):
             axes_homed = coords.get('axesHomed', [])
             xyz = coords.get('xyz', [])
 
-            # Update Cartesian Home button colors based on homed status (0=Not Homed -> GREEN, 1=Homed -> BLUE)
-            axis_map = [('X', 0), ('Y', 1), ('Z', 2)]
+            # Update Cartesian / Motion Home button colors based on is_axis_homed (Green=Not Homed, Blue=Homed)
+            axis_map = [('X', 'X'), ('Y', 'Y'), ('Z', 'Z')]
             all_homed = True
-            for name, idx in axis_map:
+            for name, ax_key in axis_map:
                 btn = getattr(self, f'HOME_{name}', None)
-                is_homed = (idx < len(axes_homed) and axes_homed[idx] == 1)
+                is_homed = is_axis_homed(self, ax_key)
                 if not is_homed:
                     all_homed = False
                 if btn is not None:
@@ -360,9 +403,10 @@ def update_duet_status_ui(self, data=None):
                                 background-color: blue;
                                 color: white;
                                 font-weight: bold;
-                                font-size: 16px;
-                                min-height: 50px;
+                                font-size: 20px;
+                                min-height: 45px;
                                 border-radius: 6px;
+                                border: none;
                             }
                             QPushButton:hover {
                                 background-color: #1565c0;
@@ -374,9 +418,10 @@ def update_duet_status_ui(self, data=None):
                                 background-color: #2e7d32;
                                 color: white;
                                 font-weight: bold;
-                                font-size: 16px;
-                                min-height: 50px;
+                                font-size: 20px;
+                                min-height: 45px;
                                 border-radius: 6px;
+                                border: none;
                             }
                             QPushButton:hover {
                                 background-color: #1b5e20;
@@ -392,9 +437,9 @@ def update_duet_status_ui(self, data=None):
                             background-color: blue;
                             color: white;
                             font-weight: bold;
-                            font-size: 16px;
-                            min-height: 50px;
+                            font-size: 20px;
                             border-radius: 6px;
+                            border: none;
                         }
                         QPushButton:hover {
                             background-color: #1565c0;
@@ -406,9 +451,9 @@ def update_duet_status_ui(self, data=None):
                             background-color: #2e7d32;
                             color: white;
                             font-weight: bold;
-                            font-size: 16px;
-                            min-height: 50px;
+                            font-size: 20px;
                             border-radius: 6px;
+                            border: none;
                         }
                         QPushButton:hover {
                             background-color: #1b5e20;
@@ -685,8 +730,8 @@ def update_connection_status_ui(self, connected=False):
                     background-color: {bg_color};
                     color: white;
                     font-weight: bold;
-                    font-size: 17px;
-                    padding: 6px 20px;
+                    font-size: 15px;
+                    padding: 0px 16px;
                     border-radius: 6px;
                 }}
             """)
@@ -776,9 +821,22 @@ def step(self, ax, plus=True):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
 
+    display_name_map = {
+        'XAXIS': 'X',
+        'YAXIS': 'Y',
+        'ZAXIS': 'Z',
+        'LAT': 'LAT',
+        'SI': 'SI',
+        'AP': 'AP',
+        'ROLL': 'Roll',
+        'PITCH': 'Pitch',
+        'YAW': 'Yaw'
+    }
+    disp_name = display_name_map.get(str(ax).upper().strip(), str(ax))
+
     if not is_axis_homed(self, ax):
-        log_to_duet_console(self, f"Error: Cannot move {ax}. Please home the axis first!", color="#ff3333")
-        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {ax}.\nPlease home the axis first!")
+        log_to_duet_console(self, f"Error: Cannot move {disp_name}. Axis {disp_name} is not homed! Please home first.", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {disp_name}.\nAxis {disp_name} is not homed.\nPlease home the axis first!")
         return
 
     step_val = getattr(self, 'global_step_val', 1.0)
@@ -1218,80 +1276,143 @@ def save_configuration(self):
         print(f"Error saving configuration.json: {e}")
 
 
-def setDuetIP(self):
+def setDuetIP(self, show_dialog=True):
     """
     Called on code startup or when user explicitly presses the Connect button.
-    Tests connection to Duet at IP address and sets self.duet_connected.
-    No automatic background reconnect attempts will occur if self.duet_connected is False.
+    Tests connection to Duet asynchronously in a background thread to prevent UI freezing.
+    Displays a modal progress dialog with a 'Cancel' button so the user can abort at any time.
     """
+    if getattr(self, '_connecting_in_progress', False):
+        return
+
     ip = get_clean_duet_ip(self)
     if hasattr(self, 'DuetIPAddress') and self.DuetIPAddress:
         self.DuetIPAddress.setText(ip)
 
     save_configuration(self)
 
-    connected = False
-    error_msg = ""
+    self._connecting_in_progress = True
+    log_to_duet_console(self, f"Connecting to Duet at http://{ip}...")
 
-    try:
-        data, status_code = duet_status_request(self, ip, timeout=6)
-        if status_code == 200:
-            connected = True
+    progress_dialog = None
+    if show_dialog:
+        progress_dialog = QProgressDialog(f"Connecting to Duet at http://{ip}...\nPlease wait.", "Cancel", 0, 0, self)
+        progress_dialog.setWindowTitle("Connecting to Duet")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setValue(0)
+        progress_dialog.setStyleSheet("""
+            QProgressDialog {
+                background-color: #ffffff;
+            }
+            QLabel {
+                font-size: 15px;
+                font-weight: bold;
+                color: #1565c0;
+                padding: 12px;
+            }
+            QPushButton {
+                background-color: #d32f2f;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 6px 18px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #b71c1c; }
+        """)
+
+    worker = ConnectionWorker(self, ip)
+    self._current_conn_worker = worker
+    if not hasattr(self, '_active_conn_workers'):
+        self._active_conn_workers = []
+    self._active_conn_workers.append(worker)
+
+    user_cancelled = False
+
+    def handle_cancel():
+        nonlocal user_cancelled
+        if worker.isRunning():
+            user_cancelled = True
+            worker.cancel()
+            self._connecting_in_progress = False
+            log_to_duet_console(self, f"Connection attempt to http://{ip} cancelled by user.", color="#ff9800")
+
+    if progress_dialog:
+        progress_dialog.canceled.connect(handle_cancel)
+
+    def handle_finished(connected, data, error_msg):
+        self._connecting_in_progress = False
+        if worker in getattr(self, '_active_conn_workers', []):
+            self._active_conn_workers.remove(worker)
+
+        if progress_dialog:
+            try:
+                progress_dialog.canceled.disconnect(handle_cancel)
+            except Exception:
+                pass
+            if progress_dialog.isVisible():
+                progress_dialog.close()
+
+        if user_cancelled or worker.is_cancelled:
+            return
+
+        self.duet_connected = connected
+        update_connection_status_ui(self, connected=connected)
+
+        if connected:
+            log_to_duet_console(self, f"Connected to Duet at http://{ip}")
+
+            # Determine machine name
+            machine_name = None
+            if isinstance(data, dict) and "name" in data:
+                machine_name = str(data["name"]).strip()
+
+            if not machine_name:
+                try:
+                    r = requests.get(f"http://{ip}/rr_model?key=network", timeout=3)
+                    if r.status_code == 200:
+                        r_json = r.json()
+                        if isinstance(r_json, dict):
+                            res_val = r_json.get("result", {})
+                            if isinstance(res_val, dict) and "hostname" in res_val:
+                                machine_name = str(res_val["hostname"]).strip()
+                except Exception:
+                    pass
+
+            if not machine_name:
+                try:
+                    r = requests.get(f"http://{ip}/machine/status", timeout=3)
+                    if r.status_code == 200:
+                        r_json = r.json()
+                        if isinstance(r_json, dict):
+                            network_val = r_json.get("network", {})
+                            if isinstance(network_val, dict) and "hostname" in network_val:
+                                machine_name = str(network_val["hostname"]).strip()
+                except Exception:
+                    pass
+
+            if machine_name:
+                log_to_duet_console(self, f"Machine name: {machine_name}")
+                if machine_name == "TRACE":
+                    if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab_platform') and self.tab_platform:
+                        self.tabWidget.setCurrentWidget(self.tab_platform)
+
+            try:
+                update_duet_status_ui(self)
+            except Exception as ex:
+                log_to_duet_console(self, f"Error: Connected, but failed to fetch status: {ex}", color="#ff3333")
         else:
-            error_msg = f"HTTP status {status_code}"
-            log_to_duet_console(self, f"Connection check returned status {status_code}")
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error testing connection to http://{ip}: {e}")
-        log_to_duet_console(self, f"Connection error: {e}")
+            log_to_duet_console(self, f"Error: Failed to connect to Duet at http://{ip}. Details: {error_msg}", color="#ff3333")
+            if show_dialog:
+                QMessageBox.warning(self, "Connection Failed",
+                                    f"Failed to connect to Duet at http://{ip}.\n\n"
+                                    f"Details: {error_msg if error_msg else 'Timed out / Unreachable'}\n\n"
+                                    "Please check the IP address and network connection.")
 
-    self.duet_connected = connected
-    update_connection_status_ui(self, connected=connected)
-
-    if connected:
-        log_to_duet_console(self, f"Connected to Duet at http://{ip}")
-        
-        # Determine machine name
-        machine_name = None
-        if isinstance(data, dict) and "name" in data:
-            machine_name = str(data["name"]).strip()
-        
-        if not machine_name:
-            try:
-                r = requests.get(f"http://{ip}/rr_model?key=network", timeout=3)
-                if r.status_code == 200:
-                    r_json = r.json()
-                    if isinstance(r_json, dict):
-                        res_val = r_json.get("result", {})
-                        if isinstance(res_val, dict) and "hostname" in res_val:
-                            machine_name = str(res_val["hostname"]).strip()
-            except Exception:
-                pass
-                
-        if not machine_name:
-            try:
-                r = requests.get(f"http://{ip}/machine/status", timeout=3)
-                if r.status_code == 200:
-                    r_json = r.json()
-                    if isinstance(r_json, dict):
-                        network_val = r_json.get("network", {})
-                        if isinstance(network_val, dict) and "hostname" in network_val:
-                            machine_name = str(network_val["hostname"]).strip()
-            except Exception:
-                pass
-
-        if machine_name:
-            log_to_duet_console(self, f"Machine name: {machine_name}")
-            if machine_name == "TRACE":
-                if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab_platform') and self.tab_platform:
-                    self.tabWidget.setCurrentWidget(self.tab_platform)
-
-        try:
-            update_duet_status_ui(self)
-        except Exception as ex:
-            log_to_duet_console(self, f"Error: Connected, but failed to fetch status: {ex}", color="#ff3333")
-    else:
-        log_to_duet_console(self, f"Error: Failed to connect to Duet at http://{ip}. Details: {error_msg}", color="#ff3333")
+    worker.finished_signal.connect(handle_finished)
+    worker.start()
 
 
 def setPhOperFolder(self):
@@ -1317,10 +1438,18 @@ def go_to_desired_positions(self):
         return
 
     # Check homing state of platform axes
-    for ax_check in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-        if not is_axis_homed(self, ax_check):
-            log_to_duet_console(self, f"Error: Cannot move platform. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
-            QMessageBox.warning(self, "Axis Not Homed", f"Cannot move platform.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
+    plat_axis_map = [
+        ('LAT', 'LAT'),
+        ('SI', 'SI'),
+        ('AP', 'AP'),
+        ('ROLL', 'Roll'),
+        ('PITCH', 'Pitch'),
+        ('YAW', 'Yaw')
+    ]
+    for ax_key, disp_name in plat_axis_map:
+        if not is_axis_homed(self, ax_key):
+            log_to_duet_console(self, f"Error: Cannot move platform. Degree of freedom {disp_name} is not homed! Please home first.", color="#ff3333")
+            QMessageBox.warning(self, "Axis Not Homed", f"Cannot move platform.\nDegree of freedom {disp_name} is not homed.\nPlease home the axis first!")
             return
 
     # 1. Retrieve target translations & rotations

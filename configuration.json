@@ -1,7 +1,7 @@
 {
     "duet_ip_address": "192.168.1.1",
-    "move_folder": "C:/Users/lars.daenen/Downloads",
-    "platform_lat_dim": "300",
-    "platform_si_dim": "500",
+    "move_folder": "",
+    "platform_lat_dim": "0.0",
+    "platform_si_dim": "0.0",
     "touchscreen_mode": false
 }

@@ -95,6 +95,19 @@ class MyApp(QMainWindow):
                     btn.setStyleSheet("QPushButton:pressed { padding-top: 3px; padding-left: 3px; }")
                 continue
 
+            # Exclude touchscreen button (already scaled in top bar block above)
+            if btn == getattr(self, 'check_touchscreen', None):
+                continue
+
+            # Exclude motion panel jog & homing buttons (they have fixed 50px heights)
+            btn_txt = btn.text().strip()
+            if any(k in btn_txt for k in ['- ', '+ ', 'Home ']) or btn_txt in ['Home ALL', 'Go to', 'Go to ...', 'Go to center']:
+                style = btn.styleSheet().strip()
+                if style and ":pressed" not in style:
+                    style += "\nQPushButton:pressed { padding-top: 3px; padding-left: 3px; }"
+                    btn.setStyleSheet(style)
+                continue
+
             # 1. Scale physical minimum height
             h = btn.minimumHeight()
             if h > 0:

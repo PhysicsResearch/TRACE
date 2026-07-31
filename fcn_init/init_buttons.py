@@ -90,6 +90,19 @@ def initialize_software_buttons(self):
     if btn_plat_all is not None:
         safe_connect(btn_plat_all, lambda _c=False: home(self, 'ALL'))
 
+    # GOTO BUTTONS (Lung Phantom axes move to target position)
+    from fcn_control.fcn_control import move
+    btn_goto_lung = getattr(self, 'btn_goto_lung', None)
+    if btn_goto_lung is not None:
+        def move_all_lung():
+            for a in ['XAXIS', 'YAXIS', 'ZAXIS']:
+                move(self, a)
+        safe_connect(btn_goto_lung, lambda _c=False: move_all_lung())
+    for axis, ax_key in [('X', 'XAXIS'), ('Y', 'YAXIS'), ('Z', 'ZAXIS')]:
+        btn = getattr(self, f'GOTO_{axis}', None)
+        if btn is not None:
+            safe_connect(btn, lambda _c=False, a=ax_key: move(self, a))
+
     # STEP BUTTONS (Cartesian & Platform axes)
     for axis in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
         for suffix in ['', '_LUNG']:

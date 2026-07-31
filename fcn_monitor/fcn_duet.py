@@ -21,28 +21,42 @@ def get_clean_duet_ip(self):
     return ip
 
 
-_shared_session = None
+import threading
+
+_thread_local = threading.local()
 
 def get_shared_session():
     """
-    Exposes the globally shared persistent session to ensure connection reuse (keep-alive)
-    across status polling and files tab uploads/downloads.
+    Returns a thread-local persistent Session to ensure connection reuse (keep-alive)
+    without multi-threaded socket access violations.
     """
-    global _shared_session
-    if _shared_session is None:
-        _shared_session = requests.Session()
-        _shared_session.trust_env = False
-    return _shared_session
+    if not hasattr(_thread_local, 'session') or _thread_local.session is None:
+        s = requests.Session()
+        s.trust_env = False
+        _thread_local.session = s
+    return _thread_local.session
 
 
 def duet_request(url, params=None, timeout=4):
     """
     Send an HTTP GET request to Duet, bypassing Windows system environment proxies
     to avoid false connection timeouts when connecting to local IP addresses.
-    Uses a globally shared Session to reuse TCP connections (keep-alive) and prevent socket exhaustion.
+    Uses a thread-local Session to reuse TCP connections (keep-alive) and prevent socket exhaustion.
+    Automatically retries once with a fresh socket if an idle keep-alive connection is reset (WinError 10054).
     """
     session = get_shared_session()
-    return session.get(url, params=params, timeout=timeout)
+    try:
+        return session.get(url, params=params, timeout=timeout)
+    except Exception:
+        # Duet closed the idle keep-alive TCP connection. Recreate session & retry once with a fresh socket.
+        if hasattr(_thread_local, 'session') and _thread_local.session:
+            try:
+                _thread_local.session.close()
+            except Exception:
+                pass
+            _thread_local.session = None
+        session = get_shared_session()
+        return session.get(url, params=params, timeout=timeout)
 
 
 def clear_status_plot(self):
@@ -260,6 +274,35 @@ def update_status_tab_dashboard(self):
         except Exception as ex:
             print(f"Error updating Control UI from status poll: {ex}")
 
+        # Poll /rr_reply for Duet messages (e.g. M117, macro responses, 'waiting for radiation')
+        try:
+            res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
+            if res_reply.status_code == 200:
+                reply_str = res_reply.text.strip()
+                if reply_str and reply_str != getattr(self, '_last_duet_reply', ''):
+                    self._last_duet_reply = reply_str
+                    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+                        self.statusDuetMessage.setText(reply_str)
+                    from fcn_control.fcn_control import log_to_duet_console
+                    log_to_duet_console(self, f"Duet Message: {reply_str}", color="#00acc1")
+        except Exception:
+            pass
+
+        # Check for message payload fields in status response (e.g. RRF object model displayMessage/message)
+        om_msg = None
+        if isinstance(data, dict):
+            om_msg = data.get("displayMessage") or data.get("message") or data.get("msg")
+            if not om_msg and "state" in data and isinstance(data["state"], dict):
+                om_msg = data["state"].get("displayMessage") or data["state"].get("message")
+        if om_msg and isinstance(om_msg, str) and om_msg.strip():
+            clean_om = om_msg.strip()
+            if clean_om != getattr(self, '_last_duet_reply', ''):
+                self._last_duet_reply = clean_om
+                if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+                    self.statusDuetMessage.setText(clean_om)
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, f"Duet Message: {clean_om}", color="#00acc1")
+
         # 1. Status Badge
         status_code = data.get("status", "I")
         self.duet_status_code = status_code
@@ -328,6 +371,15 @@ def update_status_tab_dashboard(self):
             if check_auto is not None and check_auto.isChecked() and probe > 500:
                 self.duet_status_code = 'R'  # Prevent double triggers
                 pause_continue_GCODE(self, pause=False)
+
+        # Auto pause check: if active (not paused 'S' or idle 'I'), checkbox checked, and probe == 0, auto-pause
+        if status_code not in ['S', 'I']:
+            check_pause = getattr(self, 'check_auto_pause', None)
+            if check_pause is not None and check_pause.isChecked() and probe == 0:
+                self.duet_status_code = 'S'  # Prevent double triggers
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, "Auto pause triggered: Z-probe is 0. Pausing GCODE execution.", color="#ff9800")
+                pause_continue_GCODE(self, pause=True)
 
         params = data.get("params", {})
         speed_factor = params.get("speedFactor", 100.0)
@@ -652,6 +704,20 @@ def pause_continue_GCODE(self, pause=True):
         code = "M25" if pause else "M24"
         url = f'http://{ip}/rr_gcode'
         duet_request(url, params={'gcode': code}, timeout=4)
+        
+        # Immediately fetch any console reply message sent by Duet upon pause/resume (e.g. 'waiting for radiation')
+        time.sleep(0.1)
+        try:
+            res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
+            if res_reply.status_code == 200 and res_reply.text.strip():
+                reply_text = res_reply.text.strip()
+                if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+                    self.statusDuetMessage.setText(reply_text)
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, f"Duet Message: {reply_text}", color="#00acc1")
+        except Exception:
+            pass
+
         update_status_tab_dashboard(self)
     except Exception as e:
         print(f"Exception while pausing/resuming GCODE on http://{ip}: {e}")
@@ -907,21 +973,37 @@ def duet_status_request(self, ip, timeout=5):
                         pagination_errors.append(f"Paginated request to {url_paginated} raised exception: {p_ex}")
                         break
 
-                url_cm = f'http://{ip}/rr_model?key=move.currentMove&flags=d99'
-                res_cm = duet_request(url_cm, timeout=timeout)
-                cm_json = res_cm.json().get("result", {}) if res_cm.status_code == 200 else {}
+                cm_json = {}
+                try:
+                    url_cm = f'http://{ip}/rr_model?key=move.currentMove&flags=d99'
+                    res_cm = duet_request(url_cm, timeout=timeout)
+                    cm_json = res_cm.json().get("result", {}) if res_cm.status_code == 200 else {}
+                except Exception:
+                    pass
 
-                url_state = f'http://{ip}/rr_model?key=state&flags=d99'
-                res_state = duet_request(url_state, timeout=timeout)
-                state_json = res_state.json().get("result", {}) if res_state.status_code == 200 else {}
+                state_json = {}
+                try:
+                    url_state = f'http://{ip}/rr_model?key=state&flags=d99'
+                    res_state = duet_request(url_state, timeout=timeout)
+                    state_json = res_state.json().get("result", {}) if res_state.status_code == 200 else {}
+                except Exception:
+                    pass
 
-                url_sensors = f'http://{ip}/rr_model?key=sensors&flags=d99'
-                res_sensors = duet_request(url_sensors, timeout=timeout)
-                sensors_json = res_sensors.json().get("result", {}) if res_sensors.status_code == 200 else {}
-                
-                url_job = f'http://{ip}/rr_model?key=job&flags=d99'
-                res_job = duet_request(url_job, timeout=timeout)
-                job_json = res_job.json().get("result", {}) if res_job.status_code == 200 else {}
+                sensors_json = {}
+                try:
+                    url_sensors = f'http://{ip}/rr_model?key=sensors&flags=d99'
+                    res_sensors = duet_request(url_sensors, timeout=timeout)
+                    sensors_json = res_sensors.json().get("result", {}) if res_sensors.status_code == 200 else {}
+                except Exception:
+                    pass
+
+                job_json = {}
+                try:
+                    url_job = f'http://{ip}/rr_model?key=job&flags=d99'
+                    res_job = duet_request(url_job, timeout=timeout)
+                    job_json = res_job.json().get("result", {}) if res_job.status_code == 200 else {}
+                except Exception:
+                    pass
 
                 # Dump raw responses for debugging
                 debug_data = {
@@ -972,56 +1054,78 @@ def duet_status_request(self, ip, timeout=5):
         try:
             data, code = try_request(api_mode)
             if code == 200:
+                self._api_mode_fail_count = 0
                 return data, 200
             else:
-                from fcn_control.fcn_control import log_to_duet_console
-                log_to_duet_console(self, f"Cached API mode '{api_mode}' failed with status {code}. Redetecting...", color="#ff3333")
-                self.duet_api_mode = None
+                fail_cnt = getattr(self, '_api_mode_fail_count', 0) + 1
+                self._api_mode_fail_count = fail_cnt
+                if fail_cnt >= 3:
+                    from fcn_control.fcn_control import log_to_duet_console
+                    log_to_duet_console(self, f"Cached API mode '{api_mode}' failed {fail_cnt} times. Redetecting...", color="#ff3333")
+                    self.duet_api_mode = None
+                    self._api_mode_fail_count = 0
+                else:
+                    return None, code
         except Exception as e:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Cached API mode '{api_mode}' raised exception: {e}. Redetecting...", color="#ff3333")
-            self.duet_api_mode = None
+            fail_cnt = getattr(self, '_api_mode_fail_count', 0) + 1
+            self._api_mode_fail_count = fail_cnt
+            if fail_cnt >= 3:
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, f"Cached API mode '{api_mode}' raised exception: {e}. Redetecting...", color="#ff3333")
+                self.duet_api_mode = None
+                self._api_mode_fail_count = 0
+            else:
+                return None, 500
 
     # 2. Run fallback detection
+    is_explicit_connecting = getattr(self, '_connecting_in_progress', False)
+    
     # Fallback 1: Legacy Standalone
     try:
-        from fcn_control.fcn_control import log_to_duet_console
         data, code = try_request('legacy')
         if code == 200:
             self.duet_api_mode = 'legacy'
             return data, 200
-        else:
+        elif is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
             log_to_duet_console(self, f"Legacy check failed: /rr_status?type=3 returned status {code}", color="#ff3333")
     except Exception as e:
-        from fcn_control.fcn_control import log_to_duet_console
-        log_to_duet_console(self, f"Legacy check failed: {e}", color="#ff3333")
+        if is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
+            log_to_duet_console(self, f"Legacy check failed: {e}", color="#ff3333")
 
     # Fallback 2: Modern Standalone Object Model
     try:
-        from fcn_control.fcn_control import log_to_duet_console
         data, code = try_request('model')
         if code == 200:
             self.duet_api_mode = 'model'
-            log_to_duet_console(self, "Successfully connected to standalone Duet via modern API (/rr_model)")
+            if is_explicit_connecting:
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, "Successfully connected to standalone Duet via modern API (/rr_model)")
             return data, 200
-        else:
+        elif is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
             log_to_duet_console(self, f"Modern standalone check failed: /rr_model?key=move.axes returned status {code}", color="#ff3333")
     except Exception as e:
-        from fcn_control.fcn_control import log_to_duet_console
-        log_to_duet_console(self, f"Modern standalone check failed: {e}", color="#ff3333")
+        if is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
+            log_to_duet_console(self, f"Modern standalone check failed: {e}", color="#ff3333")
 
     # Fallback 3: SBC Object Model
     try:
-        from fcn_control.fcn_control import log_to_duet_console
         data, code = try_request('sbc')
         if code == 200:
             self.duet_api_mode = 'sbc'
-            log_to_duet_console(self, "Successfully connected to Duet via SBC API (/machine/status)")
+            if is_explicit_connecting:
+                from fcn_control.fcn_control import log_to_duet_console
+                log_to_duet_console(self, "Successfully connected to Duet via SBC API (/machine/status)")
             return data, 200
-        else:
+        elif is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
             log_to_duet_console(self, f"SBC check failed: /machine/status returned status {code}", color="#ff3333")
     except Exception as e:
-        from fcn_control.fcn_control import log_to_duet_console
-        log_to_duet_console(self, f"SBC check failed: {e}", color="#ff3333")
+        if is_explicit_connecting:
+            from fcn_control.fcn_control import log_to_duet_console
+            log_to_duet_console(self, f"SBC check failed: {e}", color="#ff3333")
 
     return None, 500

@@ -85,11 +85,17 @@ def build_status_tab(self):
     # Give some spacing from Stop button
     hdr_layout.addSpacing(25)
     
-    # Add Auto-release on trigger checkbox
-    self.check_auto_release = QCheckBox("Auto-release on trigger", self.card_status)
+    # Add Auto release and Auto pause checkboxes
+    self.check_auto_release = QCheckBox("Auto release", self.card_status)
     self.check_auto_release.setChecked(False)
     self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
     hdr_layout.addWidget(self.check_auto_release)
+
+    hdr_layout.addSpacing(15)
+    self.check_auto_pause = QCheckBox("Auto pause", self.card_status)
+    self.check_auto_pause.setChecked(False)
+    self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
+    hdr_layout.addWidget(self.check_auto_pause)
     
     hdr_layout.addStretch()
     hdr_layout.addWidget(self.emergencyButton_2)
@@ -99,9 +105,34 @@ def build_status_tab(self):
     prog_row_layout = QHBoxLayout()
     prog_row_layout.setSpacing(15)
 
-    # Column 1 (Left): Progress Bar and Time Readouts stacked vertically
+    # Column 1 (Left): Duet Message, Progress Bar and Time Readouts stacked vertically
     prog_col_layout = QVBoxLayout()
-    prog_col_layout.setSpacing(4)
+    prog_col_layout.setSpacing(6)
+
+    # Duet Message readout row (aligned directly above progress bar)
+    duet_msg_row = QHBoxLayout()
+    duet_msg_row.setSpacing(10)
+    lbl_msg = QLabel("Duet Message:", self.card_status)
+    lbl_msg.setStyleSheet("font-size: 14px; font-weight: bold; color: #455a64;")
+    duet_msg_row.addWidget(lbl_msg)
+
+    self.statusDuetMessage = QLineEdit("None", self.card_status)
+    self.statusDuetMessage.setReadOnly(True)
+    self.statusDuetMessage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    self.statusDuetMessage.setMinimumHeight(36)
+    self.statusDuetMessage.setStyleSheet("""
+        QLineEdit {
+            background-color: #e0f7fa;
+            color: #006064;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #80deea;
+            border-radius: 4px;
+            padding: 2px 8px;
+        }
+    """)
+    duet_msg_row.addWidget(self.statusDuetMessage, 1)
+    prog_col_layout.addLayout(duet_msg_row)
 
     self.printProgressBar = QProgressBar(self.card_status)
     self.printProgressBar.setRange(0, 100)
