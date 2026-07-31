@@ -4,7 +4,8 @@ Main GUI construction and lazy loading orchestrator for TRACE application.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel
+from PySide6.QtGui import QPixmap
 
 from .tab_control import build_control_tab
 from .tab_status import build_status_tab
@@ -40,6 +41,19 @@ def create_gui(self):
             border-bottom: 4px solid #1565c0;
         }
     """)
+    # Add app logo icon to top left corner of main app bar
+    logo_container = QWidget(self.tabModules)
+    logo_layout = QHBoxLayout(logo_container)
+    logo_layout.setContentsMargins(12, 4, 16, 4)
+    logo_layout.setSpacing(0)
+    logo_lbl = QLabel(logo_container)
+    logo_lbl.setStyleSheet("border: none; background: transparent;")
+    logo_pix = QPixmap("assets/Open-Logo.png")
+    if not logo_pix.isNull():
+        logo_lbl.setPixmap(logo_pix.scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+    logo_layout.addWidget(logo_lbl)
+    self.tabModules.setCornerWidget(logo_container, Qt.TopLeftCorner)
+
     layout.addWidget(self.tabModules)
 
     # Instantiate page widgets

@@ -151,15 +151,33 @@ def render_status_plot(self):
     for key in stale_keys:
         self.status_plot_lines.pop(key, None)
 
-    # Adjust axis limits dynamically and safely
-    if min_y < max_y:
-        pad = (max_y - min_y) * 0.1 if max_y != min_y else 1.0
-        self.ax_status.set_ylim(min_y - pad, max_y + pad)
-    if min_x < max_x:
-        self.ax_status.set_xlim(min_x, max_x)
+    # Dynamically update and auto-scroll live data if current view is near the live right edge (within 15s)
+    curr_xlim = self.ax_status.get_xlim()
+    is_at_live_edge = (max_x - curr_xlim[1]) < 15.0 or curr_xlim[1] <= curr_xlim[0] or (curr_xlim[0] == 0.0 and curr_xlim[1] == 1.0)
 
-    if needs_legend_update or not self.ax_status.get_legend():
-        self.ax_status.legend(loc='upper right', fontsize=10, ncol=2)
+    if is_at_live_edge:
+        if min_x < max_x:
+            self.ax_status.set_xlim(min_x, max_x)
+        if min_y < max_y:
+            pad = (max_y - min_y) * 0.1 if max_y != min_y else 1.0
+            self.ax_status.set_ylim(min_y - pad, max_y + pad)
+
+    # Rebuild legend containing ONLY currently visible checked line traces
+    visible_handles = []
+    visible_labels = []
+    for cb_name, key, label, color in traces:
+        if key in self.status_plot_lines:
+            line = self.status_plot_lines[key]
+            if line.get_visible():
+                visible_handles.append(line)
+                visible_labels.append(label)
+
+    if visible_handles:
+        self.ax_status.legend(visible_handles, visible_labels, loc='upper right', fontsize=10, ncol=2)
+    else:
+        leg = self.ax_status.get_legend()
+        if leg is not None:
+            leg.remove()
 
     self.fig_status.tight_layout()
     if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
@@ -582,8 +600,8 @@ def update_status_fast(self):
         self.status_plot_data['AP'].append(current_ap)
         self.status_plot_data['SI'].append(current_si)
 
-        # Cap history buffer at 500 points
-        if len(self.status_plot_data['t']) > 500:
+        # Cap history buffer at 100,000 points to retain full plot history for panning & zoom inspection
+        if len(self.status_plot_data['t']) > 100000:
             for k in self.status_plot_data.keys():
                 self.status_plot_data[k].pop(0)
 

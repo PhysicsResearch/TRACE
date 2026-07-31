@@ -605,6 +605,7 @@ def build_platform_subtab(self):
     layout.setSpacing(6)
 
     table_frame = QFrame(self.tab_platform)
+    table_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     table_frame.setStyleSheet("QFrame { border: 1px solid #cfd8dc; border-radius: 6px; background-color: #ffffff; }")
     grid = QGridLayout(table_frame)
     grid.setContentsMargins(12, 10, 12, 10)
@@ -623,6 +624,11 @@ def build_platform_subtab(self):
     grid.setColumnStretch(7, 1) # Block 2: Target Pos
     grid.setColumnStretch(8, 2) # Block 2: Jog -
     grid.setColumnStretch(9, 2) # Block 2: Jog +
+
+    grid.setRowStretch(0, 0) # Headers
+    grid.setRowStretch(1, 1) # Row 1: LAT & SI
+    grid.setRowStretch(2, 1) # Row 2: AP & Roll
+    grid.setRowStretch(3, 1) # Row 3: Pitch & Yaw
 
     # Row 0: Headers
     headers_b1 = ["Axis", "Current", "Target", "Jog -", "Jog +"]
@@ -713,11 +719,13 @@ def build_platform_subtab(self):
 
         btn_min1 = QPushButton(f"- {name1}", table_frame)
         btn_min1.setStyleSheet(button_style)
+        btn_min1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         setattr(self, f"MIN_{axis1}", btn_min1)
         grid.addWidget(btn_min1, row_idx, 3)
 
         btn_plus1 = QPushButton(f"+ {name1}", table_frame)
         btn_plus1.setStyleSheet(button_style)
+        btn_plus1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         setattr(self, f"PLUS_{axis1}", btn_plus1)
         grid.addWidget(btn_plus1, row_idx, 4)
 
@@ -764,11 +772,13 @@ def build_platform_subtab(self):
 
         btn_min2 = QPushButton(f"- {name2}", table_frame)
         btn_min2.setStyleSheet(button_style)
+        btn_min2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         setattr(self, f"MIN_{axis2}", btn_min2)
         grid.addWidget(btn_min2, row_idx, 8)
 
         btn_plus2 = QPushButton(f"+ {name2}", table_frame)
         btn_plus2.setStyleSheet(button_style)
+        btn_plus2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         setattr(self, f"PLUS_{axis2}", btn_plus2)
         grid.addWidget(btn_plus2, row_idx, 9)
 
@@ -957,6 +967,7 @@ def build_external_motors_subtab(self):
 
     # Main Panel Frame
     main_frame = QFrame(self.tab_4)
+    main_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     main_frame.setStyleSheet("QFrame { border: 1px solid #cfd8dc; border-radius: 6px; background-color: #ffffff; }")
     frame_layout = QVBoxLayout(main_frame)
     frame_layout.setContentsMargins(14, 12, 14, 12)
@@ -985,10 +996,16 @@ def build_external_motors_subtab(self):
     for col in range(7):
         grid_axes.setColumnStretch(col, 1)
 
+    grid_axes.setRowStretch(0, 2)
+    grid_axes.setRowStretch(1, 0)
+    grid_axes.setRowStretch(2, 2)
+    grid_axes.setRowStretch(3, 2)
+
     # --- LINE 1: A, B, C, D, X, Y, Z (Row 0 = Buttons, Row 1 = Curr Pos) ---
     for idx, axis_name in enumerate(line1_axes):
         btn = QPushButton(f"{axis_name}", main_frame)
         btn.setCheckable(True)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         btn.setMinimumHeight(44)
         btn.setFont(QFont("Arial", 13, QFont.Bold))
         btn.clicked.connect(lambda _c=False, a=axis_name: select_external_axis(self, a))
@@ -1016,6 +1033,7 @@ def build_external_motors_subtab(self):
     for idx, axis_name in enumerate(line2_axes):
         btn = QPushButton(f"{axis_name}", main_frame)
         btn.setCheckable(True)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         btn.setMinimumHeight(44)
         btn.setFont(QFont("Arial", 13, QFont.Bold))
         btn.clicked.connect(lambda _c=False, a=axis_name: select_external_axis(self, a))
@@ -1064,6 +1082,7 @@ def build_external_motors_subtab(self):
 
     self.btn_move_ext = QPushButton("Move Axis", main_frame)
     self.btn_move_ext.setMinimumHeight(44)
+    self.btn_move_ext.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.btn_move_ext.setStyleSheet("""
         QPushButton {
             background-color: #d32f2f;
@@ -1077,6 +1096,7 @@ def build_external_motors_subtab(self):
 
     self.btn_home_ext = QPushButton("Home Axis A", main_frame)
     self.btn_home_ext.setMinimumHeight(44)
+    self.btn_home_ext.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     self.btn_home_ext.setStyleSheet("""
         QPushButton {
             background-color: #2e7d32;
@@ -1102,6 +1122,8 @@ def build_external_motors_subtab(self):
 
     self.btn_ext_jog_min = QPushButton("- Axis A", main_frame)
     self.btn_ext_jog_plus = QPushButton("+ Axis A", main_frame)
+    self.btn_ext_jog_min.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+    self.btn_ext_jog_plus.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     jog_btn_style = """
         QPushButton {
@@ -1123,7 +1145,6 @@ def build_external_motors_subtab(self):
 
     frame_layout.addLayout(grid_axes)
     layout.addWidget(main_frame)
-    layout.addStretch()
 
     # Select initial axis 'A'
     select_external_axis(self, 'A')

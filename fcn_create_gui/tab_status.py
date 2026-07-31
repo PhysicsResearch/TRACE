@@ -76,105 +76,15 @@ def build_status_tab(self):
     self.emergencyButton_2.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 15px; border-radius: 4px;")
     self.emergencyButton_2.setFixedSize(160, 38)
 
-    hdr_layout.addWidget(hdr_label)
-    hdr_layout.addWidget(self.statusBadgeLabel)
-    hdr_layout.addWidget(self.gcodePause)
-    hdr_layout.addWidget(self.gcodeResume)
-    hdr_layout.addWidget(self.gcodeStopJob)
-    
-    # Give some spacing from Stop button
-    hdr_layout.addSpacing(25)
-    
-    # Add Auto release and Auto pause checkboxes
-    self.check_auto_release = QCheckBox("Auto release", self.card_status)
-    self.check_auto_release.setChecked(False)
-    self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
-    hdr_layout.addWidget(self.check_auto_release)
-
-    hdr_layout.addSpacing(15)
-    self.check_auto_pause = QCheckBox("Auto pause", self.card_status)
-    self.check_auto_pause.setChecked(False)
-    self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
-    hdr_layout.addWidget(self.check_auto_pause)
-    
-    hdr_layout.addStretch()
-    hdr_layout.addWidget(self.emergencyButton_2)
-    card_layout.addLayout(hdr_layout)
-
-    # Progress Bar and Speed Control Layout (Horizontal alignment layout)
-    prog_row_layout = QHBoxLayout()
-    prog_row_layout.setSpacing(15)
-
-    # Column 1 (Left): Duet Message, Progress Bar and Time Readouts stacked vertically
-    prog_col_layout = QVBoxLayout()
-    prog_col_layout.setSpacing(6)
-
-    # Duet Message readout row (aligned directly above progress bar)
-    duet_msg_row = QHBoxLayout()
-    duet_msg_row.setSpacing(10)
-    lbl_msg = QLabel("Duet Message:", self.card_status)
-    lbl_msg.setStyleSheet("font-size: 14px; font-weight: bold; color: #455a64;")
-    duet_msg_row.addWidget(lbl_msg)
-
-    self.statusDuetMessage = QLineEdit("None", self.card_status)
-    self.statusDuetMessage.setReadOnly(True)
-    self.statusDuetMessage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    self.statusDuetMessage.setMinimumHeight(36)
-    self.statusDuetMessage.setStyleSheet("""
-        QLineEdit {
-            background-color: #e0f7fa;
-            color: #006064;
-            font-weight: bold;
-            font-size: 14px;
-            border: 1px solid #80deea;
-            border-radius: 4px;
-            padding: 2px 8px;
-        }
-    """)
-    duet_msg_row.addWidget(self.statusDuetMessage, 1)
-    prog_col_layout.addLayout(duet_msg_row)
-
-    self.printProgressBar = QProgressBar(self.card_status)
-    self.printProgressBar.setRange(0, 100)
-    self.printProgressBar.setValue(0)
-    self.printProgressBar.setTextVisible(True)
-    self.printProgressBar.setStyleSheet("""
-        QProgressBar {
-            border: 1px solid #b0bec5;
-            border-radius: 4px;
-            text-align: center;
-            height: 24px;
-            font-weight: bold;
-        }
-        QProgressBar::chunk {
-            background-color: #4caf50;
-            border-radius: 3px;
-        }
-    """)
-
-    time_info_layout = QHBoxLayout()
-    self.labelPrintDuration = QLabel("Print Duration: 00:00:00", self.card_status)
-    self.labelPrintDuration.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
-    
-    self.labelTimeRemaining = QLabel("Time Remaining: --:--:--", self.card_status)
-    self.labelTimeRemaining.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
-
-    time_info_layout.addWidget(self.labelPrintDuration)
-    time_info_layout.addStretch()
-    time_info_layout.addWidget(self.labelTimeRemaining)
-
-    prog_col_layout.addWidget(self.printProgressBar)
-    prog_col_layout.addLayout(time_info_layout)
-
     # Column 2 (Right): Speed Factor controls (Label + Editable QLineEdit + min/plus buttons)
-    sf_col_layout = QHBoxLayout()
-    sf_col_layout.setSpacing(6)
+    sf_hlayout = QHBoxLayout()
+    sf_hlayout.setSpacing(6)
 
     label_sf = QLabel("Speed Factor:")
     label_sf.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
 
     self.labelSf = QLineEdit("100%", self.card_status)
-    self.labelSf.setFixedWidth(130)
+    self.labelSf.setFixedWidth(80)
     self.labelSf.setStyleSheet("font-weight: bold; font-size: 14px; color: #2e7d32; padding: 2px;")
     
     # Restrict input to floats between 10.0 and 300.0 with up to 3 decimal places
@@ -223,14 +133,125 @@ def build_status_tab(self):
     self.minSf.clicked.connect(lambda: adjust_speed(-1.0))
     self.plusSf.clicked.connect(lambda: adjust_speed(1.0))
 
-    sf_col_layout.addWidget(label_sf)
-    sf_col_layout.addWidget(self.labelSf)
-    sf_col_layout.addWidget(self.minSf)
-    sf_col_layout.addWidget(self.plusSf)
+    # 1. TOP ROW: Proportional 1/3 and 2/3 column layout matching the Progress Bar and Duet Message field below
+    hdr_layout = QHBoxLayout()
+    hdr_layout.setSpacing(15)
 
-    prog_row_layout.addLayout(prog_col_layout, stretch=1)
-    prog_row_layout.addLayout(sf_col_layout)
-    card_layout.addLayout(prog_row_layout)
+    # Left 1/3 column: Status badge on left, Pause, Resume, Stop buttons aligned so Stop ends at 1/3 width (end of progress bar)
+    top_left_box = QHBoxLayout()
+    top_left_box.setContentsMargins(0, 0, 0, 0)
+    top_left_box.addWidget(hdr_label)
+    top_left_box.addWidget(self.statusBadgeLabel)
+    top_left_box.addStretch()
+    top_left_box.addWidget(self.gcodePause)
+    top_left_box.addWidget(self.gcodeResume)
+    top_left_box.addWidget(self.gcodeStopJob)
+
+    # Right 2/3 column: Speed Factor tightly grouped on left next to field, Auto release, Auto pause, Emergency STOP on right
+    top_right_box = QHBoxLayout()
+    top_right_box.setContentsMargins(0, 0, 0, 0)
+    
+    sf_hlayout = QHBoxLayout()
+    sf_hlayout.setSpacing(4)
+    sf_hlayout.addWidget(label_sf)
+    sf_hlayout.addWidget(self.labelSf)
+    sf_hlayout.addWidget(self.minSf)
+    sf_hlayout.addWidget(self.plusSf)
+
+    top_right_box.addLayout(sf_hlayout)
+    top_right_box.addSpacing(25)
+
+    # Add Auto release and Auto pause checkboxes
+    self.check_auto_release = QCheckBox("Auto release", self.card_status)
+    self.check_auto_release.setChecked(False)
+    self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
+    top_right_box.addWidget(self.check_auto_release)
+
+    top_right_box.addSpacing(15)
+    self.check_auto_pause = QCheckBox("Auto pause", self.card_status)
+    self.check_auto_pause.setChecked(False)
+    self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
+    top_right_box.addWidget(self.check_auto_pause)
+
+    top_right_box.addStretch()
+    top_right_box.addWidget(self.emergencyButton_2)
+
+    hdr_layout.addLayout(top_left_box, stretch=1)
+    hdr_layout.addLayout(top_right_box, stretch=2)
+
+    card_layout.addLayout(hdr_layout)
+
+    # 2. HEADER TEXT ROW (ABOVE FIELDS): Print Duration & Time Remaining above Progress Bar (1/3), Duet Message label above Duet Message field (2/3)
+    top_info_layout = QHBoxLayout()
+    top_info_layout.setSpacing(15)
+
+    self.labelPrintDuration = QLabel("Print Duration: 00:00:00", self.card_status)
+    self.labelPrintDuration.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
+    
+    self.labelTimeRemaining = QLabel("Time Remaining: --:--:--", self.card_status)
+    self.labelTimeRemaining.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
+
+    lbl_msg = QLabel("Duet Message:", self.card_status)
+    lbl_msg.setStyleSheet("font-size: 14px; font-weight: bold; color: #455a64;")
+
+    # Left 1/3 column for Print Duration & Time Remaining (aligned with right end of progress bar)
+    prog_info_box = QHBoxLayout()
+    prog_info_box.addWidget(self.labelPrintDuration)
+    prog_info_box.addStretch()
+    prog_info_box.addWidget(self.labelTimeRemaining)
+
+    # Right 2/3 column for Duet Message label
+    duet_info_box = QHBoxLayout()
+    duet_info_box.addWidget(lbl_msg)
+    duet_info_box.addStretch()
+
+    top_info_layout.addLayout(prog_info_box, stretch=1)
+    top_info_layout.addLayout(duet_info_box, stretch=2)
+
+    card_layout.addLayout(top_info_layout)
+
+    # 3. INTERACTIVE FIELDS ROW: Progress bar on left (1/3 width = 0.5 of Duet message), Duet Message entry field on right (2/3 width)
+    prog_duet_row = QHBoxLayout()
+    prog_duet_row.setSpacing(15)
+
+    self.printProgressBar = QProgressBar(self.card_status)
+    self.printProgressBar.setRange(0, 100)
+    self.printProgressBar.setValue(0)
+    self.printProgressBar.setTextVisible(True)
+    self.printProgressBar.setStyleSheet("""
+        QProgressBar {
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            text-align: center;
+            height: 32px;
+            font-weight: bold;
+        }
+        QProgressBar::chunk {
+            background-color: #4caf50;
+            border-radius: 3px;
+        }
+    """)
+
+    self.statusDuetMessage = QLineEdit("None", self.card_status)
+    self.statusDuetMessage.setReadOnly(True)
+    self.statusDuetMessage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    self.statusDuetMessage.setMinimumHeight(32)
+    self.statusDuetMessage.setStyleSheet("""
+        QLineEdit {
+            background-color: #e0f7fa;
+            color: #006064;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #80deea;
+            border-radius: 4px;
+            padding: 2px 8px;
+        }
+    """)
+
+    prog_duet_row.addWidget(self.printProgressBar, stretch=1)
+    prog_duet_row.addWidget(self.statusDuetMessage, stretch=2)
+
+    card_layout.addLayout(prog_duet_row)
 
     # Section: Tool Position & Speeds & Other Axes
     metrics_grid = QGridLayout()

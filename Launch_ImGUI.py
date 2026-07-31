@@ -3,7 +3,7 @@ faulthandler.enable()
 os.environ.setdefault("QT_OPENGL", "software")  # safer on RDP/VM
 
 from PySide6.QtCore import Qt, QCoreApplication
-from PySide6.QtGui import QSurfaceFormat
+from PySide6.QtGui import QSurfaceFormat, QIcon, QPixmap
 from PySide6.QtWidgets import QMainWindow, QMenu
 
 # Force software GL (stable on many Windows setups)
@@ -284,22 +284,30 @@ if __name__ == "__main__":
         }
     """)
 
+    # Set application window icon
+    app_icon = QIcon("assets/Open-Logo.png")
+    app.setWindowIcon(app_icon)
+
     # --- Show splash ASAP ---
-    pix = QPixmap(":/assets/Open-Logo.png")
+    pix = QPixmap("assets/Open-Logo.png")
     if pix.isNull():
-        pix = QPixmap(600, 300)  # fallback
-        pix.fill(Qt.black)
+        pix = QPixmap(300, 300)
+        pix.fill(Qt.transparent)
+    else:
+        pix = pix.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     splash = QSplashScreen(pix)
-    splash.showMessage("Starting TRACE…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.white)
+    splash.setStyleSheet("background: transparent;")
+    splash.showMessage("Starting TRACE…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.black)
     splash.show()
     app.processEvents()  # let splash paint immediately
 
     # --- Create main window ---
     folder_path = sys.argv[1] if len(sys.argv) > 1 else None
     window = MyApp(folder_path)
+    window.setWindowIcon(app_icon)
 
     app.setStyle('Fusion')
-    splash.showMessage("Loading UI…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.white)
+    splash.showMessage("Loading UI…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.black)
     app.processEvents()
 
     # --- Show window and close splash ---
