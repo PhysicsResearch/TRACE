@@ -53,7 +53,11 @@ def build_status_tab(self):
         }
     """)
 
-    # GCode Pause / Resume / Stop Job Buttons (Uniformly Sized to match Emergency STOP height)
+    # GCode Start / Pause / Resume / Stop Job Buttons (Uniformly Sized to match Emergency STOP height)
+    self.gcodeStart = QPushButton("Start", self.card_status)
+    self.gcodeStart.setFixedSize(85, 38)
+    self.gcodeStart.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; font-size: 14px; border-radius: 4px;")
+
     self.gcodePause = QPushButton("Pause", self.card_status)
     self.gcodePause.setFixedSize(85, 38)
     self.gcodePause.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 14px; border-radius: 4px;")
@@ -67,7 +71,8 @@ def build_status_tab(self):
     self.gcodeStopJob.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; font-size: 14px; border-radius: 4px;")
 
     # Connect buttons
-    from fcn_monitor.fcn_duet import pause_continue_GCODE, cancel_GCODE_job
+    from fcn_monitor.fcn_duet import pause_continue_GCODE, cancel_GCODE_job, start_selected_gcode_execution
+    self.gcodeStart.clicked.connect(lambda: start_selected_gcode_execution(self))
     self.gcodePause.clicked.connect(lambda: pause_continue_GCODE(self, pause=True))
     self.gcodeResume.clicked.connect(lambda: pause_continue_GCODE(self, pause=False))
     self.gcodeStopJob.clicked.connect(lambda: cancel_GCODE_job(self))
@@ -137,12 +142,13 @@ def build_status_tab(self):
     hdr_layout = QHBoxLayout()
     hdr_layout.setSpacing(15)
 
-    # Left 1/3 column: Status badge on left, Pause, Resume, Stop buttons aligned so Stop ends at 1/3 width (end of progress bar)
+    # Left 1/3 column: Status badge on left, Start, Pause, Resume, Stop buttons aligned so Stop ends at 1/3 width (end of progress bar)
     top_left_box = QHBoxLayout()
     top_left_box.setContentsMargins(0, 0, 0, 0)
     top_left_box.addWidget(hdr_label)
     top_left_box.addWidget(self.statusBadgeLabel)
     top_left_box.addStretch()
+    top_left_box.addWidget(self.gcodeStart)
     top_left_box.addWidget(self.gcodePause)
     top_left_box.addWidget(self.gcodeResume)
     top_left_box.addWidget(self.gcodeStopJob)
@@ -352,7 +358,31 @@ def build_status_tab(self):
     self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.txt)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
 
-    # Time interval control (placed between checkbox and clear plot button)
+    # Reference Time Offset control (placed to the left of Time interval)
+    lbl_ref_offset = QLabel("Ref. Offset (s):", plot_box)
+    lbl_ref_offset.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
+
+    self.input_ref_offset = QLineEdit("0", plot_box)
+    self.input_ref_offset.setFixedWidth(65)
+    self.input_ref_offset.setStyleSheet("""
+        QLineEdit {
+            background-color: #ffffff;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            padding: 4px 6px;
+            color: #2e7d32;
+        }
+    """)
+    from PySide6.QtGui import QDoubleValidator
+    validator_offset = QDoubleValidator(-1000.0, 1000.0, 2, self.input_ref_offset)
+    validator_offset.setNotation(QDoubleValidator.StandardNotation)
+    self.input_ref_offset.setValidator(validator_offset)
+    register_touch_line_edit(self, self.input_ref_offset, label_name="Ref. Offset (s)")
+    self.input_ref_offset.textChanged.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
+
+    # Time interval control (placed between offset and clear plot button)
     lbl_time_interval = QLabel("Time interval (s):", plot_box)
     lbl_time_interval.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
 
@@ -382,6 +412,8 @@ def build_status_tab(self):
     log_layout.addWidget(self.PhOperFolder, stretch=1)
     log_layout.addWidget(self.setPhOperFolder)
     log_layout.addWidget(self.check_record_log)
+    log_layout.addWidget(lbl_ref_offset)
+    log_layout.addWidget(self.input_ref_offset)
     log_layout.addWidget(lbl_time_interval)
     log_layout.addWidget(self.input_time_interval)
     log_layout.addWidget(self.button_clear_plot)
@@ -414,6 +446,25 @@ def build_status_tab(self):
     v_checks_layout = QVBoxLayout(self.status_checks_container)
     v_checks_layout.setContentsMargins(0, 0, 0, 0)
     v_checks_layout.setSpacing(2)
+
+    # Show reference checkbox (always visible next to the plot)
+    self.check_show_reference = QCheckBox("Show reference", self.status_checks_container)
+    self.check_show_reference.setChecked(False)
+    self.check_show_reference.setVisible(True)
+    self.check_show_reference.setStyleSheet("QCheckBox { font-weight: bold; font-size: 15px; color: #1565c0; margin-bottom: 4px; }")
+
+    def on_show_reference_toggled(checked):
+        if checked:
+            from fcn_monitor.fcn_duet import auto_load_current_gcode_reference, render_status_plot
+            if getattr(self, 'status_reference_data', None) is None:
+                auto_load_current_gcode_reference(self)
+            render_status_plot(self)
+        else:
+            from fcn_monitor.fcn_duet import render_status_plot
+            render_status_plot(self)
+
+    self.check_show_reference.toggled.connect(on_show_reference_toggled)
+    v_checks_layout.addWidget(self.check_show_reference)
 
     checkbox_specs = [
         # (attribute, label, color)

@@ -2,6 +2,7 @@
 import os
 import time
 import math
+import numpy as np
 import requests
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox
@@ -82,16 +83,25 @@ def render_status_plot(self):
         return
 
     plot_data = getattr(self, 'status_plot_data', None)
-    if plot_data is None:
-        return
+    t_data = plot_data.get('t', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
 
-    t_data = plot_data.get('t', [])
-    if not t_data or len(t_data) == 0:
+    show_ref = False
+    if hasattr(self, 'check_show_reference') and self.check_show_reference is not None and self.check_show_reference.isChecked():
+        show_ref = True
+
+    ref_data = getattr(self, 'status_reference_data', None)
+
+    # If no live data and no reference data, exit early
+    if len(t_data) == 0 and not (show_ref and ref_data is not None):
         return
 
     # Keep track of active line handles in self.status_plot_lines dict
     if not hasattr(self, 'status_plot_lines'):
         self.status_plot_lines = {}
+
+    # Keep track of active reference line handles
+    if not hasattr(self, 'status_ref_lines'):
+        self.status_ref_lines = {}
 
     traces = [
         ('status_check_X', 'X', 'X (mm)', '#1e88e5'),
@@ -114,14 +124,15 @@ def render_status_plot(self):
     ]
 
     needs_legend_update = False
-    min_x, max_x = t_data[0], t_data[-1]
+    min_x = t_data[0] if len(t_data) > 0 else 0.0
+    max_x = t_data[-1] if len(t_data) > 0 else (ref_data.get('t', [60.0])[-1] if (ref_data and 't' in ref_data and len(ref_data['t']) > 0) else 60.0)
     min_y, max_y = 1e9, -1e9
 
     for cb_name, key, label, color in traces:
         cb = getattr(self, cb_name, None)
         if cb is not None and cb.isChecked():
-            data_list = plot_data.get(key, [])
-            if len(data_list) == len(t_data):
+            data_list = plot_data.get(key, []) if (plot_data is not None and isinstance(plot_data, dict)) else []
+            if len(data_list) > 0 and len(data_list) == len(t_data):
                 # Calculate Y limits for checked lines
                 min_y = min(min_y, min(data_list))
                 max_y = max(max_y, max(data_list))
@@ -136,12 +147,46 @@ def render_status_plot(self):
                     line, = self.ax_status.plot(t_data, data_list, label=label, color=color, linewidth=1.5)
                     self.status_plot_lines[key] = line
                     needs_legend_update = True
+            else:
+                if key in self.status_plot_lines:
+                    self.status_plot_lines[key].set_visible(False)
+
+            # Draw expected reference value using same color with a dashed line (--)
+            if show_ref and ref_data is not None and key in ref_data:
+                ref_t = ref_data.get('t', [])
+                ref_vals = ref_data.get(key, [])
+                if len(ref_t) > 0 and len(ref_vals) == len(ref_t):
+                    # Read reference time offset (default 0.0s)
+                    ref_offset = 0.0
+                    if hasattr(self, 'input_ref_offset') and self.input_ref_offset is not None:
+                        try:
+                            ref_offset = float(self.input_ref_offset.text().strip())
+                        except ValueError:
+                            ref_offset = 0.0
+
+                    ref_t_shifted = np.asarray(ref_t, dtype=float) + ref_offset
+                    min_y = min(min_y, min(ref_vals))
+                    max_y = max(max_y, max(ref_vals))
+                    if key in self.status_ref_lines:
+                        rline = self.status_ref_lines[key]
+                        rline.set_data(ref_t_shifted, ref_vals)
+                        rline.set_visible(True)
+                    else:
+                        rline, = self.ax_status.plot(ref_t_shifted, ref_vals, linestyle='--', color=color, linewidth=1.5, alpha=0.85)
+                        self.status_ref_lines[key] = rline
+            else:
+                if key in self.status_ref_lines:
+                    if self.status_ref_lines[key].get_visible():
+                        self.status_ref_lines[key].set_visible(False)
         else:
             # If the trace is unchecked, make the line invisible if it exists
             if key in self.status_plot_lines:
                 if self.status_plot_lines[key].get_visible():
                     self.status_plot_lines[key].set_visible(False)
                     needs_legend_update = True
+            if key in self.status_ref_lines:
+                if self.status_ref_lines[key].get_visible():
+                    self.status_ref_lines[key].set_visible(False)
 
     # Remove stale lines that are not in the dictionary anymore
     stale_keys = []
@@ -209,14 +254,234 @@ def clear_status_plot_data(self):
     }
     if hasattr(self, 'status_plot_lines'):
         self.status_plot_lines.clear()
+    if hasattr(self, 'status_ref_lines'):
+        self.status_ref_lines.clear()
     if hasattr(self, 'ax_status') and self.ax_status is not None:
         self.ax_status.clear()
         self.ax_status.set_xlabel("Time (s)", fontsize=13, fontweight='bold')
-        self.ax_status.set_ylabel("Position (mm / deg)", fontsize=13, fontweight='bold')
+        self.ax_status.set_ylabel("Position (mm)", fontsize=13, fontweight='bold')
         self.ax_status.tick_params(axis='both', which='major', labelsize=11)
         self.ax_status.grid(True, linestyle=":", alpha=0.6)
-    if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
-        self.statusCanvas.draw_idle()
+        if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
+            self.statusCanvas.draw_idle()
+
+
+def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None):
+    """
+    Parses GCode string or file path into a dictionary of reference traces:
+    t, X, Y, Z, A, B, C, D, 'e, 'f, 'a, 'c, LAT, SI, AP, Roll, Pitch, Yaw.
+    Accepts an optional progress_dialog (QProgressDialog) to display parsing progress.
+    """
+    import os
+    import re
+    import pandas as pd
+    import numpy as np
+    from fcn_plan.fcn_create import _reverse_motion_platform_kinematics
+
+    lines = []
+    if isinstance(fpath_or_content, str) and os.path.exists(fpath_or_content):
+        try:
+            with open(fpath_or_content, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        except Exception:
+            lines = []
+    elif isinstance(fpath_or_content, str):
+        lines = fpath_or_content.splitlines()
+
+    if not lines:
+        return None
+
+    pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
+    data_rows = []
+    current_time = 0.0
+    current_feedrate = 1000.0
+    last_vals = {}
+    num_lines = len(lines)
+
+    for idx, line in enumerate(lines):
+        if progress_dialog is not None and num_lines > 0 and idx % 200 == 0:
+            pct = 50 + int((idx / num_lines) * 45)
+            progress_dialog.setValue(pct)
+            from PySide6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+            if progress_dialog.wasCanceled():
+                return None
+
+        line_clean = line.split(';')[0].strip()
+        if not line_clean:
+            continue
+        if line_clean.startswith('G1'):
+            row_data = {}
+            matches = pattern.findall(line_clean)
+            for axis, val in matches:
+                if axis == 'F':
+                    current_feedrate = float(val)
+                elif axis != 'G':
+                    # Normalize single-letter axes a,b,c,d,x,y,z to uppercase A,B,C,D,X,Y,Z
+                    norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
+                    row_data[norm_axis] = float(val)
+            
+            # Primary motion axes for distance computation to prevent double-counting secondary axes
+            primary_axes = [ax for ax in ['A', 'B', 'C', 'D'] if ax in row_data]
+            if not primary_axes:
+                primary_axes = [ax for ax in ['X', 'Y', 'Z'] if ax in row_data]
+            if not primary_axes:
+                primary_axes = [ax for ax in row_data.keys() if ax != 'F']
+
+            dist_sq = 0.0
+            has_movement = False
+            for axis in primary_axes:
+                prev_val = last_vals.get(axis, None)
+                if prev_val is not None:
+                    diff = row_data[axis] - prev_val
+                    dist_sq += diff * diff
+                    has_movement = True
+
+            dist = np.sqrt(dist_sq) if has_movement else 0.0
+            dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
+            current_time += dt
+
+            for axis, val in row_data.items():
+                last_vals[axis] = val
+            for axis, val in last_vals.items():
+                if axis not in row_data:
+                    row_data[axis] = val
+
+            row_data['time'] = current_time
+            row_data['timestamp'] = current_time * 1000.0
+            row_data['Command'] = ""
+            data_rows.append(row_data)
+        elif line_clean.startswith('G4'):
+            p_match = re.search(r'[pP](\d+)', line_clean)
+            if p_match:
+                ms = float(p_match.group(1))
+                current_time += (ms / 1000.0)
+                if last_vals:
+                    dwell_row = {axis: val for axis, val in last_vals.items()}
+                    dwell_row['time'] = current_time
+                    dwell_row['timestamp'] = current_time * 1000.0
+                    dwell_row['Command'] = ""
+                    data_rows.append(dwell_row)
+
+    if not data_rows:
+        return None
+
+    df = pd.DataFrame(data_rows)
+    for col in df.columns:
+        if col not in ['Command', 'time', 'timestamp']:
+            df[col] = df[col].ffill().bfill().fillna(0.0)
+
+    # Ensure reference timeline is anchored at t=0.0
+    if df['time'].iloc[0] > 0.0:
+        first_row = df.iloc[0].copy()
+        first_row['time'] = 0.0
+        first_row['timestamp'] = 0.0
+        df = pd.concat([pd.DataFrame([first_row]), df], ignore_index=True)
+
+    t_max = df['time'].max()
+    if t_max > 0.0:
+        t_grid = np.arange(0.0, t_max + 0.005, 0.02)
+        resampled = {'time': t_grid, 'timestamp': t_grid * 1000.0, 'Command': [""] * len(t_grid)}
+        exclude = {'time', 'timestamp', 'Command'}
+        for c in [col for col in df.columns if col not in exclude]:
+            resampled[c] = np.interp(t_grid, df['time'].values, df[c].values)
+        df = pd.DataFrame(resampled)
+
+    # Calculate motion platform kinematics if A, B, C, D present
+    if 'A' in df.columns and 'B' in df.columns and 'C' in df.columns and 'D' in df.columns:
+        df_kin = _reverse_motion_platform_kinematics(self, df)
+        for kin_col in ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']:
+            if kin_col in df_kin.columns:
+                df[kin_col] = df_kin[kin_col].values
+
+    ref_dict = {'t': df['time'].values}
+    for col in df.columns:
+        if col not in ['time', 'timestamp', 'Command']:
+            ref_dict[col] = df[col].values
+
+    return ref_dict
+
+
+def auto_load_current_gcode_reference(self):
+    """Attempts to fetch the active or last GCODE filename from Duet and load its reference data."""
+    if getattr(self, 'status_reference_data', None) is not None:
+        return True
+    filename = get_curr_file(self, init=False)
+    if not filename:
+        return False
+
+    from PySide6.QtWidgets import QProgressDialog
+    from PySide6.QtCore import Qt, QCoreApplication
+
+    fname = os.path.basename(filename)
+    progress = QProgressDialog(f"Loading reference plot data from '{fname}'...", "Cancel", 0, 100, self)
+    progress.setWindowTitle("Loading Reference Data")
+    progress.setWindowModality(Qt.WindowModal)
+    progress.setMinimumWidth(520)
+    progress.setMinimumHeight(160)
+    progress.setStyleSheet("""
+        QProgressDialog { font-size: 16px; font-weight: bold; }
+        QLabel { font-size: 16px; min-height: 35px; }
+        QProgressBar { text-align: center; font-size: 16px; font-weight: bold; height: 30px; border-radius: 4px; }
+        QPushButton { font-size: 16px; font-weight: bold; min-width: 100px; min-height: 38px; border-radius: 4px; }
+    """)
+    progress.setValue(10)
+    progress.show()
+    QCoreApplication.processEvents()
+
+    ip = get_clean_duet_ip(self)
+    dl_url = f'http://{ip}/rr_download?name=/gcodes/{filename.strip("/")}'
+    try:
+        res = duet_request(dl_url, timeout=5)
+        progress.setValue(50)
+        QCoreApplication.processEvents()
+        if res.status_code == 200 and res.text:
+            ref_dict = load_and_parse_gcode_reference(self, res.text, progress_dialog=progress)
+            self.status_reference_data = ref_dict
+            return ref_dict is not None
+    except Exception as e:
+        print(f"Failed to auto-load reference for {filename}: {e}")
+    finally:
+        progress.setValue(100)
+        progress.close()
+    return False
+
+
+def start_selected_gcode_execution(self):
+    """
+    Executes the currently selected G-code file on the Duet when the green Start button is clicked.
+    Can be re-clicked after a run finishes to run the exact same file again from the start.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    if not getattr(self, 'duet_connected', False):
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before starting motion.")
+        return
+
+    fpath = getattr(self, 'selected_gcode_path', None)
+    if not fpath:
+        fpath = get_curr_file(self, init=False)
+
+    if not fpath:
+        QMessageBox.warning(self, "No File Selected", "Please select a G-code file from the Files tab first.")
+        return
+
+    self.status_t0 = None
+    self.status_plot_data = None
+    self.status_stopped = False
+    
+    if hasattr(self, 'status_plot_lines'):
+        self.status_plot_lines.clear()
+
+    ip = get_clean_duet_ip(self)
+    url = f'http://{ip}/rr_gcode'
+    try:
+        fname = os.path.basename(fpath) if os.path.isabs(fpath) else fpath.strip("/")
+        duet_request(url, params={'gcode': f'M32 0:/gcodes/{fname}'}, timeout=4)
+        if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
+            self.statusDuetMessage.setText(f"Started execution of 0:/gcodes/{fname}")
+    except Exception as e:
+        QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
 def log_data_point(self, t, x, y, z):
@@ -421,17 +686,26 @@ def update_status_tab_dashboard(self):
             else:
                 self.labelSf.setText(f"{speed_factor:.3f}%")
 
-        # 5. Render graph update every second
-        if status_code != "I" and not getattr(self, 'status_stopped', False):
-            render_status_plot(self)
-        else:
+        # Reset error count on successful status update
+        self.duet_status_errors = 0
+
+        # 5. Render graph update every second (continuous rendering whenever monitored)
+        if not getattr(self, 'status_stopped', False):
+            try:
+                render_status_plot(self)
+            except Exception as pe:
+                print(f"Error rendering status plot: {pe}")
+        if status_code == "I":
             close_data_log_file(self)
 
     except Exception as e:
         print(f"Error updating status tab dashboard: {e}")
-        self.duet_connected = False
-        from fcn_control.fcn_control import update_connection_status_ui
-        update_connection_status_ui(self, connected=False)
+        err_cnt = getattr(self, 'duet_status_errors', 0) + 1
+        self.duet_status_errors = err_cnt
+        if err_cnt >= 3:
+            self.duet_connected = False
+            from fcn_control.fcn_control import update_connection_status_ui
+            update_connection_status_ui(self, connected=False)
 
 
 def get_positions_only_fast(self, ip):
@@ -493,7 +767,7 @@ def update_status_fast(self):
     if getattr(self, 'status_stopped', False):
         return
     status_code = getattr(self, 'duet_status_code', 'I')
-    if status_code not in ["P", "S", "R", "M"]:
+    if status_code not in ["P", "S", "R", "M", "I", "D", "B", "C"]:
         return
 
     ip = get_clean_duet_ip(self)
@@ -579,44 +853,51 @@ def update_status_fast(self):
         if hasattr(self, 'statusPosYaw') and self.statusPosYaw:
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
-        # Append to plot data
-        if not hasattr(self, 'status_plot_data') or self.status_plot_data is None or 'A' not in self.status_plot_data:
-            self.status_plot_data = {
-                't': [], 'X': [], 'Y': [], 'Z': [],
-                'A': [], 'B': [], 'C': [], 'D': [],
-                "'e": [], "'f": [], "'a": [], "'c": [],
-                'Roll': [], 'Pitch': [], 'Yaw': [],
-                'LAT': [], 'AP': [], 'SI': []
-            }
+        # Append to plot data ONLY during active motion (P: Printing/Running, S: Paused, R: Resuming, M: Simulating, B: Busy)
+        status_code = getattr(self, 'duet_status_code', 'I')
+        if status_code in ["P", "S", "R", "M", "B"]:
+            if not hasattr(self, 'status_plot_data') or self.status_plot_data is None or 'A' not in self.status_plot_data:
+                self.status_plot_data = {
+                    't': [], 'X': [], 'Y': [], 'Z': [],
+                    'A': [], 'B': [], 'C': [], 'D': [],
+                    "'e": [], "'f": [], "'a": [], "'c": [],
+                    'Roll': [], 'Pitch': [], 'Yaw': [],
+                    'LAT': [], 'AP': [], 'SI': []
+                }
 
-        t_now = time.time()
-        if not hasattr(self, 'status_t0') or self.status_t0 is None:
-            self.status_t0 = t_now
-        elapsed_t = t_now - self.status_t0
+            t_now = time.time()
+            if not hasattr(self, 'status_t0') or self.status_t0 is None:
+                self.status_t0 = t_now
+            elapsed_t = t_now - self.status_t0
 
-        self.status_plot_data['t'].append(elapsed_t)
-        self.status_plot_data['X'].append(axis_positions['X'])
-        self.status_plot_data['Y'].append(axis_positions['Y'])
-        self.status_plot_data['Z'].append(axis_positions['Z'])
-        self.status_plot_data['A'].append(axis_positions['A'])
-        self.status_plot_data['B'].append(axis_positions['B'])
-        self.status_plot_data['C'].append(axis_positions['C'])
-        self.status_plot_data['D'].append(axis_positions['D'])
-        self.status_plot_data["'e"].append(axis_positions["'e"])
-        self.status_plot_data["'f"].append(axis_positions["'f"])
-        self.status_plot_data["'a"].append(axis_positions["'a"])
-        self.status_plot_data["'c"].append(axis_positions["'c"])
-        self.status_plot_data['Roll'].append(current_roll)
-        self.status_plot_data['Pitch'].append(current_pitch)
-        self.status_plot_data['Yaw'].append(current_yaw)
-        self.status_plot_data['LAT'].append(current_lat)
-        self.status_plot_data['AP'].append(current_ap)
-        self.status_plot_data['SI'].append(current_si)
+            self.status_plot_data['t'].append(elapsed_t)
+            self.status_plot_data['X'].append(axis_positions['X'])
+            self.status_plot_data['Y'].append(axis_positions['Y'])
+            self.status_plot_data['Z'].append(axis_positions['Z'])
+            self.status_plot_data['A'].append(axis_positions['A'])
+            self.status_plot_data['B'].append(axis_positions['B'])
+            self.status_plot_data['C'].append(axis_positions['C'])
+            self.status_plot_data['D'].append(axis_positions['D'])
+            self.status_plot_data["'e"].append(axis_positions["'e"])
+            self.status_plot_data["'f"].append(axis_positions["'f"])
+            self.status_plot_data["'a"].append(axis_positions["'a"])
+            self.status_plot_data["'c"].append(axis_positions["'c"])
+            self.status_plot_data['Roll'].append(current_roll)
+            self.status_plot_data['Pitch'].append(current_pitch)
+            self.status_plot_data['Yaw'].append(current_yaw)
+            self.status_plot_data['LAT'].append(current_lat)
+            self.status_plot_data['AP'].append(current_ap)
+            self.status_plot_data['SI'].append(current_si)
 
-        # Cap history buffer at 100,000 points to retain full plot history for panning & zoom inspection
-        if len(self.status_plot_data['t']) > 100000:
-            for k in self.status_plot_data.keys():
-                self.status_plot_data[k].pop(0)
+            # Cap history buffer at 100,000 points to retain full plot history for panning & zoom inspection
+            if len(self.status_plot_data['t']) > 100000:
+                for k in self.status_plot_data.keys():
+                    self.status_plot_data[k].pop(0)
+
+            # File logging
+            check_log = getattr(self, 'check_record_data', None)
+            if check_log is not None and check_log.isChecked():
+                log_data_point(self, elapsed_t, current_lat, current_ap, current_si)
 
         # File logging
         if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():

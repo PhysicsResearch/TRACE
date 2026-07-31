@@ -1258,8 +1258,8 @@ def move(self, ax):
 def save_configuration(self):
     ip = get_clean_duet_ip(self)
     folder = getattr(self, 'gcode_folder', '')
-    lat_dim = self.input_plat_lat.text().strip() if hasattr(self, 'input_plat_lat') else '0.0'
-    si_dim = self.input_plat_si.text().strip() if hasattr(self, 'input_plat_si') else '0.0'
+    lat_dim = self.input_plat_lat.text().strip() if hasattr(self, 'input_plat_lat') and self.input_plat_lat.text().strip() else '100.0'
+    si_dim = self.input_plat_si.text().strip() if hasattr(self, 'input_plat_si') and self.input_plat_si.text().strip() else '100.0'
     touch_mode = self.check_touchscreen.isChecked() if hasattr(self, 'check_touchscreen') and self.check_touchscreen is not None else False
     
     data = {

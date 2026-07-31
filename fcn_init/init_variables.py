@@ -26,14 +26,20 @@ def initialize_software_variables(self):
             data = json.load(f)
         self.duet_ip = data.get('duet_ip_address', '192.168.0.1')
         self.gcode_folder = data.get('move_folder', '')
-        self.plat_lat_dim = data.get('platform_lat_dim', '0.0')
-        self.plat_si_dim = data.get('platform_si_dim', '0.0')
+        self.plat_lat_dim = data.get('platform_lat_dim', '100.0')
+        self.plat_si_dim = data.get('platform_si_dim', '100.0')
+        try:
+            if float(self.plat_lat_dim) <= 0.0: self.plat_lat_dim = '100.0'
+        except ValueError: self.plat_lat_dim = '100.0'
+        try:
+            if float(self.plat_si_dim) <= 0.0: self.plat_si_dim = '100.0'
+        except ValueError: self.plat_si_dim = '100.0'
         self.touchscreen_mode = data.get('touchscreen_mode', False)
     except Exception:
         self.duet_ip = '192.168.0.1'
         self.gcode_folder = ''
-        self.plat_lat_dim = '0.0'
-        self.plat_si_dim = '0.0'
+        self.plat_lat_dim = '100.0'
+        self.plat_si_dim = '100.0'
         self.touchscreen_mode = False
 
     if hasattr(self, 'DuetIPAddress') and self.DuetIPAddress is not None:

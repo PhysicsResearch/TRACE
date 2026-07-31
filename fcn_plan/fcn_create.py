@@ -629,6 +629,14 @@ def generate_planned_gcode(self):
             QMessageBox.warning(self, "Export Error", f"Invalid platform SI dimension value: '{self.input_plat_si.text()}'")
             return None, None
 
+        if lat_dim <= 0.0 or si_dim <= 0.0:
+            QMessageBox.warning(
+                self,
+                "Platform Dimension Error",
+                f"Platform LAT and SI dimensions must be greater than 0 mm (currently LAT: {lat_dim} mm, SI: {si_dim} mm).\n\nPlease set valid platform dimensions in the Control tab settings before exporting."
+            )
+            return None, None
+
         if not hasattr(self, 'input_offset_ap') or not self.input_offset_ap or not self.input_offset_ap.text().strip():
             QMessageBox.warning(self, "Export Error", "Offset AP input field is missing or empty.")
             return None, None
@@ -726,15 +734,15 @@ def upload_gcode_to_duet_action(self):
     Writes G-code to a temp file, stops background polling, then uploads using the shared session
     (same code path as the Files tab upload_file).
     """
-    if not getattr(self, 'duet_connected', False):
-        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
-        return
-
     from PySide6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog, QWidget
     from PySide6.QtCore import Qt, QCoreApplication
     from fcn_monitor.fcn_duet import get_clean_duet_ip, get_shared_session
     import io
     import time
+
+    if not getattr(self, 'duet_connected', False):
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
+        return
 
     gcode_content, default_name = generate_planned_gcode(self)
     if not gcode_content:
@@ -1082,48 +1090,54 @@ def _reverse_motion_platform_kinematics(self, df):
     """
     import numpy as np
 
-    A = df['A'].values
-    B = df['B'].values
-    C = df['C'].values
-    D = df['D'].values
+    A = np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0)
+    B = np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0)
+    C = np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0)
+    D = np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0)
 
     # LAT from 'e and 'f (average)
     lat_cols = [c for c in df.columns if c in ["'e", "'f"]]
     if lat_cols:
-        LAT = np.mean([df[c].values for c in lat_cols], axis=0)
+        LAT = np.nan_to_num(np.mean([df[c].values for c in lat_cols], axis=0), nan=0.0)
     else:
         LAT = np.zeros(len(df))
 
     # SI from 'a, 'c, 'b (average)
     si_cols = [c for c in df.columns if c in ["'a", "'c", "'b"]]
     if si_cols:
-        SI = np.mean([df[c].values for c in si_cols], axis=0)
+        SI = np.nan_to_num(np.mean([df[c].values for c in si_cols], axis=0), nan=0.0)
     else:
         SI = np.zeros(len(df))
 
-    # Read platform dimensions from settings, default to 100.0
+    # Read platform dimensions from settings, default to 100.0 if missing/invalid/<=0
     try:
         lat_dim = float(self.input_plat_lat.text().strip())
+        if lat_dim <= 0.0:
+            lat_dim = 100.0
     except Exception:
         lat_dim = 100.0
+
     try:
         si_dim = float(self.input_plat_si.text().strip())
+        if si_dim <= 0.0:
+            si_dim = 100.0
     except Exception:
         si_dim = 100.0
+
     try:
         off_ap = float(self.input_offset_ap.text().strip())
     except Exception:
         off_ap = 0.0
 
     # Pitch: D - A = si_dim * sin(p), where p = -pitch_rad
-    sin_p = np.clip((D - A) / si_dim, -1.0, 1.0)
+    sin_p = np.clip(np.nan_to_num((D - A) / si_dim, nan=0.0), -1.0, 1.0)
     p_rad = np.arcsin(sin_p)
     Pitch = -np.degrees(p_rad)
 
     # Roll: A - B = lat_dim * sin(roll) * cos(p)
     cos_p = np.cos(p_rad)
     cos_p_safe = np.where(np.abs(cos_p) < 1e-10, 1.0, cos_p)
-    sin_r = np.clip((A - B) / (lat_dim * cos_p_safe), -1.0, 1.0)
+    sin_r = np.clip(np.nan_to_num((A - B) / (lat_dim * cos_p_safe), nan=0.0), -1.0, 1.0)
     Roll = np.degrees(np.arcsin(sin_r))
 
     # AP: mean of actuators, corrected for rotation center offset
@@ -1371,6 +1385,7 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         QCoreApplication.processEvents()
 
     # Re-scale progress range to cover table load
+    n_points = len(self.dfEdit) if hasattr(self, 'dfEdit') and self.dfEdit is not None else 0
     if progress_dialog is not None:
         progress.setMaximum(progress_offset + 100 + n_points)
         loadTable_create(self, self.dfEdit, progress=progress, start_val=progress_offset + 100)

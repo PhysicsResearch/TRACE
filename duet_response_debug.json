@@ -137,7 +137,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "A",
-                "machinePosition": 51.535,
+                "machinePosition": 15.001,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -151,9 +151,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 98947,
+                "stepPos": 28801,
                 "stepsPerMm": 1920.0,
-                "userPosition": 51.535,
+                "userPosition": 15.001,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -178,7 +178,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "B",
-                "machinePosition": 29.994,
+                "machinePosition": 14.999,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -192,9 +192,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 57589,
+                "stepPos": 28799,
                 "stepsPerMm": 1920.0,
-                "userPosition": 29.994,
+                "userPosition": 14.999,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -219,7 +219,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "C",
-                "machinePosition": 29.994,
+                "machinePosition": 15.0,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -233,9 +233,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 57589,
+                "stepPos": 28800,
                 "stepsPerMm": 1920.0,
-                "userPosition": 29.994,
+                "userPosition": 15.0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -260,7 +260,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "D",
-                "machinePosition": 51.535,
+                "machinePosition": 15.0,
                 "max": 90.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -274,9 +274,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 98947,
+                "stepPos": 28800,
                 "stepsPerMm": 1920.0,
-                "userPosition": 51.535,
+                "userPosition": 15.0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -302,7 +302,7 @@
                 "homed": true,
                 "jerk": 1920.0,
                 "letter": "a",
-                "machinePosition": 12.118,
+                "machinePosition": 0,
                 "max": 50.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -316,9 +316,9 @@
                 "printingJerk": 1920.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1920.0,
-                "stepPos": 23266,
+                "stepPos": 0,
                 "stepsPerMm": 1920.0,
-                "userPosition": 12.118,
+                "userPosition": 0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -344,7 +344,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "c",
-                "machinePosition": 12.118,
+                "machinePosition": 0,
                 "max": 50.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -358,9 +358,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 23266,
+                "stepPos": 0,
                 "stepsPerMm": 1920.0,
-                "userPosition": 12.118,
+                "userPosition": 0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -385,7 +385,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "e",
-                "machinePosition": 9.118,
+                "machinePosition": 0,
                 "max": 100.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -399,9 +399,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 17506,
+                "stepPos": 0,
                 "stepsPerMm": 1920.0,
-                "userPosition": 9.118,
+                "userPosition": 0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -426,7 +426,7 @@
                 "homed": true,
                 "jerk": 300.0,
                 "letter": "f",
-                "machinePosition": 9.118,
+                "machinePosition": 0,
                 "max": 100.0,
                 "maxProbed": false,
                 "microstepping": {
@@ -440,9 +440,9 @@
                 "printingJerk": 300.0,
                 "reducedAcceleration": 500.0,
                 "speed": 1200.0,
-                "stepPos": 17506,
+                "stepPos": 0,
                 "stepsPerMm": 1920.0,
-                "userPosition": 9.118,
+                "userPosition": 0,
                 "visible": true,
                 "workplaceOffsets": [
                     0,
@@ -594,7 +594,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "A",
-            "machinePosition": 51.535,
+            "machinePosition": 15.001,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -608,9 +608,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 98947,
+            "stepPos": 28801,
             "stepsPerMm": 1920.0,
-            "userPosition": 51.535,
+            "userPosition": 15.001,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -635,7 +635,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "B",
-            "machinePosition": 29.994,
+            "machinePosition": 14.999,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -649,9 +649,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 57589,
+            "stepPos": 28799,
             "stepsPerMm": 1920.0,
-            "userPosition": 29.994,
+            "userPosition": 14.999,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -676,7 +676,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "C",
-            "machinePosition": 29.994,
+            "machinePosition": 15.0,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -690,9 +690,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 57589,
+            "stepPos": 28800,
             "stepsPerMm": 1920.0,
-            "userPosition": 29.994,
+            "userPosition": 15.0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -717,7 +717,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "D",
-            "machinePosition": 51.535,
+            "machinePosition": 15.0,
             "max": 90.0,
             "maxProbed": false,
             "microstepping": {
@@ -731,9 +731,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 98947,
+            "stepPos": 28800,
             "stepsPerMm": 1920.0,
-            "userPosition": 51.535,
+            "userPosition": 15.0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -759,7 +759,7 @@
             "homed": true,
             "jerk": 1920.0,
             "letter": "a",
-            "machinePosition": 12.118,
+            "machinePosition": 0,
             "max": 50.0,
             "maxProbed": false,
             "microstepping": {
@@ -773,9 +773,9 @@
             "printingJerk": 1920.0,
             "reducedAcceleration": 500.0,
             "speed": 1920.0,
-            "stepPos": 23266,
+            "stepPos": 0,
             "stepsPerMm": 1920.0,
-            "userPosition": 12.118,
+            "userPosition": 0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -801,7 +801,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "c",
-            "machinePosition": 12.118,
+            "machinePosition": 0,
             "max": 50.0,
             "maxProbed": false,
             "microstepping": {
@@ -815,9 +815,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 23266,
+            "stepPos": 0,
             "stepsPerMm": 1920.0,
-            "userPosition": 12.118,
+            "userPosition": 0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -842,7 +842,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "e",
-            "machinePosition": 9.118,
+            "machinePosition": 0,
             "max": 100.0,
             "maxProbed": false,
             "microstepping": {
@@ -856,9 +856,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 17506,
+            "stepPos": 0,
             "stepsPerMm": 1920.0,
-            "userPosition": 9.118,
+            "userPosition": 0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -883,7 +883,7 @@
             "homed": true,
             "jerk": 300.0,
             "letter": "f",
-            "machinePosition": 9.118,
+            "machinePosition": 0,
             "max": 100.0,
             "maxProbed": false,
             "microstepping": {
@@ -897,9 +897,9 @@
             "printingJerk": 300.0,
             "reducedAcceleration": 500.0,
             "speed": 1200.0,
-            "stepPos": 17506,
+            "stepPos": 0,
             "stepsPerMm": 1920.0,
-            "userPosition": 9.118,
+            "userPosition": 0,
             "visible": true,
             "workplaceOffsets": [
                 0,
@@ -930,7 +930,7 @@
         "logLevel": "off",
         "machineMode": "FFF",
         "macroRestarted": false,
-        "msUpTime": 158,
+        "msUpTime": 988,
         "nextTool": -1,
         "powerFailScript": "",
         "previousTool": -1,
@@ -960,18 +960,18 @@
                     0,
                     0,
                     0,
-                    51.535,
-                    29.994,
-                    29.994,
-                    51.535,
-                    12.118,
-                    12.118,
-                    9.118,
-                    9.118
+                    26.527,
+                    9.847,
+                    9.847,
+                    26.527,
+                    0,
+                    0,
+                    0,
+                    0
                 ],
                 "extruderPos": 0,
                 "fanPwm": 0,
-                "feedRate": 1676.0,
+                "feedRate": 2019.0,
                 "ioBits": 0,
                 "toolNumber": -1
             },
@@ -1057,9 +1057,127 @@
             }
         ],
         "status": "idle",
-        "time": "2026-07-31T16:32:13",
-        "upTime": 2401
+        "time": "2026-07-31T17:57:16",
+        "upTime": 7503
     },
-    "sensors_raw": {},
-    "job_raw": {}
+    "sensors_raw": {
+        "analog": [],
+        "endstops": [
+            null,
+            null,
+            null,
+            {
+                "highEnd": false,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": false,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": false,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": false,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": false,
+                "triggered": true,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": true,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": true,
+                "triggered": false,
+                "type": "inputPin"
+            },
+            {
+                "highEnd": true,
+                "triggered": false,
+                "type": "inputPin"
+            }
+        ],
+        "filamentMonitors": [],
+        "gpIn": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            {
+                "value": 1
+            }
+        ],
+        "probes": [
+            {
+                "calibrationTemperature": 25.0,
+                "deployedByUser": false,
+                "disablesHeaters": false,
+                "diveHeights": [
+                    5.0,
+                    5.0
+                ],
+                "lastStopHeight": 0,
+                "maxProbeCount": 1,
+                "offsets": [
+                    0,
+                    0,
+                    -0.7,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0
+                ],
+                "recoveryTime": 0,
+                "speeds": [
+                    120.0,
+                    120.0
+                ],
+                "temperatureCoefficients": [
+                    0,
+                    0
+                ],
+                "threshold": 500,
+                "tolerance": 0.03,
+                "travelSpeed": 6000.0,
+                "triggerHeight": 0.7,
+                "type": 5,
+                "value": [
+                    0
+                ]
+            }
+        ]
+    },
+    "job_raw": {
+        "file": {
+            "customInfo": {},
+            "filament": [],
+            "height": 0,
+            "lastModified": "2026-07-31T17:55:24",
+            "layerHeight": 0,
+            "numLayers": 0,
+            "size": 613787,
+            "thumbnails": []
+        },
+        "filePosition": 0,
+        "lastDuration": 61,
+        "lastFileName": "0:/gcodes/planned_motion_platform_AP_sin.gcode",
+        "lastWarmUpDuration": 0,
+        "timesLeft": {}
+    }
 }

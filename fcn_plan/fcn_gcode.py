@@ -144,6 +144,12 @@ def generate_gcode_string(
             np.any(np.abs(Yaw_new) > lim_yaw)):
             exceeds_limits = True
 
+        # Ensure platform dimensions are non-zero positive numbers
+        if lat_dim <= 0.0:
+            lat_dim = 100.0
+        if si_dim <= 0.0:
+            si_dim = 100.0
+
         # Calculate actuator positions A, B, C, D
         support_points = {
             'A': (-lat_dim / 2.0, -si_dim / 2.0, 0.0),
@@ -220,15 +226,7 @@ def generate_gcode_string(
                 flush_dwell()
                 gcode_lines.append(new_commands_indices[i])
 
-            dA_from_last = A_new[i] - last_A
-            dB_from_last = B_new[i] - last_B
-            dC_from_last = C_new[i] - last_C
-            dD_from_last = D_new[i] - last_D
-            dLAT_from_last = LAT_new[i] - last_LAT
-            dSI_from_last = SI_new[i] - last_SI
-            max_diff = max(abs(dA_from_last), abs(dB_from_last), abs(dC_from_last), abs(dD_from_last), abs(dLAT_from_last), abs(dSI_from_last))
-
-            # Distinguish between truly stationary and decimated steps
+            # Distinguish between truly stationary and moving steps
             is_stationary = (
                 LAT_new[i] == LAT_new[i-1] and
                 SI_new[i] == SI_new[i-1] and
@@ -240,9 +238,6 @@ def generate_gcode_string(
 
             if is_stationary:
                 dwell_accum += (t_new[i] - t_new[i-1])
-            elif max_diff < 0.01:
-                # Decimated step
-                pass
             else:
                 # Calculate dt_elapsed BEFORE flushing dwell_accum
                 dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx] - dwell_accum)
@@ -251,12 +246,9 @@ def generate_gcode_string(
                 dB = B_new[i] - last_B
                 dC = C_new[i] - last_C
                 dD = D_new[i] - last_D
-                de = LAT_new[i] - last_LAT
-                df = LAT_new[i] - last_LAT
-                da = SI_new[i] - last_SI
-                dc = SI_new[i] - last_SI
                 
-                dist = np.sqrt(dA*dA + dB*dB + dC*dC + dD*dD + de*de + df*df + da*da + dc*dc)
+                # Primary motion actuators for distance calculation
+                dist = np.sqrt(dA*dA + dB*dB + dC*dC + dD*dD)
                 speed = (dist / dt_elapsed) * 60.0
                 if speed < 0.1:
                     speed = 0.1

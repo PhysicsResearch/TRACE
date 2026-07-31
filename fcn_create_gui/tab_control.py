@@ -815,7 +815,7 @@ def build_platform_subtab(self):
     lbl_dim_lat.setStyleSheet(label_sub_style)
     config_hlayout.addWidget(lbl_dim_lat)
 
-    self.input_plat_lat = QLineEdit("0.0", config_frame)
+    self.input_plat_lat = QLineEdit("100.0", config_frame)
     self.input_plat_lat.setStyleSheet(input_style)
     self.input_plat_lat.setMinimumHeight(35)
     self.input_plat_lat.setMaximumWidth(90)
@@ -826,7 +826,7 @@ def build_platform_subtab(self):
     lbl_dim_si.setStyleSheet(label_sub_style)
     config_hlayout.addWidget(lbl_dim_si)
 
-    self.input_plat_si = QLineEdit("0.0", config_frame)
+    self.input_plat_si = QLineEdit("100.0", config_frame)
     self.input_plat_si.setStyleSheet(input_style)
     self.input_plat_si.setMinimumHeight(35)
     self.input_plat_si.setMaximumWidth(90)
