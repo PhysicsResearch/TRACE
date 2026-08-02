@@ -1096,14 +1096,14 @@ def _reverse_motion_platform_kinematics(self, df):
     D = np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0)
 
     # LAT from 'e and 'f (average)
-    lat_cols = [c for c in df.columns if c in ["'e", "'f"]]
+    lat_cols = [c for c in df.columns if c in ["'e", "'f", "e", "f"]]
     if lat_cols:
         LAT = np.nan_to_num(np.mean([df[c].values for c in lat_cols], axis=0), nan=0.0)
     else:
         LAT = np.zeros(len(df))
 
     # SI from 'a, 'c, 'b (average)
-    si_cols = [c for c in df.columns if c in ["'a", "'c", "'b"]]
+    si_cols = [c for c in df.columns if c in ["'a", "'c", "'b", "a", "c", "b"]]
     if si_cols:
         SI = np.nan_to_num(np.mean([df[c].values for c in si_cols], axis=0), nan=0.0)
     else:

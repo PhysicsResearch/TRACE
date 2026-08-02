@@ -92,6 +92,14 @@ def render_status_plot(self):
     ref_data = getattr(self, 'status_reference_data', None)
 
     # If no live data and no reference data, exit early
+    # But first hide reference lines if show_ref was turned off
+    if not show_ref and hasattr(self, 'status_ref_lines'):
+        for rkey in self.status_ref_lines:
+            if self.status_ref_lines[rkey].get_visible():
+                self.status_ref_lines[rkey].set_visible(False)
+        if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
+            self.statusCanvas.draw_idle()
+
     if len(t_data) == 0 and not (show_ref and ref_data is not None):
         return
 
@@ -124,8 +132,7 @@ def render_status_plot(self):
     ]
 
     needs_legend_update = False
-    min_x = t_data[0] if len(t_data) > 0 else 0.0
-    max_x = t_data[-1] if len(t_data) > 0 else (ref_data.get('t', [60.0])[-1] if (ref_data and 't' in ref_data and len(ref_data['t']) > 0) else 60.0)
+    live_max_x = t_data[-1] if (t_data is not None and len(t_data) > 0) else 0.0
     min_y, max_y = 1e9, -1e9
 
     for cb_name, key, label, color in traces:
@@ -206,16 +213,26 @@ def render_status_plot(self):
         except ValueError:
             time_win = 60.0
 
-    # Dynamically update and auto-scroll live data respecting configured time window
+    # Calculate step-jump x-axis limits starting at [0.0, time_win]
+    # Reaching 60s -> [30, 90], reaching 90s -> [60, 120]
+    half_win = time_win / 2.0
+    if live_max_x <= time_win:
+        x_start = 0.0
+        x_end = time_win
+    else:
+        import math
+        steps = math.floor((live_max_x - time_win) / half_win) + 1
+        x_start = steps * half_win
+        x_end = x_start + time_win
+
     curr_xlim = self.ax_status.get_xlim()
-    is_at_live_edge = (max_x - curr_xlim[1]) < 15.0 or curr_xlim[1] <= curr_xlim[0] or (curr_xlim[0] == 0.0 and curr_xlim[1] == 1.0)
+    is_uninitialized = (curr_xlim[0] == 0.0 and curr_xlim[1] == 1.0) or curr_xlim[1] <= curr_xlim[0]
+    is_at_live_edge = is_uninitialized or (live_max_x >= curr_xlim[1] - 1.0) or (live_max_x == 0.0)
 
     if is_at_live_edge:
-        if max_x > 0:
-            x_start = max(0.0, max_x - time_win)
-            x_end = max_x if max_x > time_win else max(max_x, time_win)
-            if x_start < x_end:
-                self.ax_status.set_xlim(x_start, x_end)
+        if abs(curr_xlim[0] - x_start) > 1e-4 or abs(curr_xlim[1] - x_end) > 1e-4:
+            self.ax_status.set_xlim(x_start, x_end)
+
         if min_y < max_y:
             pad = (max_y - min_y) * 0.1 if max_y != min_y else 1.0
             self.ax_status.set_ylim(min_y - pad, max_y + pad)
@@ -317,14 +334,17 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
                 if axis == 'F':
                     current_feedrate = float(val)
                 elif axis != 'G':
-                    # Normalize single-letter axes a,b,c,d,x,y,z to uppercase A,B,C,D,X,Y,Z
-                    norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
-                    row_data[norm_axis] = float(val)
+                    # Parse lower-case motor axes ('f, 'e, 'a, 'c, 'b or f, e, a, c, b)
+                    if axis.startswith("'") or (len(axis) == 1 and axis.islower() and axis in ['e', 'f', 'a', 'c', 'b']):
+                        clean_ax = axis.strip("'").lower()
+                        row_data[f"'{clean_ax}"] = float(val)
+                        row_data[clean_ax] = float(val)
+                    else:
+                        norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
+                        row_data[norm_axis] = float(val)
             
-            # Primary motion axes for distance computation to prevent double-counting secondary axes
-            primary_axes = [ax for ax in ['A', 'B', 'C', 'D'] if ax in row_data]
-            if not primary_axes:
-                primary_axes = [ax for ax in ['X', 'Y', 'Z'] if ax in row_data]
+            # Primary motion axes for distance computation to prevent double-counting secondary/duplicate keys
+            primary_axes = [ax for ax in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z', "'e", "'f", "'a", "'c"] if ax in row_data]
             if not primary_axes:
                 primary_axes = [ax for ax in row_data.keys() if ax != 'F']
 
@@ -398,6 +418,9 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
     for col in df.columns:
         if col not in ['time', 'timestamp', 'Command']:
             ref_dict[col] = df[col].values
+            clean_c = col.strip("'")
+            ref_dict[clean_c] = df[col].values
+            ref_dict[f"'{clean_c}"] = df[col].values
 
     return ref_dict
 
@@ -414,27 +437,32 @@ def auto_load_current_gcode_reference(self):
     from PySide6.QtCore import Qt, QCoreApplication
 
     fname = os.path.basename(filename)
-    progress = QProgressDialog(f"Loading reference plot data from '{fname}'...", "Cancel", 0, 100, self)
-    progress.setWindowTitle("Loading Reference Data")
-    progress.setWindowModality(Qt.WindowModal)
-    progress.setMinimumWidth(520)
-    progress.setMinimumHeight(160)
-    progress.setStyleSheet("""
-        QProgressDialog { font-size: 16px; font-weight: bold; }
-        QLabel { font-size: 16px; min-height: 35px; }
-        QProgressBar { text-align: center; font-size: 16px; font-weight: bold; height: 30px; border-radius: 4px; }
-        QPushButton { font-size: 16px; font-weight: bold; min-width: 100px; min-height: 38px; border-radius: 4px; }
-    """)
-    progress.setValue(10)
-    progress.show()
-    QCoreApplication.processEvents()
+    from PySide6.QtWidgets import QWidget, QApplication
+    progress = None
+    if QApplication.instance() is not None:
+        parent_widget = self if isinstance(self, QWidget) else None
+        progress = QProgressDialog(f"Loading reference plot data from '{fname}'...", "Cancel", 0, 100, parent_widget)
+        progress.setWindowTitle("Loading Reference Data")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumWidth(520)
+        progress.setMinimumHeight(160)
+        progress.setStyleSheet("""
+            QProgressDialog { font-size: 16px; font-weight: bold; }
+            QLabel { font-size: 16px; min-height: 35px; }
+            QProgressBar { text-align: center; font-size: 16px; font-weight: bold; height: 30px; border-radius: 4px; }
+            QPushButton { font-size: 16px; font-weight: bold; min-width: 100px; min-height: 38px; border-radius: 4px; }
+        """)
+        progress.setValue(10)
+        progress.show()
+        QCoreApplication.processEvents()
 
     ip = get_clean_duet_ip(self)
     dl_url = f'http://{ip}/rr_download?name=/gcodes/{filename.strip("/")}'
     try:
         res = duet_request(dl_url, timeout=5)
-        progress.setValue(50)
-        QCoreApplication.processEvents()
+        if progress:
+            progress.setValue(50)
+            QCoreApplication.processEvents()
         if res.status_code == 200 and res.text:
             ref_dict = load_and_parse_gcode_reference(self, res.text, progress_dialog=progress)
             self.status_reference_data = ref_dict
@@ -442,8 +470,9 @@ def auto_load_current_gcode_reference(self):
     except Exception as e:
         print(f"Failed to auto-load reference for {filename}: {e}")
     finally:
-        progress.setValue(100)
-        progress.close()
+        if progress:
+            progress.setValue(100)
+            progress.close()
     return False
 
 
@@ -877,24 +906,63 @@ def process_auto_sync_speed(self):
 
 def get_positions_only_fast(self, ip):
     """
-    Highly optimized request to fetch only axes positions (10ms polling).
+    Highly optimized request to fetch axes positions and homing status (10ms polling).
     Uses RRF3 /rr_model?key=move.axes or falls back to legacy /rr_status?type=2.
+    Continuously synchronizes self.ext_axes_homed and refreshes UI button styles.
     """
-    # 1. RRF3 Model Path (lightweight key query)
+    if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
+        self.ext_axes_homed = {}
+
+    # 1. RRF3 Model Path (lightweight key query using flags=f for fast single-page response of all 11 axes)
     try:
-        url = f"http://{ip}/rr_model?key=move.axes"
+        url = f"http://{ip}/rr_model?key=move.axes&flags=f"
         response = duet_request(url, timeout=0.8)
         if response.status_code == 200:
             axes_list = response.json().get("result", [])
             if isinstance(axes_list, list) and axes_list:
                 axis_positions = {}
-                for ax in axes_list:
-                    if isinstance(ax, dict) and "letter" in ax:
-                        let = str(ax["letter"]).strip()
+                homed_changed = False
+
+                axes_rrf_order = getattr(self, 'duet_configured_axes', None)
+                if not axes_rrf_order or len(axes_rrf_order) != len(axes_list):
+                    if len(axes_list) == 11:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                    else:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+
+                for idx, ax in enumerate(axes_list):
+                    if isinstance(ax, dict):
                         user_pos = ax.get("userPosition", 0.0)
+
+                        if "letter" in ax:
+                            let = str(ax["letter"]).strip()
+                        elif idx < len(axes_rrf_order):
+                            let = axes_rrf_order[idx]
+                        else:
+                            let = str(idx)
+
+                        clean_let = let.strip("'").strip()
                         axis_positions[let] = user_pos
-                        axis_positions[let.lower()] = user_pos
-                        axis_positions[f"'{let.lower()}"] = user_pos
+                        axis_positions[clean_let] = user_pos
+                        axis_positions[f"'{clean_let}"] = user_pos
+
+                        if "homed" in ax or "userHomed" in ax:
+                            homed_val = ax.get("homed", ax.get("userHomed", 0))
+                            is_h = (homed_val == 1 or homed_val is True)
+
+                            if self.ext_axes_homed.get(clean_let) != is_h or self.ext_axes_homed.get(f"'{clean_let}") != is_h:
+                                homed_changed = True
+                            self.ext_axes_homed[let] = is_h
+                            self.ext_axes_homed[clean_let] = is_h
+                            self.ext_axes_homed[f"'{clean_let}"] = is_h
+
+                if homed_changed:
+                    try:
+                        from fcn_control.fcn_control import refresh_external_axis_styles
+                        refresh_external_axis_styles(self)
+                    except Exception:
+                        pass
+
                 return axis_positions
     except Exception:
         pass
@@ -906,15 +974,36 @@ def get_positions_only_fast(self, ip):
         if response_legacy.status_code == 200:
             data = response_legacy.json()
             xyz = data.get("coords", {}).get("xyz", [0.0, 0.0, 0.0])
+            axes_homed = data.get("coords", {}).get("axesHomed", [])
+
             axis_positions = {
                 'X': xyz[0] if len(xyz) > 0 else 0.0,
                 'Y': xyz[1] if len(xyz) > 1 else 0.0,
                 'Z': xyz[2] if len(xyz) > 2 else 0.0,
             }
-            axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+            axes_rrf_order = getattr(self, 'duet_configured_axes', None)
+            if not axes_rrf_order:
+                if len(axes_homed) == 11 or len(xyz) == 11:
+                    axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                else:
+                    axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+
             for idx, ax_name in enumerate(axes_rrf_order):
                 if idx < len(xyz):
                     axis_positions[ax_name] = xyz[idx]
+                if idx < len(axes_homed):
+                    is_h = (axes_homed[idx] == 1)
+                    clean_n = str(ax_name).strip("'")
+                    self.ext_axes_homed[ax_name] = is_h
+                    self.ext_axes_homed[clean_n] = is_h
+                    self.ext_axes_homed[f"'{clean_n}"] = is_h
+
+            try:
+                from fcn_control.fcn_control import refresh_external_axis_styles
+                refresh_external_axis_styles(self)
+            except Exception:
+                pass
+
             return axis_positions
     except Exception:
         pass
@@ -1020,6 +1109,7 @@ def update_status_fast(self):
         if hasattr(self, 'statusPosYaw') and self.statusPosYaw:
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
+        elapsed_t = 0.0
         # Append to plot data ONLY during active motion (P: Printing/Running, S: Paused, R: Resuming, M: Simulating, B: Busy)
         status_code = getattr(self, 'duet_status_code', 'I')
         if status_code in ["P", "S", "R", "M", "B"]:
@@ -1080,28 +1170,39 @@ def update_status_fast(self):
 
 def get_curr_file(self, init=True):
     """
-    Get the filename of the GCODE currently being executed on DUET
+    Get the filename of the GCODE currently being executed or selected on DUET
     """
+    sel_path = getattr(self, 'selected_gcode_path', None)
+    if sel_path:
+        return os.path.basename(sel_path)
+
     ip = get_clean_duet_ip(self)
     try:
+        url_job = f'http://{ip}/rr_model?key=job'
+        res_job = duet_request(url_job, timeout=2)
+        if res_job.status_code == 200:
+            job_data = res_job.json().get('result', {})
+            if isinstance(job_data, dict):
+                file_info = job_data.get('file', {})
+                fn = file_info.get('fileName') if isinstance(file_info, dict) else None
+                if not fn:
+                    fn = job_data.get('lastFileName')
+                if fn:
+                    return os.path.basename(fn)
+
         url = f'http://{ip}/rr_fileinfo'
-        response = duet_request(url, timeout=4)
+        response = duet_request(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
-            if data.get('err') == 1:
-                from fcn_control.fcn_control import log_to_duet_console
-                log_to_duet_console(self, "Error: Duet fileinfo request returned error status", color="#ff3333")
-                return None
             filepath = data.get('fileName', '')
-            if init == True:
-                self.tprint = data.get('printDuration', 0)
-            _, filename = os.path.split(filepath)
-            return filename
+            if filepath:
+                if init == True:
+                    self.tprint = data.get('printDuration', 0)
+                _, filename = os.path.split(filepath)
+                return filename
     except Exception as e:
-        print(f"Duet fileinfo error ({url}): {e}")
-        from fcn_control.fcn_control import log_to_duet_console
-        log_to_duet_console(self, f"Error: Duet could not be reached at http://{ip}. Details: {e}", color="#ff3333")
-        return None    
+        print(f"Duet fileinfo error: {e}")
+    return None    
 
 
 def get_duet_status(self):
@@ -1303,21 +1404,28 @@ def translate_machine_status_to_legacy(om_data):
     x_pos = axes_by_letter.get("X", {}).get("userPosition", 0.0) if isinstance(axes_by_letter.get("X"), dict) else 0.0
     y_pos = axes_by_letter.get("Y", {}).get("userPosition", 0.0) if isinstance(axes_by_letter.get("Y"), dict) else 0.0
     z_pos = axes_by_letter.get("Z", {}).get("userPosition", 0.0) if isinstance(axes_by_letter.get("Z"), dict) else 0.0
-    
+
     axes_homed = []
-    # Cartesian X, Y, Z first
-    for letter in ["X", "Y", "Z"]:
-        homed_val = 1 if is_axis_homed(axes_by_letter.get(letter)) else 0
-        axes_homed.append(homed_val)
-        
-    # Then other letters
-    other_letters = ["V", "W", "A", "B", "C", "D", "a", "c", "e", "f"]
-    for letter in other_letters:
-        homed_val = 1 if is_axis_homed(axes_by_letter.get(letter)) else 0
-        axes_homed.append(homed_val)
-        
+    xyz_all = []
+
+    if isinstance(axes, list) and len(axes) > 0:
+        for ax in axes:
+            if isinstance(ax, dict):
+                homed_val = 1 if is_axis_homed(ax) else 0
+                axes_homed.append(homed_val)
+                xyz_all.append(float(ax.get("userPosition", 0.0)))
+    else:
+        # Fallback if axes list is empty
+        for letter in ["X", "Y", "Z", "A", "B", "C", "D", "a", "c", "e", "f"]:
+            homed_val = 1 if is_axis_homed(axes_by_letter.get(letter)) else 0
+            axes_homed.append(homed_val)
+            xyz_all.append(float(axes_by_letter.get(letter, {}).get("userPosition", 0.0) if isinstance(axes_by_letter.get(letter), dict) else 0.0))
+
+    if len(xyz_all) < 3:
+        xyz_all = [x_pos, y_pos, z_pos]
+
     legacy["coords"] = {
-        "xyz": [x_pos, y_pos, z_pos],
+        "xyz": xyz_all,
         "axesHomed": axes_homed
     }
     

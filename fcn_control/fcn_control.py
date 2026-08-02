@@ -56,41 +56,57 @@ def log_to_duet_console(self, text, color=None):
 def is_axis_homed(self, axis_key):
     """
     Evaluates whether the given axis or platform degree of freedom is homed.
-    Strictly separates Cartesian Lung Phantom axes (X, Y, Z) from Motion Platform degrees of freedom (LAT, SI, AP).
+    Strictly distinguishes Cartesian Lung Phantom axes (X, Y, Z) from Motion Platform degrees of freedom (LAT, SI, AP).
     """
     if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
         return False
 
     h = self.ext_axes_homed
-    key = str(axis_key).upper().strip()
+    raw_key = str(axis_key).strip()
+    upper_key = raw_key.upper()
 
-    # Cartesian Lung Phantom axes (strictly X, Y, Z)
-    if key in ['X', 'LUNG_X']:
-        return bool(h.get('X', False))
-    elif key in ['Y', 'LUNG_Y']:
-        return bool(h.get('Y', False))
-    elif key in ['Z', 'LUNG_Z']:
-        return bool(h.get('Z', False))
+    # Cartesian Lung Phantom axes (strictly Cartesian stepper motors X, Y, Z on Duet)
+    if upper_key in ['X', 'Y', 'Z', 'LUNG_X', 'LUNG_Y', 'LUNG_Z', 'XAXIS_LUNG', 'YAXIS_LUNG', 'ZAXIS_LUNG']:
+        clean_ax = upper_key.replace('LUNG_', '').replace('_LUNG', '').replace('AXIS', '')
+        return bool(h.get(clean_ax, False))
 
     # Motion Platform degrees of freedom (driven by platform motors 'e, 'f, 'a, 'c/'b, A, B, C, D)
-    elif key in ['LAT', 'XAXIS']:
-        return bool((h.get("'e", False) and h.get("'f", False)) or h.get('LAT', False))
-    elif key in ['SI', 'YAXIS']:
-        return bool((h.get("'a", False) and (h.get("'c", False) or h.get("'b", False))) or h.get('SI', False))
-    elif key in ['AP', 'ZAXIS']:
-        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('AP', False))
-    elif key in ['ROLL']:
-        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('U', False))
-    elif key in ['PITCH']:
-        return bool((h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False)) or h.get('V', False))
-    elif key in ['YAW']:
+    elif upper_key in ['LAT']:
+        e_homed = bool(h.get("'e", False) or h.get("e", False) or h.get("E", False))
+        f_homed = bool(h.get("'f", False) or h.get("f", False) or h.get("F", False))
+        return (e_homed and f_homed) or bool(h.get('LAT', False))
+    elif upper_key in ['SI']:
+        a_homed = bool(h.get("'a", False) or h.get("a", False))
+        c_homed = bool(h.get("'c", False) or h.get("c", False) or h.get("'b", False) or h.get("b", False))
+        return (a_homed and c_homed) or bool(h.get('SI', False))
+    elif upper_key in ['AP']:
+        abcd_homed = bool(h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False))
+        return abcd_homed or bool(h.get('AP', False))
+    elif upper_key in ['ROLL']:
+        abcd_homed = bool(h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False))
+        return abcd_homed or bool(h.get('U', False))
+    elif upper_key in ['PITCH']:
+        abcd_homed = bool(h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False))
+        return abcd_homed or bool(h.get('V', False))
+    elif upper_key in ['YAW']:
         return bool(h.get('W', False) or h.get('YAW', False))
+    elif upper_key in ['XAXIS']:
+        return bool(h.get('X', False))
+    elif upper_key in ['YAXIS']:
+        return bool(h.get('Y', False))
+    elif upper_key in ['ZAXIS']:
+        return bool(h.get('Z', False))
     else:
-        if axis_key in h:
-            return bool(h[axis_key])
-        if key in h:
-            return bool(h[key])
-        return False
+        # Check exact key, unquoted key, single-quoted key, upper and lower variations
+        clean_k = raw_key.strip("'")
+        return bool(
+            h.get(raw_key, False) or
+            h.get(clean_k, False) or
+            h.get(f"'{clean_k}", False) or
+            h.get(clean_k.lower(), False) or
+            h.get(f"'{clean_k.lower()}", False) or
+            h.get(clean_k.upper(), False)
+        )
 
 
 def update_moving_button_styles(self):
@@ -127,17 +143,36 @@ def update_moving_button_styles(self):
         QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
     """
 
-    # 1. Platform & Lung Phantom jog buttons
-    axis_keys = ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']
-    for ax_key in axis_keys:
-        homed = is_axis_homed(self, ax_key)
+    # 1. Platform jog buttons (XAXIS=LAT, YAXIS=SI, ZAXIS=AP, ROLL, PITCH, YAW)
+    plat_mapping = {
+        'XAXIS': 'LAT',
+        'YAXIS': 'SI',
+        'ZAXIS': 'AP',
+        'ROLL': 'ROLL',
+        'PITCH': 'PITCH',
+        'YAW': 'YAW'
+    }
+    for ax_key, dof_key in plat_mapping.items():
+        homed = is_axis_homed(self, dof_key)
         target_style = style_green if homed else style_red
-
         for btn_prefix in ['MIN_', 'PLUS_']:
-            for suffix in ['', '_LUNG']:
-                btn = getattr(self, f"{btn_prefix}{ax_key}{suffix}", None)
-                if btn is not None:
-                    btn.setStyleSheet(target_style)
+            btn = getattr(self, f"{btn_prefix}{ax_key}", None)
+            if btn is not None:
+                btn.setStyleSheet(target_style)
+
+    # 2. Lung Phantom jog buttons (strictly Cartesian X, Y, Z axes on Duet)
+    lung_mapping = {
+        'XAXIS': 'X',
+        'YAXIS': 'Y',
+        'ZAXIS': 'Z'
+    }
+    for ax_key, cart_key in lung_mapping.items():
+        homed = is_axis_homed(self, cart_key)
+        target_style = style_green if homed else style_red
+        for btn_prefix in ['MIN_', 'PLUS_']:
+            btn = getattr(self, f"{btn_prefix}{ax_key}_LUNG", None)
+            if btn is not None:
+                btn.setStyleSheet(target_style)
 
     # 2. Ind. Motors tab shared jog & move buttons
     selected_ext = getattr(self, 'selected_ext_axis', 'A')
@@ -151,8 +186,8 @@ def update_moving_button_styles(self):
     if hasattr(self, 'btn_move_ext') and self.btn_move_ext:
         self.btn_move_ext.setStyleSheet(ext_style)
 
-    # 3. Go to ... and Go to center buttons
-    all_plat_homed = (is_axis_homed(self, 'XAXIS') and is_axis_homed(self, 'YAXIS') and is_axis_homed(self, 'ZAXIS'))
+    # 3. Go to ... and Go to center buttons (ignoring YAW which is not implemented yet)
+    all_plat_homed = (is_axis_homed(self, 'LAT') and is_axis_homed(self, 'SI') and is_axis_homed(self, 'AP') and is_axis_homed(self, 'ROLL') and is_axis_homed(self, 'PITCH'))
     if hasattr(self, 'btn_go_to') and self.btn_go_to:
         self.btn_go_to.setStyleSheet(style_green if all_plat_homed else style_red)
     if hasattr(self, 'btn_go_to_center') and self.btn_go_to_center:
@@ -464,7 +499,8 @@ def update_duet_status_ui(self, data=None):
             if btn_plat_all is not None:
                 btn_plat_all.setMinimumHeight(45)
                 btn_plat_all.setMinimumWidth(140)
-                if all_homed:
+                all_plat_homed = (is_axis_homed(self, 'LAT') and is_axis_homed(self, 'SI') and is_axis_homed(self, 'AP'))
+                if all_plat_homed:
                     btn_plat_all.setStyleSheet("""
                         QPushButton {
                             background-color: blue;
@@ -495,9 +531,9 @@ def update_duet_status_ui(self, data=None):
                         QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
                     """)
 
-            # Update current position displays for cartesian axes
+            # Update current position displays for Cartesian Lung Phantom axes
             if len(xyz) >= 3:
-                for axis_name, val in zip(['XAXIS', 'YAXIS', 'ZAXIS'], xyz[:3]):
+                for axis_name, val in zip(['XAXIS_LUNG', 'YAXIS_LUNG', 'ZAXIS_LUNG'], xyz[:3]):
                     pos_field = getattr(self, f'POS_CURR_{axis_name}', None)
                     if pos_field is not None:
                         pos_field.setText(f"{val:.3f}")
@@ -514,46 +550,70 @@ def update_duet_status_ui(self, data=None):
             parsed_from_move_axes = False
             move_axes = data.get('move', {}).get('axes', [])
             if isinstance(move_axes, list) and len(move_axes) > 0:
+                configured_axes = []
                 for ax_info in move_axes:
                     if isinstance(ax_info, dict):
                         let = str(ax_info.get('letter', '')).strip()
-                        homed_val = ax_info.get('homed', ax_info.get('userHomed', 0))
-                        is_h = (homed_val == 1 or homed_val is True)
                         if let:
-                            self.ext_axes_homed[let] = is_h
-                            self.ext_axes_homed[f"'{let}"] = is_h
+                            configured_axes.append(let)
+                            clean_let = let.strip("'").strip()
+
+                            if "homed" in ax_info or "userHomed" in ax_info:
+                                homed_val = ax_info.get('homed', ax_info.get('userHomed', 0))
+                                is_h = (homed_val == 1 or homed_val is True)
+                                self.ext_axes_homed[let] = is_h
+                                self.ext_axes_homed[clean_let] = is_h
+                                self.ext_axes_homed[f"'{clean_let}"] = is_h
+
                             self.axis_min_limits[let] = ax_info.get('min', 0.0)
                             self.axis_max_limits[let] = ax_info.get('max', 200.0)
-                            self.axis_min_limits[f"'{let}"] = ax_info.get('min', 0.0)
-                            self.axis_max_limits[f"'{let}"] = ax_info.get('max', 200.0)
+                            self.axis_min_limits[clean_let] = ax_info.get('min', 0.0)
+                            self.axis_max_limits[clean_let] = ax_info.get('max', 200.0)
+                            self.axis_min_limits[f"'{clean_let}"] = ax_info.get('min', 0.0)
+                            self.axis_max_limits[f"'{clean_let}"] = ax_info.get('max', 200.0)
                             parsed_from_move_axes = True
 
-                            # Also update the current position display for this axis if it exists
-                            # Note: The field can be named self.POS_CURR_A or self.POS_CURR_'a
+                            # Also update current position display
                             field = getattr(self, f"POS_CURR_{let}", None)
                             if field is None:
-                                field = getattr(self, f"POS_CURR_'{let}", None)
+                                field = getattr(self, f"POS_CURR_{clean_let}", None)
+                            if field is None:
+                                field = getattr(self, f"POS_CURR_'{clean_let}", None)
                             user_pos = ax_info.get('userPosition', 0.0)
                             if field is not None:
                                 field.setText(f"{user_pos:.3f}")
-                            if let == 'W' or let == 'w':
+                            if let.upper() == 'W':
                                 fy = getattr(self, "POS_CURR_YAW", None)
                                 if fy is not None:
                                     fy.setText(f"{user_pos:.3f}")
+                if configured_axes:
+                    self.duet_configured_axes = configured_axes
 
-            # 2. Map axesHomed array using exact TRACE RRF axis order (only as fallback if not parsed from move.axes)
+            # 2. Map axesHomed array using exact board configuration or dynamic length fallback
             if not parsed_from_move_axes and isinstance(axes_homed, list) and len(axes_homed) > 0:
-                axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                axes_rrf_order = getattr(self, 'duet_configured_axes', None)
+                if not axes_rrf_order:
+                    if len(axes_homed) == 11:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                    else:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+
                 for idx, ax_name in enumerate(axes_rrf_order):
                     if idx < len(axes_homed):
                         is_h = (axes_homed[idx] == 1)
+                        clean_n = str(ax_name).strip("'")
                         self.ext_axes_homed[ax_name] = is_h
-                        
-                        # Fallback: update text fields too
+                        self.ext_axes_homed[clean_n] = is_h
+                        self.ext_axes_homed[f"'{clean_n}"] = is_h
+
                         field = getattr(self, f"POS_CURR_{ax_name}", None)
+                        if field is None:
+                            field = getattr(self, f"POS_CURR_{clean_n}", None)
+                        if field is None:
+                            field = getattr(self, f"POS_CURR_'{clean_n}", None)
                         if field is not None and idx < len(xyz):
                             field.setText(f"{xyz[idx]:.3f}")
-                        if ax_name == 'W':
+                        if str(ax_name).upper() == 'W':
                             fy = getattr(self, "POS_CURR_YAW", None)
                             if fy is not None and idx < len(xyz):
                                 fy.setText(f"{xyz[idx]:.3f}")
@@ -673,14 +733,11 @@ def update_duet_status_ui(self, data=None):
             if hasattr(self, 'POS_CURR_YAXIS') and self.POS_CURR_YAXIS:
                 self.POS_CURR_YAXIS.setText(f"{h_si:.3f}")
 
-            # Automatically synchronize current & target fields for all tabs (Platform & Lung Phantom)
+            # Synchronize target fields (POS_DES) with current fields (POS_CURR) for each tab when not being edited
             for ax_name in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-                master_curr = getattr(self, f"POS_CURR_{ax_name}", None)
                 for suffix in ['', '_LUNG']:
                     curr_f = getattr(self, f"POS_CURR_{ax_name}{suffix}", None)
                     des_f = getattr(self, f"POS_DES_{ax_name}{suffix}", None)
-                    if curr_f is not None and master_curr is not None and curr_f != master_curr:
-                        curr_f.setText(master_curr.text())
                     if curr_f is not None and des_f is not None and not des_f.hasFocus():
                         des_f.setText(curr_f.text())
 
@@ -810,12 +867,25 @@ def home(self, ax):
     else:
         send_cmd(self, f'G28 {ax}')
 
+    # Schedule follow-up status refreshes at 500ms, 1500ms, and 3000ms after G28
+    # to catch instantaneous or fast homing completion reliably
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(500, lambda: update_duet_status_ui(self))
+    QTimer.singleShot(1500, lambda: update_duet_status_ui(self))
+    QTimer.singleShot(3000, lambda: update_duet_status_ui(self))
+
 
 def step(self, ax, plus=True):
     """
     Function to move axes step-wise using the global step size selected by the user.
     Applies to all cartesian, platform (Roll, Pitch, Yaw), and individual motor axes (A, B, C, D, X, Y, Z, 'a, 'c, 'e, 'f).
     """
+    raw_ax = str(ax).upper().strip()
+    if raw_ax in ['YAW', 'W', "'W"]:
+        log_to_duet_console(self, "Warning: Yaw motion is not implemented yet!", color="#ff9800")
+        QMessageBox.information(self, "Not Implemented", "Yaw motion is not implemented yet!")
+        return
+
     if not getattr(self, 'duet_connected', False):
         log_to_duet_console(self, f"Error: Cannot move {ax}. Not connected to Duet.", color="#ff3333")
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
@@ -846,7 +916,13 @@ def step(self, ax, plus=True):
     # Define GCODE commands
     send_cmd(self, "G91") # set relative mode
 
-    if ax == 'XAXIS':
+    if ax in ['XAXIS_LUNG', 'LUNG_XAXIS', 'LUNG_X', 'X']:
+        cmd = f"G1 X{step_val:.4f} F600"
+    elif ax in ['YAXIS_LUNG', 'LUNG_YAXIS', 'LUNG_Y', 'Y']:
+        cmd = f"G1 Y{step_val:.4f} F600"
+    elif ax in ['ZAXIS_LUNG', 'LUNG_ZAXIS', 'LUNG_Z', 'Z']:
+        cmd = f"G1 Z{step_val:.4f} F600"
+    elif ax == 'XAXIS':
         cmd = f"G1 'e{step_val:.4f} 'f{step_val:.4f} F600"
     elif ax == 'YAXIS':
         axis_y_lo = "'c"
@@ -1120,7 +1196,16 @@ def move(self, ax):
         limits_max[ax_name] = max_val
         limits_min[ax_name] = min_val
 
-    if ax == 'XAXIS':
+    if ax in ['XAXIS_LUNG', 'LUNG_XAXIS', 'LUNG_X', 'X']:
+        cmd = f"G1 X{delta:.4f} F600"
+        send_cmd(self, cmd)
+    elif ax in ['YAXIS_LUNG', 'LUNG_YAXIS', 'LUNG_Y', 'Y']:
+        cmd = f"G1 Y{delta:.4f} F600"
+        send_cmd(self, cmd)
+    elif ax in ['ZAXIS_LUNG', 'LUNG_ZAXIS', 'LUNG_Z', 'Z']:
+        cmd = f"G1 Z{delta:.4f} F600"
+        send_cmd(self, cmd)
+    elif ax == 'XAXIS':
         cmd = f"G1 'e{delta:.4f} 'f{delta:.4f} F600"
         send_cmd(self, cmd)
     elif ax == 'YAXIS':
@@ -1437,14 +1522,13 @@ def go_to_desired_positions(self):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
 
-    # Check homing state of platform axes
+    # Check homing state of platform axes (ignoring YAW which is not implemented yet)
     plat_axis_map = [
         ('LAT', 'LAT'),
         ('SI', 'SI'),
         ('AP', 'AP'),
         ('ROLL', 'Roll'),
-        ('PITCH', 'Pitch'),
-        ('YAW', 'Yaw')
+        ('PITCH', 'Pitch')
     ]
     for ax_key, disp_name in plat_axis_map:
         if not is_axis_homed(self, ax_key):
@@ -1596,15 +1680,15 @@ def go_to_center(self):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
 
-    # Check homing state of platform axes
-    for ax_check in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
+    # Check homing state of platform axes (ignoring YAW which is not implemented yet)
+    for ax_check in ['LAT', 'SI', 'AP', 'ROLL', 'PITCH']:
         if not is_axis_homed(self, ax_check):
             log_to_duet_console(self, f"Error: Cannot move platform to center. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
             QMessageBox.warning(self, "Axis Not Homed", f"Cannot move to center.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
             return
 
-    # 1. Update target position input fields in UI to center values
-    for ax, val in [('XAXIS', '25.000'), ('YAXIS', '25.000'), ('ZAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:
+    # 1. Update target position input fields in UI to center values (LAT = 50.000 mm, SI = 25.000 mm, AP = 35.000 mm)
+    for ax, val in [('XAXIS', '50.000'), ('YAXIS', '25.000'), ('ZAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:
         des_f = getattr(self, f"POS_DES_{ax}", None)
         if des_f is not None:
             des_f.setText(val)
@@ -1617,9 +1701,9 @@ def go_to_center(self):
     if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
         axis_y_lo = "'b"
 
-    cmd_horiz = f"G1 'e25.0000 'f25.0000 'a25.0000 {axis_y_lo}25.0000 F600"
+    cmd_horiz = f"G1 'e50.0000 'f50.0000 'a25.0000 {axis_y_lo}25.0000 F600"
     cmd_vert = f"G1 A35.0000 B35.0000 C35.0000 D35.0000 F600"
 
     send_cmd(self, cmd_horiz)
     send_cmd(self, cmd_vert)
-    log_to_duet_console(self, "Moving platform to center position: A, B, C, D = 35.0 mm; 'e, 'f, 'a, 'c/'b = 25.0 mm; Roll/Pitch/Yaw = 0 deg.")
+    log_to_duet_console(self, "Moving platform to center position: A, B, C, D = 35.0 mm; 'e, 'f = 50.0 mm; 'a, 'c/'b = 25.0 mm; Roll/Pitch/Yaw = 0 deg.")

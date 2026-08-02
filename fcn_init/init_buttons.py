@@ -95,10 +95,10 @@ def initialize_software_buttons(self):
     btn_goto_lung = getattr(self, 'btn_goto_lung', None)
     if btn_goto_lung is not None:
         def move_all_lung():
-            for a in ['XAXIS', 'YAXIS', 'ZAXIS']:
+            for a in ['XAXIS_LUNG', 'YAXIS_LUNG', 'ZAXIS_LUNG']:
                 move(self, a)
         safe_connect(btn_goto_lung, lambda _c=False: move_all_lung())
-    for axis, ax_key in [('X', 'XAXIS'), ('Y', 'YAXIS'), ('Z', 'ZAXIS')]:
+    for axis, ax_key in [('X', 'XAXIS_LUNG'), ('Y', 'YAXIS_LUNG'), ('Z', 'ZAXIS_LUNG')]:
         btn = getattr(self, f'GOTO_{axis}', None)
         if btn is not None:
             safe_connect(btn, lambda _c=False, a=ax_key: move(self, a))
@@ -108,10 +108,11 @@ def initialize_software_buttons(self):
         for suffix in ['', '_LUNG']:
             b_min = getattr(self, f'MIN_{axis}{suffix}', None)
             b_plus = getattr(self, f'PLUS_{axis}{suffix}', None)
+            target_ax = f"{axis}{suffix}"
             if b_min is not None:
-                safe_connect(b_min, lambda _c=False, a=axis: step(self, a, plus=False))
+                safe_connect(b_min, lambda _c=False, a=target_ax: step(self, a, plus=False))
             if b_plus is not None:
-                safe_connect(b_plus, lambda _c=False, a=axis: step(self, a, plus=True))
+                safe_connect(b_plus, lambda _c=False, a=target_ax: step(self, a, plus=True))
 
     # REMODELED INDIVIDUAL MOTORS SHARED CONTROLS
     if hasattr(self, 'btn_ext_jog_min') and self.btn_ext_jog_min:
@@ -127,8 +128,9 @@ def initialize_software_buttons(self):
     for axis_key in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
         for suffix in ['', '_LUNG']:
             field = getattr(self, f'POS_DES_{axis_key}{suffix}', None)
+            target_ax = f"{axis_key}{suffix}"
             if field is not None:
-                safe_connect_return(field, lambda _a=axis_key: move(self, _a))
+                safe_connect_return(field, lambda _a=target_ax: move(self, _a))
     if hasattr(self, 'POS_DES_EXT') and self.POS_DES_EXT:
         safe_connect_return(self.POS_DES_EXT, lambda: move_selected_ext_axis(self))
 
