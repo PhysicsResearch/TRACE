@@ -68,7 +68,8 @@ def clear_status_plot(self):
         't': [], 'X': [], 'Y': [], 'Z': [],
         'A': [], 'B': [], 'C': [], 'D': [],
         "'e": [], "'f": [], "'a": [], "'c": [],
-        'Roll': [], 'Pitch': [], 'Yaw': []
+        'Roll': [], 'Pitch': [], 'Yaw': [],
+        'LAT': [], 'AP': [], 'SI': []
     }
     self.status_t0 = None
     render_status_plot(self)
@@ -163,13 +164,15 @@ def render_status_plot(self):
                 ref_t = ref_data.get('t', [])
                 ref_vals = ref_data.get(key, [])
                 if len(ref_t) > 0 and len(ref_vals) == len(ref_t):
-                    # Read reference time offset (default 0.0s)
-                    ref_offset = 0.0
+                    # Read reference time offset (supports float decimals, retains last valid offset while typing)
+                    ref_offset = getattr(self, '_last_valid_ref_offset', 0.0)
                     if hasattr(self, 'input_ref_offset') and self.input_ref_offset is not None:
+                        text_val = self.input_ref_offset.text().strip()
                         try:
-                            ref_offset = float(self.input_ref_offset.text().strip())
+                            ref_offset = float(text_val)
+                            self._last_valid_ref_offset = ref_offset
                         except ValueError:
-                            ref_offset = 0.0
+                            ref_offset = getattr(self, '_last_valid_ref_offset', 0.0)
 
                     ref_t_shifted = np.asarray(ref_t, dtype=float) + ref_offset
                     min_y = min(min_y, min(ref_vals))
@@ -267,7 +270,8 @@ def clear_status_plot_data(self):
         't': [], 'X': [], 'Y': [], 'Z': [],
         'A': [], 'B': [], 'C': [], 'D': [],
         "'e": [], "'f": [], "'a": [], "'c": [],
-        'Roll': [], 'Pitch': [], 'Yaw': []
+        'Roll': [], 'Pitch': [], 'Yaw': [],
+        'LAT': [], 'AP': [], 'SI': []
     }
     if hasattr(self, 'status_plot_lines'):
         self.status_plot_lines.clear()
@@ -343,7 +347,7 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
                         norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
                         row_data[norm_axis] = float(val)
             
-            # Primary motion axes for distance computation to prevent double-counting secondary/duplicate keys
+            # Primary motion axes for distance computation matching TRACE G-code generator
             primary_axes = [ax for ax in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z', "'e", "'f", "'a", "'c"] if ax in row_data]
             if not primary_axes:
                 primary_axes = [ax for ax in row_data.keys() if ax != 'F']
@@ -425,19 +429,22 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
     return ref_dict
 
 
-def auto_load_current_gcode_reference(self):
-    """Attempts to fetch the active or last GCODE filename from Duet and load its reference data."""
-    if getattr(self, 'status_reference_data', None) is not None:
-        return True
-    filename = get_curr_file(self, init=False)
+def auto_load_current_gcode_reference(self, filename=None, force=False):
+    """Attempts to fetch the active or specified GCODE filename from Duet and load its reference data."""
+    if not filename:
+        filename = get_curr_file(self, init=False)
     if not filename:
         return False
 
-    from PySide6.QtWidgets import QProgressDialog
-    from PySide6.QtCore import Qt, QCoreApplication
-
     fname = os.path.basename(filename)
-    from PySide6.QtWidgets import QWidget, QApplication
+
+    # Return True immediately if reference data is already loaded for this exact file
+    if not force and getattr(self, 'status_reference_data', None) is not None:
+        if getattr(self, '_loaded_ref_filename', None) == fname:
+            return True
+
+    from PySide6.QtWidgets import QProgressDialog, QWidget, QApplication
+    from PySide6.QtCore import Qt, QCoreApplication
     progress = None
     if QApplication.instance() is not None:
         parent_widget = self if isinstance(self, QWidget) else None
@@ -466,6 +473,7 @@ def auto_load_current_gcode_reference(self):
         if res.status_code == 200 and res.text:
             ref_dict = load_and_parse_gcode_reference(self, res.text, progress_dialog=progress)
             self.status_reference_data = ref_dict
+            self._loaded_ref_filename = fname
             return ref_dict is not None
     except Exception as e:
         print(f"Failed to auto-load reference for {filename}: {e}")
@@ -501,52 +509,71 @@ def start_selected_gcode_execution(self):
     url = f'http://{ip}/rr_gcode'
     fname = os.path.basename(fpath) if os.path.isabs(fpath) else fpath.strip("/")
 
-    # Check if Pre-setup is enabled (default True)
-    check_pre = getattr(self, 'check_pre_setup', None)
-    if check_pre is not None and check_pre.isChecked():
-        if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
-            self.statusDuetMessage.setText(f"Pre-positioning to starting coordinates of {fname}...")
-            QCoreApplication.processEvents()
+    # Always pre-position platform to starting coordinates of fname before launching execution
+    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
+        self.statusDuetMessage.setText(f"Pre-positioning to starting coordinates of {fname}...")
+        QCoreApplication.processEvents()
 
-        first_g1 = None
-        ref_data = getattr(self, 'status_reference_data', None)
-        if ref_data is not None:
-            g1_parts = ["G1"]
-            for ax in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z', "'e", "'f", "'a", "'c"]:
-                if ax in ref_data and len(ref_data[ax]) > 0:
-                    val = ref_data[ax][0]
-                    g1_parts.append(f"{ax}{val:.3f}")
-            if len(g1_parts) > 1:
-                first_g1 = " ".join(g1_parts) + " F1500"
+    first_g1 = None
+    try:
+        dl_url = f'http://{ip}/rr_download?name=/gcodes/{fname}'
+        res = duet_request(dl_url, timeout=3)
+        lines = res.text.splitlines() if (res.status_code == 200 and res.text) else []
+        if not lines and os.path.exists(fpath):
+            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+        for l in lines:
+            l_clean = l.split(';')[0].strip()
+            if l_clean.startswith('G1') and len(l_clean) > 3:
+                first_g1 = l_clean
+                break
+    except Exception as e:
+        print(f"Could not read first G1 line from {fname}: {e}")
 
-        if not first_g1:
-            try:
-                dl_url = f'http://{ip}/rr_download?name=/gcodes/{fname}'
-                res = duet_request(dl_url, timeout=3)
-                lines = res.text.splitlines() if (res.status_code == 200 and res.text) else []
-                if not lines and os.path.exists(fpath):
-                    with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                        lines = f.readlines()
-                for l in lines:
-                    l_clean = l.split(';')[0].strip()
-                    if l_clean.startswith('G1') and len(l_clean) > 3:
-                        first_g1 = l_clean
-                        break
-            except Exception:
-                pass
+    if first_g1:
+        try:
+            duet_request(url, params={'gcode': f'G90\n{first_g1}\nM400'}, timeout=5)
+            # Wait for pre-position move to finish
+            t_pre = time.perf_counter()
+            while time.perf_counter() - t_pre < 2.5:
+                status_c = getattr(self, 'duet_status_code', 'I')
+                if status_c in ['I', 'S']:
+                    break
+                time.sleep(0.05)
+        except Exception as e:
+            print(f"Pre-positioning move failed: {e}")
 
-        if first_g1:
-            try:
-                duet_request(url, params={'gcode': f'{first_g1}\nM400'}, timeout=5)
-                time.sleep(0.5)
-            except Exception as e:
-                print(f"Pre-positioning move failed: {e}")
+    # Parse target starting coordinates from first_g1 for exact snapshot anchor
+    snapshot = {}
+    if first_g1:
+        import re
+        pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
+        matches = pattern.findall(first_g1)
+        for axis, val in matches:
+            if axis != 'G' and axis != 'F':
+                if axis.startswith("'") or (len(axis) == 1 and axis.islower()):
+                    clean_ax = axis.strip("'").lower()
+                    snapshot[f"'{clean_ax}"] = float(val)
+                    snapshot[clean_ax] = float(val)
+                else:
+                    norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
+                    snapshot[norm_axis] = float(val)
 
     self.status_t0 = None
     self.status_plot_data = None
     self.status_stopped = False
+    self.waiting_for_motion_start = True
+    self._start_pos_snapshot = snapshot if snapshot else None
     self._last_auto_sf = 100.0
     
+    # Load reference data specifically for this G-code file IF 'Show reference' is checked and not already loaded
+    show_ref_check = getattr(self, 'check_show_reference', None)
+    if show_ref_check is not None and show_ref_check.isChecked():
+        if getattr(self, 'status_reference_data', None) is None or getattr(self, '_loaded_ref_filename', None) != fname:
+            auto_load_current_gcode_reference(self, filename=fname, force=False)
+    else:
+        self.status_reference_data = None
+
     if hasattr(self, 'status_plot_lines'):
         self.status_plot_lines.clear()
 
@@ -1113,7 +1140,7 @@ def update_status_fast(self):
         # Append to plot data ONLY during active motion (P: Printing/Running, S: Paused, R: Resuming, M: Simulating, B: Busy)
         status_code = getattr(self, 'duet_status_code', 'I')
         if status_code in ["P", "S", "R", "M", "B"]:
-            if not hasattr(self, 'status_plot_data') or self.status_plot_data is None or 'A' not in self.status_plot_data:
+            if not hasattr(self, 'status_plot_data') or self.status_plot_data is None or 'A' not in self.status_plot_data or 'LAT' not in self.status_plot_data:
                 self.status_plot_data = {
                     't': [], 'X': [], 'Y': [], 'Z': [],
                     'A': [], 'B': [], 'C': [], 'D': [],
@@ -1122,10 +1149,77 @@ def update_status_fast(self):
                     'LAT': [], 'AP': [], 'SI': []
                 }
 
-            t_now = time.time()
+            # Detect physical motion start to align live t=0.0s with reference curve t=0.0s
+            if getattr(self, 'waiting_for_motion_start', False):
+                if not hasattr(self, '_start_pos_snapshot') or self._start_pos_snapshot is None:
+                    self._start_pos_snapshot = {k: v for k, v in axis_positions.items()}
+                    return
+
+                # Check if any motor axis has moved by >= 0.002mm from starting snapshot
+                has_moved = False
+                for k in ['A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", 'X', 'Y', 'Z']:
+                    if k in axis_positions and k in self._start_pos_snapshot:
+                        if abs(axis_positions[k] - self._start_pos_snapshot[k]) >= 0.002:
+                            has_moved = True
+                            break
+
+                if not has_moved:
+                    return  # Wait until Duet physically starts moving motors
+                else:
+                    self.waiting_for_motion_start = False
+                    self.status_t0 = time.perf_counter()
+                    self._last_sample_perf = self.status_t0
+                    self._last_elapsed_t = 0.0
+                    self._last_dt_smooth = 0.01
+
+                    # Seed initial t=0.000s baseline origin point from snapshot
+                    sn = self._start_pos_snapshot
+                    sn_a, sn_b = sn.get('A', 15.0), sn.get('B', 15.0)
+                    sn_c, sn_d = sn.get('C', 15.0), sn.get('D', 15.0)
+                    sn_ap = (sn_a + sn_b + sn_c + sn_d) / 4.0
+                    sn_e, sn_f = sn.get("'e", 15.0), sn.get("'f", 15.0)
+                    sn_lat = (sn_e + sn_f) / 2.0
+                    sn_lo_a, sn_lo_c = sn.get("'a", 15.0), sn.get("'c", 15.0)
+                    sn_si = (sn_lo_a + sn_lo_c) / 2.0
+
+                    self.status_plot_data['t'].append(0.0)
+                    self.status_plot_data['X'].append(sn.get('X', 0.0))
+                    self.status_plot_data['Y'].append(sn.get('Y', 0.0))
+                    self.status_plot_data['Z'].append(sn.get('Z', 0.0))
+                    self.status_plot_data['A'].append(sn_a)
+                    self.status_plot_data['B'].append(sn_b)
+                    self.status_plot_data['C'].append(sn_c)
+                    self.status_plot_data['D'].append(sn_d)
+                    self.status_plot_data["'e"].append(sn_e)
+                    self.status_plot_data["'f"].append(sn_f)
+                    self.status_plot_data["'a"].append(sn_lo_a)
+                    self.status_plot_data["'c"].append(sn_lo_c)
+                    self.status_plot_data['Roll'].append(0.0)
+                    self.status_plot_data['Pitch'].append(0.0)
+                    self.status_plot_data['Yaw'].append(0.0)
+                    self.status_plot_data['LAT'].append(sn_lat)
+                    self.status_plot_data['AP'].append(sn_ap)
+                    self.status_plot_data['SI'].append(sn_si)
+
+            t_now = time.perf_counter()
             if not hasattr(self, 'status_t0') or self.status_t0 is None:
                 self.status_t0 = t_now
-            elapsed_t = t_now - self.status_t0
+                self._last_sample_perf = t_now
+                self._last_elapsed_t = 0.0
+                self._last_dt_smooth = 0.01
+
+            dt_raw = t_now - getattr(self, '_last_sample_perf', t_now)
+            self._last_sample_perf = t_now
+
+            # Apply low-pass exponential smoothing filter to eliminate Wi-Fi packet arrival jitter
+            if 0.001 <= dt_raw <= 0.2:
+                dt_smooth = 0.35 * dt_raw + 0.65 * getattr(self, '_last_dt_smooth', dt_raw)
+                self._last_dt_smooth = dt_smooth
+                elapsed_t = getattr(self, '_last_elapsed_t', 0.0) + dt_smooth
+            else:
+                elapsed_t = t_now - self.status_t0
+
+            self._last_elapsed_t = elapsed_t
 
             self.status_plot_data['t'].append(elapsed_t)
             self.status_plot_data['X'].append(axis_positions['X'])

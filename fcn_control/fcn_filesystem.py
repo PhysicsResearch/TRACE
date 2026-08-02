@@ -331,74 +331,11 @@ def delete_selected_item(self):
 
 def select_gcode_for_status(self, fpath):
     """
-    Selects a G-code file, loads reference data, switches to the Status tab,
-    and prepares it for execution when the user clicks 'Start'.
+    Selects a G-code file, switches to the Status tab, and prepares it for execution.
+    Reference plot data is automatically downloaded on Start if 'Show reference' is enabled.
     """
     self.selected_gcode_path = fpath
-
-    # Ask user if they want to load reference data for real-time plot
-    reply = QMessageBox.question(
-        self,
-        "Load Reference Plot Data?",
-        f"Would you like to load reference data from '{os.path.basename(fpath)}' for real-time plotting?",
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.Yes
-    )
-
-    if reply == QMessageBox.Yes:
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt, QCoreApplication
-        
-        fname = os.path.basename(fpath)
-        progress = QProgressDialog(f"Loading reference plot data from '{fname}'...", "Cancel", 0, 100, self)
-        progress.setWindowTitle("Loading Reference Data")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumWidth(520)
-        progress.setMinimumHeight(160)
-        progress.setStyleSheet("""
-            QProgressDialog { font-size: 16px; font-weight: bold; }
-            QLabel { font-size: 16px; min-height: 35px; }
-            QProgressBar { text-align: center; font-size: 16px; font-weight: bold; height: 30px; border-radius: 4px; }
-            QPushButton { font-size: 16px; font-weight: bold; min-width: 100px; min-height: 38px; border-radius: 4px; }
-        """)
-        progress.setValue(10)
-        progress.show()
-        QCoreApplication.processEvents()
-
-        ip = get_clean_duet_ip(self)
-        dl_url = f'http://{ip}/rr_download?name=/gcodes/{fpath.strip("/")}'
-        try:
-            from fcn_monitor.fcn_duet import load_and_parse_gcode_reference
-            res = duet_request(dl_url, timeout=5)
-            progress.setValue(50)
-            QCoreApplication.processEvents()
-
-            if res.status_code == 200 and res.text:
-                self.status_reference_data = load_and_parse_gcode_reference(self, res.text, progress_dialog=progress)
-            elif os.path.exists(fpath):
-                self.status_reference_data = load_and_parse_gcode_reference(self, fpath, progress_dialog=progress)
-            else:
-                self.status_reference_data = None
-        except Exception:
-            if os.path.exists(fpath):
-                from fcn_monitor.fcn_duet import load_and_parse_gcode_reference
-                self.status_reference_data = load_and_parse_gcode_reference(self, fpath, progress_dialog=progress)
-            else:
-                self.status_reference_data = None
-        finally:
-            progress.setValue(100)
-            progress.close()
-    else:
-        self.status_reference_data = None
-
-    # Show and enable check_show_reference checkbox on Status tab if reference is loaded
-    if hasattr(self, 'check_show_reference') and self.check_show_reference is not None:
-        if getattr(self, 'status_reference_data', None) is not None:
-            self.check_show_reference.setVisible(True)
-            self.check_show_reference.setEnabled(True)
-            self.check_show_reference.setChecked(True)
-        else:
-            self.check_show_reference.setChecked(False)
+    self.status_reference_data = None
 
     if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
         self.statusDuetMessage.setText(f"File 0:/gcodes/{os.path.basename(fpath)} selected for printing. Press 'Start' to begin motion.")

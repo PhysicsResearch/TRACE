@@ -188,13 +188,7 @@ def build_status_tab(self):
 
     top_right_box.addSpacing(12)
 
-    # Add Pre-setup checkbox (placed just after Auto-sync Speed, enabled by default)
-    self.check_pre_setup = QCheckBox("Pre-setup", self.card_status)
-    self.check_pre_setup.setChecked(True)
-    self.check_pre_setup.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #2e7d32; }")
-    top_right_box.addWidget(self.check_pre_setup)
 
-    top_right_box.addSpacing(12)
 
     # Add Auto release and Auto pause checkboxes
     self.check_auto_release = QCheckBox("Auto release", self.card_status)
@@ -424,8 +418,10 @@ def build_status_tab(self):
         }
     """)
     from PySide6.QtGui import QDoubleValidator
-    validator_offset = QDoubleValidator(-1000.0, 1000.0, 2, self.input_ref_offset)
+    from PySide6.QtCore import QLocale
+    validator_offset = QDoubleValidator(-1000.0, 1000.0, 3, self.input_ref_offset)
     validator_offset.setNotation(QDoubleValidator.StandardNotation)
+    validator_offset.setLocale(QLocale(QLocale.C))
     self.input_ref_offset.setValidator(validator_offset)
     register_touch_line_edit(self, self.input_ref_offset, label_name="Ref. Offset (s)")
     self.input_ref_offset.textChanged.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
