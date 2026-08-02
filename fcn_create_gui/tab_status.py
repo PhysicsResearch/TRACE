@@ -168,7 +168,33 @@ def build_status_tab(self):
     sf_hlayout.addWidget(self.plusSf)
 
     top_right_box.addWidget(sf_container)
-    top_right_box.addSpacing(25)
+    top_right_box.addSpacing(15)
+
+    # Add Auto-sync Speed (placed just before Pre-setup, disabled by default)
+    self.check_auto_sync = QCheckBox("Auto-sync Speed", self.card_status)
+    self.check_auto_sync.setChecked(False)
+    self.check_auto_sync.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #1565c0; }")
+    top_right_box.addWidget(self.check_auto_sync)
+
+    def on_auto_sync_toggled(enabled):
+        # Disable manual speed controls when auto-sync is enabled
+        self.labelSf.setEnabled(not enabled)
+        self.minSf.setEnabled(not enabled)
+        self.plusSf.setEnabled(not enabled)
+        style = "background-color: #f5f5f5; color: #9e9e9e;" if enabled else "background-color: #ffffff; color: #0d47a1;"
+        self.labelSf.setStyleSheet(f"QLineEdit {{ font-weight: bold; font-size: 14px; border: 1px solid #b0bec5; border-radius: 4px; padding: 4px; text-align: center; {style} }}")
+
+    self.check_auto_sync.toggled.connect(on_auto_sync_toggled)
+
+    top_right_box.addSpacing(12)
+
+    # Add Pre-setup checkbox (placed just after Auto-sync Speed, enabled by default)
+    self.check_pre_setup = QCheckBox("Pre-setup", self.card_status)
+    self.check_pre_setup.setChecked(True)
+    self.check_pre_setup.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #2e7d32; }")
+    top_right_box.addWidget(self.check_pre_setup)
+
+    top_right_box.addSpacing(12)
 
     # Add Auto release and Auto pause checkboxes
     self.check_auto_release = QCheckBox("Auto release", self.card_status)
@@ -176,7 +202,7 @@ def build_status_tab(self):
     self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
     top_right_box.addWidget(self.check_auto_release)
 
-    top_right_box.addSpacing(15)
+    top_right_box.addSpacing(12)
     self.check_auto_pause = QCheckBox("Auto pause", self.card_status)
     self.check_auto_pause.setChecked(False)
     self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
@@ -358,6 +384,28 @@ def build_status_tab(self):
     self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.txt)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
 
+    # Max Speed Adjustment Limit control (default 20%)
+    lbl_max_speed_adj = QLabel("Max Speed Adj (%):", plot_box)
+    lbl_max_speed_adj.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
+
+    self.input_max_speed_adj = QLineEdit("20", plot_box)
+    self.input_max_speed_adj.setFixedWidth(55)
+    self.input_max_speed_adj.setStyleSheet("""
+        QLineEdit {
+            background-color: #ffffff;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            padding: 4px 6px;
+            color: #d81b60;
+        }
+    """)
+    validator_max_adj = QDoubleValidator(1.0, 200.0, 1, self.input_max_speed_adj)
+    validator_max_adj.setNotation(QDoubleValidator.StandardNotation)
+    self.input_max_speed_adj.setValidator(validator_max_adj)
+    register_touch_line_edit(self, self.input_max_speed_adj, label_name="Max Speed Adj (%)")
+
     # Reference Time Offset control (placed to the left of Time interval)
     lbl_ref_offset = QLabel("Ref. Offset (s):", plot_box)
     lbl_ref_offset.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
@@ -412,6 +460,8 @@ def build_status_tab(self):
     log_layout.addWidget(self.PhOperFolder, stretch=1)
     log_layout.addWidget(self.setPhOperFolder)
     log_layout.addWidget(self.check_record_log)
+    log_layout.addWidget(lbl_max_speed_adj)
+    log_layout.addWidget(self.input_max_speed_adj)
     log_layout.addWidget(lbl_ref_offset)
     log_layout.addWidget(self.input_ref_offset)
     log_layout.addWidget(lbl_time_interval)

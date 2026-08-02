@@ -450,9 +450,11 @@ def auto_load_current_gcode_reference(self):
 def start_selected_gcode_execution(self):
     """
     Executes the currently selected G-code file on the Duet when the green Start button is clicked.
-    Can be re-clicked after a run finishes to run the exact same file again from the start.
+    If 'Pre-setup' is enabled, pre-positions the platform at the initial G-code coordinates
+    before launching execution and tracking.
     """
     from PySide6.QtWidgets import QMessageBox
+    from PySide6.QtCore import QCoreApplication
 
     if not getattr(self, 'duet_connected', False):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before starting motion.")
@@ -466,17 +468,60 @@ def start_selected_gcode_execution(self):
         QMessageBox.warning(self, "No File Selected", "Please select a G-code file from the Files tab first.")
         return
 
+    ip = get_clean_duet_ip(self)
+    url = f'http://{ip}/rr_gcode'
+    fname = os.path.basename(fpath) if os.path.isabs(fpath) else fpath.strip("/")
+
+    # Check if Pre-setup is enabled (default True)
+    check_pre = getattr(self, 'check_pre_setup', None)
+    if check_pre is not None and check_pre.isChecked():
+        if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
+            self.statusDuetMessage.setText(f"Pre-positioning to starting coordinates of {fname}...")
+            QCoreApplication.processEvents()
+
+        first_g1 = None
+        ref_data = getattr(self, 'status_reference_data', None)
+        if ref_data is not None:
+            g1_parts = ["G1"]
+            for ax in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z', "'e", "'f", "'a", "'c"]:
+                if ax in ref_data and len(ref_data[ax]) > 0:
+                    val = ref_data[ax][0]
+                    g1_parts.append(f"{ax}{val:.3f}")
+            if len(g1_parts) > 1:
+                first_g1 = " ".join(g1_parts) + " F1500"
+
+        if not first_g1:
+            try:
+                dl_url = f'http://{ip}/rr_download?name=/gcodes/{fname}'
+                res = duet_request(dl_url, timeout=3)
+                lines = res.text.splitlines() if (res.status_code == 200 and res.text) else []
+                if not lines and os.path.exists(fpath):
+                    with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                for l in lines:
+                    l_clean = l.split(';')[0].strip()
+                    if l_clean.startswith('G1') and len(l_clean) > 3:
+                        first_g1 = l_clean
+                        break
+            except Exception:
+                pass
+
+        if first_g1:
+            try:
+                duet_request(url, params={'gcode': f'{first_g1}\nM400'}, timeout=5)
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"Pre-positioning move failed: {e}")
+
     self.status_t0 = None
     self.status_plot_data = None
     self.status_stopped = False
+    self._last_auto_sf = 100.0
     
     if hasattr(self, 'status_plot_lines'):
         self.status_plot_lines.clear()
 
-    ip = get_clean_duet_ip(self)
-    url = f'http://{ip}/rr_gcode'
     try:
-        fname = os.path.basename(fpath) if os.path.isabs(fpath) else fpath.strip("/")
         duet_request(url, params={'gcode': f'M32 0:/gcodes/{fname}'}, timeout=4)
         if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
             self.statusDuetMessage.setText(f"Started execution of 0:/gcodes/{fname}")
@@ -686,6 +731,13 @@ def update_status_tab_dashboard(self):
             else:
                 self.labelSf.setText(f"{speed_factor:.3f}%")
 
+        # Auto-sync speed processing during active printing/motion
+        if status_code in ["P", "R", "S", "M", "B"]:
+            try:
+                process_auto_sync_speed(self)
+            except Exception as se:
+                print(f"Error in auto-sync speed: {se}")
+
         # Reset error count on successful status update
         self.duet_status_errors = 0
 
@@ -706,6 +758,121 @@ def update_status_tab_dashboard(self):
             self.duet_connected = False
             from fcn_control.fcn_control import update_connection_status_ui
             update_connection_status_ui(self, connected=False)
+
+
+def process_auto_sync_speed(self):
+    """
+    Evaluates phase lag using sliding window cross-correlation and adjusts Duet Speed Factor (M220) automatically.
+    If required speed adjustment exceeds max_limit (default 20%), turns Auto-sync OFF and alerts user.
+    """
+    check_sync = getattr(self, 'check_auto_sync', None)
+    if check_sync is None or not check_sync.isChecked():
+        return
+
+    plot_data = getattr(self, 'status_plot_data', None)
+    ref_data = getattr(self, 'status_reference_data', None)
+    if not plot_data or not ref_data:
+        return
+
+    t_live = plot_data.get('t', [])
+    if len(t_live) < 30:  # Need at least ~3 seconds of live position points
+        return
+
+    t_elapsed = t_live[-1]
+    if t_elapsed < 4.0:
+        return
+
+    # Select primary signal trace for correlation
+    target_key = None
+    for key in ['AP', 'LAT', 'SI', 'Roll', 'X', 'Y', 'Z']:
+        if key in plot_data and key in ref_data and len(plot_data[key]) == len(t_live):
+            target_key = key
+            break
+
+    if not target_key:
+        return
+
+    # Take recent 15s window of live plot points
+    window_sec = 15.0
+    recent_indices = [i for i, t in enumerate(t_live) if t >= max(0.0, t_elapsed - window_sec)]
+    if len(recent_indices) < 15:
+        return
+
+    t_win = np.array([t_live[i] for i in recent_indices], dtype=float)
+    y_win = np.array([plot_data[target_key][i] for i in recent_indices], dtype=float)
+
+    # Interpolate matching reference values over same time window
+    ref_t = ref_data.get('t', [])
+    ref_y = ref_data.get(target_key, [])
+    if len(ref_t) < 2 or len(ref_y) != len(ref_t):
+        return
+
+    # Apply any manual Ref. Offset
+    ref_offset = 0.0
+    if hasattr(self, 'input_ref_offset') and self.input_ref_offset is not None:
+        try: ref_offset = float(self.input_ref_offset.text().strip())
+        except ValueError: pass
+
+    y_ref_win = np.interp(t_win - ref_offset, ref_t, ref_y)
+
+    dt_sample = float(np.mean(np.diff(t_win))) if len(t_win) > 1 else 0.02
+    if dt_sample <= 0:
+        return
+
+    # Estimate time lag via cross-correlation
+    max_shift_samples = int(3.0 / dt_sample)
+    y_win_norm = y_win - np.mean(y_win)
+    y_ref_norm = y_ref_win - np.mean(y_ref_win)
+
+    if np.std(y_win_norm) < 1e-3 or np.std(y_ref_norm) < 1e-3:
+        return
+
+    corr = np.correlate(y_win_norm, y_ref_norm, mode='full')
+    zero_idx = len(y_win_norm) - 1
+    search_start = max(0, zero_idx - max_shift_samples)
+    search_end = min(len(corr), zero_idx + max_shift_samples + 1)
+
+    best_idx = search_start + int(np.argmax(corr[search_start:search_end]))
+    sample_shift = best_idx - zero_idx
+    time_lag = sample_shift * dt_sample  # positive = live lags behind reference
+
+    # Calculate required speed factor
+    drift_rate = time_lag / max(1.0, t_elapsed)
+    required_sf = 100.0 * (1.0 + drift_rate) + (time_lag * 0.5)
+    required_sf = max(10.0, min(300.0, required_sf))
+    required_adj_pct = abs(required_sf - 100.0)
+
+    # Read maximum allowed adjustment limit (default 20%)
+    max_limit = 20.0
+    if hasattr(self, 'input_max_speed_adj') and self.input_max_speed_adj is not None:
+        try:
+            val = float(self.input_max_speed_adj.text().strip())
+            if val > 0:
+                max_limit = val
+        except ValueError:
+            max_limit = 20.0
+
+    # Limit check: if required adjustment > max_limit, disable Auto-sync and warn user
+    if required_adj_pct > max_limit:
+        self.check_auto_sync.setChecked(False)  # Turn Auto-sync OFF
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            self,
+            "Auto-Sync Limit Exceeded",
+            f"Auto-Sync Disabled!\n\n"
+            f"Required speed adjustment ({required_adj_pct:.1f}%) exceeds maximum limit ({max_limit:.1f}%).\n\n"
+            f"Auto-Sync has been turned OFF for safety. Please check your setup or adjust speed manually."
+        )
+        return
+
+    # Apply speed adjustment if within limits and changed by >= 0.5%
+    last_applied = getattr(self, '_last_auto_sf', 100.0)
+    if abs(required_sf - last_applied) >= 0.5:
+        self._last_auto_sf = required_sf
+        self.status_speed_factor = required_sf
+        if hasattr(self, 'labelSf') and self.labelSf:
+            self.labelSf.setText(f"{required_sf:.1f}%")
+        set_GCODE_speed(self, required_sf)
 
 
 def get_positions_only_fast(self, ip):
