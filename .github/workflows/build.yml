@@ -1,0 +1,186 @@
+name: Build TRACE (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "App version, e.g. 1.0.0"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      KMP_DUPLICATE_LIB_OK: "TRUE"
+      PYSIDE_DISABLE_INTERNAL_QT_CONF: "1"
+      QT_PLUGIN_PATH: ""
+      QT_QPA_PLATFORM_PLUGIN_PATH: ""
+      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Cache Nuitka cache
+        uses: actions/cache@v4
+        with:
+          path: .nuitka-cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/*.py', '.github/workflows/build.yml') }}
+          restore-keys: ${{ runner.os }}-nuitka-
+
+      - name: Build with Nuitka
+        shell: powershell
+        env:
+          PYSIDE_DISABLE_INTERNAL_QT_CONF: "1"
+          QT_PLUGIN_PATH: ""
+          QT_QPA_PLATFORM_PLUGIN_PATH: ""
+          MPLBACKEND: "Agg"
+        run: |
+          python -m venv venv-build
+          $venvScripts = "$(Resolve-Path .\venv-build\Scripts)"
+
+          $oldPath = $env:Path
+          $env:Path = "$venvScripts;$env:SystemRoot\system32;$env:SystemRoot"
+
+          python -m pip install --upgrade pip wheel setuptools
+
+          pip install `
+            "PySide6==6.10.0" `
+            "PySide6-Addons==6.10.0" `
+            "PySide6-Essentials==6.10.0" `
+            "shiboken6==6.10.0"
+
+          pip install "numpy==2.4.*" "scipy==1.16.*"
+          pip install "matplotlib==3.10.*"
+          pip install pillow openpyxl certifi
+          pip install "pandas==3.0.*"
+          pip install "requests>=2.32"
+
+          pip install "nuitka>=2.2" ordered-set zstandard
+
+          $qtBase = python -c "import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__),'Qt'))"
+          $qtBase = ($qtBase.Trim() -replace '\\','/')
+          $qtRes  = "$qtBase/resources"
+          $qtTr   = "$qtBase/translations"
+          $qtExec = "$qtBase/libexec"
+
+          $qtArgs = @()
+          if (Test-Path $qtRes)  { $qtArgs += "--include-data-dir=$qtRes=PySide6/Qt/resources" }
+          if (Test-Path $qtTr)   { $qtArgs += "--include-data-dir=$qtTr=PySide6/Qt/translations" }
+          if (Test-Path $qtExec) { $qtArgs += "--include-data-dir=$qtExec=PySide6/Qt/libexec" }
+
+          $args = @(
+            "Launch_ImGUI.py",
+            "--standalone",
+            "--remove-output",
+            "--output-dir=dist\TRACE",
+            "--enable-plugin=pyside6",
+            "--include-qt-plugins=platforms,imageformats,styles",
+            "--windows-console-mode=force",
+            "---report=dist\TRACE\build_report.html".Replace("---","--"),
+            "--assume-yes-for-downloads",
+
+            "--include-package=numpy",
+            "--include-package=scipy",
+            "--include-package=matplotlib",
+            "--include-package-data=matplotlib",
+            "--include-package=requests",
+            "--include-package-data=certifi",
+            "--include-package=openpyxl",
+            "--include-package-data=openpyxl",
+            "--include-package=pandas",
+            "--include-package-data=pandas",
+            "--include-package=PIL",
+            
+            "--include-data-dir=assets=assets"
+          )
+
+          $args += $qtArgs
+
+          $oldQtConf = $env:PYSIDE_DISABLE_INTERNAL_QT_CONF
+          $env:PYSIDE_DISABLE_INTERNAL_QT_CONF = ""
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          python -m nuitka @args
+
+          $env:PYSIDE_DISABLE_INTERNAL_QT_CONF = $oldQtConf
+          $env:Path = $oldPath
+
+      - name: Flatten Nuitka dist into dist\TRACE
+        shell: powershell
+        run: |
+          $root = "dist\TRACE"
+          $src  = Join-Path $root "Launch_ImGUI.dist"
+
+          if (!(Test-Path $src)) {
+            throw "Expected $src not found"
+          }
+
+          Copy-Item -Path "$src\*" -Destination $root -Recurse -Force
+          Remove-Item -Path $src -Recurse -Force
+
+      - name: Verify dist contents
+        shell: powershell
+        run: |
+          if (-not (Test-Path "dist\TRACE\Launch_ImGUI.exe")) {
+            throw "Launch_ImGUI.exe missing"
+          }
+
+      - name: Zip portable build
+        shell: powershell
+        run: |
+          Compress-Archive `
+            -Path "dist/TRACE/*" `
+            -DestinationPath "TRACE-win-portable-v${{ github.event.inputs.app_version }}.zip" `
+            -Force
+
+      - name: Ensure Inno Setup is installed
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${Env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if (!(Test-Path $iscc)) {
+              $isccAlt = "${Env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+              if (Test-Path $isccAlt) {
+                $iscc = $isccAlt
+              } else {
+                throw "ISCC.exe not found after install."
+              }
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Build TRACE installer
+        shell: powershell
+        run: |
+          $iscc = "${Env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            $iscc = "${Env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc TRACE.iss
+
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TRACE-portable-v${{ github.event.inputs.app_version }}
+          path: TRACE-win-portable-v${{ github.event.inputs.app_version }}.zip
+
+      - name: Upload Installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TRACE-Installer-v${{ github.event.inputs.app_version }}
+          path: Output/TRACE-Setup.exe
