@@ -71,15 +71,15 @@ def is_axis_homed(self, axis_key):
         return bool(h.get(clean_ax, False))
 
     # Motion Platform degrees of freedom (driven by platform motors 'e, 'f, 'a, 'c/'b, A, B, C, D)
-    elif upper_key in ['LAT']:
+    elif upper_key in ['LAT', 'LATAXIS']:
         e_homed = bool(h.get("'e", False) or h.get("e", False) or h.get("E", False))
         f_homed = bool(h.get("'f", False) or h.get("f", False) or h.get("F", False))
         return (e_homed and f_homed) or bool(h.get('LAT', False))
-    elif upper_key in ['SI']:
+    elif upper_key in ['SI', 'SIAXIS']:
         a_homed = bool(h.get("'a", False) or h.get("a", False))
         c_homed = bool(h.get("'c", False) or h.get("c", False) or h.get("'b", False) or h.get("b", False))
         return (a_homed and c_homed) or bool(h.get('SI', False))
-    elif upper_key in ['AP']:
+    elif upper_key in ['AP', 'APAXIS']:
         abcd_homed = bool(h.get('A', False) and h.get('B', False) and h.get('C', False) and h.get('D', False))
         return abcd_homed or bool(h.get('AP', False))
     elif upper_key in ['ROLL']:
@@ -90,12 +90,7 @@ def is_axis_homed(self, axis_key):
         return abcd_homed or bool(h.get('V', False))
     elif upper_key in ['YAW']:
         return bool(h.get('W', False) or h.get('YAW', False))
-    elif upper_key in ['XAXIS']:
-        return bool(h.get('X', False))
-    elif upper_key in ['YAXIS']:
-        return bool(h.get('Y', False))
-    elif upper_key in ['ZAXIS']:
-        return bool(h.get('Z', False))
+
     else:
         # Check exact key, unquoted key, single-quoted key, upper and lower variations
         clean_k = raw_key.strip("'")
@@ -143,11 +138,11 @@ def update_moving_button_styles(self):
         QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
     """
 
-    # 1. Platform jog buttons (XAXIS=LAT, YAXIS=SI, ZAXIS=AP, ROLL, PITCH, YAW)
+    # 1. Platform jog buttons (LATAXIS=LAT, SIAXIS=SI, APAXIS=AP, ROLL, PITCH, YAW)
     plat_mapping = {
-        'XAXIS': 'LAT',
-        'YAXIS': 'SI',
-        'ZAXIS': 'AP',
+        'LATAXIS': 'LAT',
+        'SIAXIS': 'SI',
+        'APAXIS': 'AP',
         'ROLL': 'ROLL',
         'PITCH': 'PITCH',
         'YAW': 'YAW'
@@ -692,8 +687,8 @@ def update_duet_status_ui(self, data=None):
 
             # Calculate current AP position (average of A, B, C, D actuator positions)
             h_ap = (curr_a + curr_b + curr_c + curr_d) / 4.0
-            if hasattr(self, 'POS_CURR_ZAXIS') and self.POS_CURR_ZAXIS:
-                self.POS_CURR_ZAXIS.setText(f"{h_ap:.3f}")
+            if hasattr(self, 'POS_CURR_APAXIS') and self.POS_CURR_APAXIS:
+                self.POS_CURR_APAXIS.setText(f"{h_ap:.3f}")
 
             # Calculate current LAT (average of 'e and 'f)
             curr_e = 0.0
@@ -711,8 +706,8 @@ def update_duet_status_ui(self, data=None):
                 except ValueError:
                     pass
             h_lat = (curr_e + curr_f) / 2.0
-            if hasattr(self, 'POS_CURR_XAXIS') and self.POS_CURR_XAXIS:
-                self.POS_CURR_XAXIS.setText(f"{h_lat:.3f}")
+            if hasattr(self, 'POS_CURR_LATAXIS') and self.POS_CURR_LATAXIS:
+                self.POS_CURR_LATAXIS.setText(f"{h_lat:.3f}")
 
             # Calculate current SI (average of 'a and 'c)
             curr_a_lo = 0.0
@@ -730,16 +725,22 @@ def update_duet_status_ui(self, data=None):
                 except ValueError:
                     pass
             h_si = (curr_a_lo + curr_c_lo) / 2.0
-            if hasattr(self, 'POS_CURR_YAXIS') and self.POS_CURR_YAXIS:
-                self.POS_CURR_YAXIS.setText(f"{h_si:.3f}")
+            if hasattr(self, 'POS_CURR_SIAXIS') and self.POS_CURR_SIAXIS:
+                self.POS_CURR_SIAXIS.setText(f"{h_si:.3f}")
 
             # Synchronize target fields (POS_DES) with current fields (POS_CURR) for each tab when not being edited
-            for ax_name in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-                for suffix in ['', '_LUNG']:
-                    curr_f = getattr(self, f"POS_CURR_{ax_name}{suffix}", None)
-                    des_f = getattr(self, f"POS_DES_{ax_name}{suffix}", None)
-                    if curr_f is not None and des_f is not None and not des_f.hasFocus():
-                        des_f.setText(curr_f.text())
+            for ax_name in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW']:
+                curr_f = getattr(self, f"POS_CURR_{ax_name}", None)
+                des_f = getattr(self, f"POS_DES_{ax_name}", None)
+                if curr_f is not None and des_f is not None and not des_f.hasFocus():
+                    des_f.setText(curr_f.text())
+
+            for ax_name in ['XAXIS', 'YAXIS', 'ZAXIS']:
+                target_ax = f"{ax_name}_LUNG"
+                curr_f = getattr(self, f"POS_CURR_{target_ax}", None)
+                des_f = getattr(self, f"POS_DES_{target_ax}", None)
+                if curr_f is not None and des_f is not None and not des_f.hasFocus():
+                    des_f.setText(curr_f.text())
 
             refresh_external_axis_styles(self)
 
@@ -781,15 +782,18 @@ def update_connection_status_ui(self, connected=False):
             """)
         else:
             self.connect_status.setText(status_text)
-            bg_color = "#2e7d32" if connected else "#d32f2f"
+            bg_color = "#e8f5e9" if connected else "#ffebee"
+            text_color = "#2e7d32" if connected else "#c62828"
+            border_color = "#a5d6a7" if connected else "#ef9a9a"
             self.connect_status.setStyleSheet(f"""
                 QLabel {{
                     background-color: {bg_color};
-                    color: white;
+                    color: {text_color};
                     font-weight: bold;
-                    font-size: 15px;
+                    font-size: 14px;
                     padding: 0px 16px;
-                    border-radius: 6px;
+                    border: 1px solid {border_color};
+                    border-radius: 18px;
                 }}
             """)
 
@@ -875,6 +879,61 @@ def home(self, ax):
     QTimer.singleShot(3000, lambda: update_duet_status_ui(self))
 
 
+def check_relative_move_limits(self, ax, delta):
+    """
+    Validates a relative move (delta) against axis limits.
+    Returns (True, "") if the move is safe, or (False, error_msg) if blocked.
+    """
+    def get_limit(m, is_max, default):
+        limits_dict = self.axis_max_limits if is_max else getattr(self, 'axis_min_limits', {})
+        if hasattr(self, 'axis_max_limits' if is_max else 'axis_min_limits') and limits_dict:
+            return limits_dict.get(m, default)
+        return default
+    
+    def get_curr(m):
+        field_names = [f"POS_CURR_{m}", f"POS_CURR_{m}AXIS_LUNG", f"POS_CURR_{m}_LUNG"]
+        if m.startswith("'"):
+            field_names.insert(0, f"POS_CURR_{m[1:]}")
+        for fn in field_names:
+            field = getattr(self, fn, None)
+            if field:
+                try: return float(field.text())
+                except ValueError: pass
+        return 0.0
+
+    def check_motor(m, d, default_max=70.0, default_min=0.2):
+        c = get_curr(m)
+        mx = get_limit(m, True, default_max)
+        mn = get_limit(m, False, default_min)
+        if c + d > mx: return False, f"Actuator {m} would exceed max limit ({mx:.1f} mm)."
+        if c + d < mn: return False, f"Actuator {m} would drop below min limit ({mn:.1f} mm)."
+        return True, ""
+
+    if ax in ['XAXIS_LUNG', 'LUNG_XAXIS', 'LUNG_X', 'X']:
+        return check_motor('X', delta, 200.0, 0.0)
+    elif ax in ['YAXIS_LUNG', 'LUNG_YAXIS', 'LUNG_Y', 'Y']:
+        return check_motor('Y', delta, 200.0, 0.0)
+    elif ax in ['ZAXIS_LUNG', 'LUNG_ZAXIS', 'LUNG_Z', 'Z']:
+        return check_motor('Z', delta, 200.0, 0.0)
+    elif ax == 'LATAXIS':
+        ok, err = check_motor("'e", delta)
+        if not ok: return ok, err
+        return check_motor("'f", delta)
+    elif ax == 'SIAXIS':
+        ok, err = check_motor("'a", delta)
+        if not ok: return ok, err
+        axis_y_lo = "'c"
+        if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
+            axis_y_lo = "'b"
+        return check_motor(axis_y_lo, delta)
+    elif ax == 'APAXIS':
+        for m in ['A', 'B', 'C', 'D']:
+            ok, err = check_motor(m, delta)
+            if not ok: return ok, err
+            
+    return True, ""
+
+
 def step(self, ax, plus=True):
     """
     Function to move axes step-wise using the global step size selected by the user.
@@ -892,9 +951,9 @@ def step(self, ax, plus=True):
         return
 
     display_name_map = {
-        'XAXIS': 'X',
-        'YAXIS': 'Y',
-        'ZAXIS': 'Z',
+        'LATAXIS': 'LAT',
+        'SIAXIS': 'SI',
+        'APAXIS': 'AP',
         'LAT': 'LAT',
         'SI': 'SI',
         'AP': 'AP',
@@ -913,6 +972,13 @@ def step(self, ax, plus=True):
     if not plus:
         step_val *= -1
     
+    # Validate move before executing
+    ok, err = check_relative_move_limits(self, ax, step_val)
+    if not ok:
+        log_to_duet_console(self, f"Error: Movement blocked. {err}", color="#ff3333")
+        QMessageBox.warning(self, "Limit Exceeded", f"Cannot complete step.\n{err}")
+        return
+
     # Define GCODE commands
     send_cmd(self, "G91") # set relative mode
 
@@ -922,14 +988,14 @@ def step(self, ax, plus=True):
         cmd = f"G1 Y{step_val:.4f} F600"
     elif ax in ['ZAXIS_LUNG', 'LUNG_ZAXIS', 'LUNG_Z', 'Z']:
         cmd = f"G1 Z{step_val:.4f} F600"
-    elif ax == 'XAXIS':
+    elif ax == 'LATAXIS':
         cmd = f"G1 'e{step_val:.4f} 'f{step_val:.4f} F600"
-    elif ax == 'YAXIS':
+    elif ax == 'SIAXIS':
         axis_y_lo = "'c"
         if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
             axis_y_lo = "'b"
         cmd = f"G1 'a{step_val:.4f} {axis_y_lo}{step_val:.4f} F600"     
-    elif ax == 'ZAXIS':
+    elif ax == 'APAXIS':
         cmd = f"G1 A{step_val:.4f} B{step_val:.4f} C{step_val:.4f} D{step_val:.4f} F600"
     elif ax in ['ROLL', 'Roll']:
         # Roll calculation using platform dimension LAT
@@ -1131,8 +1197,14 @@ def move(self, ax):
         return
 
     if not is_axis_homed(self, ax):
-        log_to_duet_console(self, f"Error: Cannot move {ax}. Please home the axis first!", color="#ff3333")
-        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {ax}.\nPlease home the axis first!")
+        display_name_map = {
+            'LATAXIS': 'LAT', 'SIAXIS': 'SI', 'APAXIS': 'AP',
+            'LAT': 'LAT', 'SI': 'SI', 'AP': 'AP',
+            'ROLL': 'Roll', 'PITCH': 'Pitch', 'YAW': 'Yaw'
+        }
+        disp_name = display_name_map.get(str(ax).upper().strip(), str(ax))
+        log_to_duet_console(self, f"Error: Cannot move {disp_name}. Please home the axis first!", color="#ff3333")
+        QMessageBox.warning(self, "Axis Not Homed", f"Cannot move {disp_name}.\nPlease home the axis first!")
         return
 
     des_field = getattr(self, f"POS_DES_{ax}", None)
@@ -1154,6 +1226,13 @@ def move(self, ax):
 
     delta = target_val - current_val
     if abs(delta) < 0.0001:
+        return
+
+    # Validate move before executing
+    ok, err = check_relative_move_limits(self, ax, delta)
+    if not ok:
+        log_to_duet_console(self, f"Error: Movement blocked. {err}", color="#ff3333")
+        QMessageBox.warning(self, "Limit Exceeded", f"Cannot complete move.\n{err}")
         return
 
     # Generate and send command
@@ -1205,16 +1284,16 @@ def move(self, ax):
     elif ax in ['ZAXIS_LUNG', 'LUNG_ZAXIS', 'LUNG_Z', 'Z']:
         cmd = f"G1 Z{delta:.4f} F600"
         send_cmd(self, cmd)
-    elif ax == 'XAXIS':
+    elif ax == 'LATAXIS':
         cmd = f"G1 'e{delta:.4f} 'f{delta:.4f} F600"
         send_cmd(self, cmd)
-    elif ax == 'YAXIS':
+    elif ax == 'SIAXIS':
         axis_y_lo = "'c"
         if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
             axis_y_lo = "'b"
         cmd = f"G1 'a{delta:.4f} {axis_y_lo}{delta:.4f} F600"
         send_cmd(self, cmd)
-    elif ax == 'ZAXIS':
+    elif ax == 'APAXIS':
         # Check if moving by delta makes any actuator exceed limits
         new_A = curr_a + delta
         new_B = curr_b + delta
@@ -1377,6 +1456,7 @@ def setDuetIP(self, show_dialog=True):
     save_configuration(self)
 
     self._connecting_in_progress = True
+    self.duet_api_mode = None  # Force API mode redetection when switching IP
     log_to_duet_console(self, f"Connecting to Duet at http://{ip}...")
 
     progress_dialog = None
@@ -1524,9 +1604,9 @@ def go_to_desired_positions(self):
 
     # Check homing state of platform axes (ignoring YAW which is not implemented yet)
     plat_axis_map = [
-        ('LAT', 'LAT'),
-        ('SI', 'SI'),
-        ('AP', 'AP'),
+        ('LATAXIS', 'LAT'),
+        ('SIAXIS', 'SI'),
+        ('APAXIS', 'AP'),
         ('ROLL', 'Roll'),
         ('PITCH', 'Pitch')
     ]
@@ -1538,9 +1618,9 @@ def go_to_desired_positions(self):
 
     # 1. Retrieve target translations & rotations
     try:
-        t_lat = float(self.POS_DES_XAXIS.text().strip())
-        t_si = float(self.POS_DES_YAXIS.text().strip())
-        t_ap = float(self.POS_DES_ZAXIS.text().strip())
+        t_lat = float(self.POS_DES_LATAXIS.text().strip())
+        t_si = float(self.POS_DES_SIAXIS.text().strip())
+        t_ap = float(self.POS_DES_APAXIS.text().strip())
         t_roll = float(self.POS_DES_ROLL.text().strip())
         t_pitch = float(self.POS_DES_PITCH.text().strip())
         t_yaw = float(self.POS_DES_YAW.text().strip())
@@ -1681,17 +1761,17 @@ def go_to_center(self):
         return
 
     # Check homing state of platform axes (ignoring YAW which is not implemented yet)
-    for ax_check in ['LAT', 'SI', 'AP', 'ROLL', 'PITCH']:
+    for ax_check in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH']:
         if not is_axis_homed(self, ax_check):
             log_to_duet_console(self, f"Error: Cannot move platform to center. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
             QMessageBox.warning(self, "Axis Not Homed", f"Cannot move to center.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
             return
 
     # 1. Update target position input fields in UI to center values (LAT = 50.000 mm, SI = 25.000 mm, AP = 35.000 mm)
-    for ax, val in [('XAXIS', '50.000'), ('YAXIS', '25.000'), ('ZAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:
-        des_f = getattr(self, f"POS_DES_{ax}", None)
-        if des_f is not None:
-            des_f.setText(val)
+    for ax, val in [('LATAXIS', '50.000'), ('SIAXIS', '25.000'), ('APAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:
+        field = getattr(self, f"POS_DES_{ax}", None)
+        if field is not None:
+            field.setText(val)
 
     # 2. Send G-Code absolute center moves
     send_cmd(self, "G90")  # Absolute positioning mode

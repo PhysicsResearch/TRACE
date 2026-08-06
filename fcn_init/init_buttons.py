@@ -104,15 +104,22 @@ def initialize_software_buttons(self):
             safe_connect(btn, lambda _c=False, a=ax_key: move(self, a))
 
     # STEP BUTTONS (Cartesian & Platform axes)
-    for axis in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-        for suffix in ['', '_LUNG']:
-            b_min = getattr(self, f'MIN_{axis}{suffix}', None)
-            b_plus = getattr(self, f'PLUS_{axis}{suffix}', None)
-            target_ax = f"{axis}{suffix}"
-            if b_min is not None:
-                safe_connect(b_min, lambda _c=False, a=target_ax: step(self, a, plus=False))
-            if b_plus is not None:
-                safe_connect(b_plus, lambda _c=False, a=target_ax: step(self, a, plus=True))
+    for axis in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW']:
+        b_min = getattr(self, f'MIN_{axis}', None)
+        b_plus = getattr(self, f'PLUS_{axis}', None)
+        if b_min is not None:
+            safe_connect(b_min, lambda _c=False, a=axis: step(self, a, plus=False))
+        if b_plus is not None:
+            safe_connect(b_plus, lambda _c=False, a=axis: step(self, a, plus=True))
+
+    for axis in ['XAXIS', 'YAXIS', 'ZAXIS']:
+        target_ax = f"{axis}_LUNG"
+        b_min = getattr(self, f'MIN_{target_ax}', None)
+        b_plus = getattr(self, f'PLUS_{target_ax}', None)
+        if b_min is not None:
+            safe_connect(b_min, lambda _c=False, a=target_ax: step(self, a, plus=False))
+        if b_plus is not None:
+            safe_connect(b_plus, lambda _c=False, a=target_ax: step(self, a, plus=True))
 
     # REMODELED INDIVIDUAL MOTORS SHARED CONTROLS
     if hasattr(self, 'btn_ext_jog_min') and self.btn_ext_jog_min:
@@ -125,12 +132,16 @@ def initialize_software_buttons(self):
         safe_connect(self.btn_home_ext, lambda _c=False: home_selected_ext_axis(self))
 
     # TARGET POSITION CONFIRMATION (Return key)
-    for axis_key in ['XAXIS', 'YAXIS', 'ZAXIS', 'ROLL', 'PITCH', 'YAW']:
-        for suffix in ['', '_LUNG']:
-            field = getattr(self, f'POS_DES_{axis_key}{suffix}', None)
-            target_ax = f"{axis_key}{suffix}"
-            if field is not None:
-                safe_connect_return(field, lambda _a=target_ax: move(self, _a))
+    for axis_key in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW']:
+        field = getattr(self, f'POS_DES_{axis_key}', None)
+        if field is not None:
+            safe_connect_return(field, lambda _a=axis_key: move(self, _a))
+            
+    for axis_key in ['XAXIS', 'YAXIS', 'ZAXIS']:
+        target_ax = f"{axis_key}_LUNG"
+        field = getattr(self, f'POS_DES_{target_ax}', None)
+        if field is not None:
+            safe_connect_return(field, lambda _a=target_ax: move(self, _a))
     if hasattr(self, 'POS_DES_EXT') and self.POS_DES_EXT:
         safe_connect_return(self.POS_DES_EXT, lambda: move_selected_ext_axis(self))
 

@@ -370,7 +370,7 @@ def build_status_tab(self):
 
     self.PhOperFolder = QLineEdit(desktop_default, plot_box)
     self.PhOperFolder.setStyleSheet("font-size: 14px; padding: 4px;")
-    register_touch_line_edit(self, self.PhOperFolder, label_name="Log Output Folder")
+    register_touch_line_edit(self, self.PhOperFolder, label_name="Log Output Folder", keyboard_mode="full")
 
     self.setPhOperFolder = QPushButton("Set Folder", plot_box)
     self.setPhOperFolder.setStyleSheet("background-color: blue; color: white; font-weight: bold; font-size: 14px; min-height: 36px;")

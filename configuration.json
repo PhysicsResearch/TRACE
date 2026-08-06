@@ -3,5 +3,5 @@
     "move_folder": "",
     "platform_lat_dim": "300",
     "platform_si_dim": "500",
-    "touchscreen_mode": false
+    "touchscreen_mode": true
 }

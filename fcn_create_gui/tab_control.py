@@ -76,8 +76,8 @@ def build_control_tab(self):
     label_ip.setStyleSheet("font-weight: bold; font-size: 15px; color: #263238;")
     
     self.DuetIPAddress = QLineEdit(self.top_bar_frame)
-    self.DuetIPAddress.setText("192.168.0.1")
-    self.DuetIPAddress.setMinimumWidth(140)
+    self.DuetIPAddress.setText("192.168.8.3")
+    self.DuetIPAddress.setFixedWidth(180)
     self.DuetIPAddress.setFixedHeight(36)
     self.DuetIPAddress.setStyleSheet("""
         QLineEdit {
@@ -107,18 +107,53 @@ def build_control_tab(self):
         QPushButton:hover { background-color: #1565c0; }
     """)
     
+    self.btn_ip_lungphan = QPushButton("LungPhan", self.top_bar_frame)
+    self.btn_ip_lungphan.setFixedHeight(36)
+    self.btn_ip_lungphan.setFixedWidth(130)
+    self.btn_ip_lungphan.setStyleSheet("""
+        QPushButton {
+            background-color: orange;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            padding: 0px 16px;
+            border-radius: 6px;
+            border: none;
+        }
+        QPushButton:hover { background-color: darkorange; }
+    """)
+    self.btn_ip_lungphan.clicked.connect(lambda: (self.DuetIPAddress.setText("192.168.8.3"), self.setDuetIP.click()))
+
+    self.btn_ip_trace = QPushButton("TRACE", self.top_bar_frame)
+    self.btn_ip_trace.setFixedHeight(36)
+    self.btn_ip_trace.setFixedWidth(130)
+    self.btn_ip_trace.setStyleSheet("""
+        QPushButton {
+            background-color: purple;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            padding: 0px 16px;
+            border-radius: 6px;
+            border: none;
+        }
+        QPushButton:hover { background-color: darkmagenta; }
+    """)
+    self.btn_ip_trace.clicked.connect(lambda: (self.DuetIPAddress.setText("192.168.8.2"), self.setDuetIP.click()))
+
     self.connect_status = QLabel("NOT CONNECTED", self.top_bar_frame)
     self.connect_status.setAlignment(Qt.AlignCenter)
     self.connect_status.setFixedHeight(36)
     self.connect_status.setMinimumWidth(200)
     self.connect_status.setStyleSheet("""
         QLabel {
-            background-color: #d32f2f;
-            color: white;
+            background-color: #ffebee;
+            color: #c62828;
             font-weight: bold;
-            font-size: 15px;
+            font-size: 14px;
             padding: 0px 16px;
-            border-radius: 6px;
+            border: 1px solid #ef9a9a;
+            border-radius: 18px;
         }
     """)
  
@@ -206,6 +241,8 @@ def build_control_tab(self):
     top_bar_layout.addWidget(label_ip, 0, Qt.AlignVCenter)
     top_bar_layout.addWidget(self.DuetIPAddress, 0, Qt.AlignVCenter)
     top_bar_layout.addWidget(self.setDuetIP, 0, Qt.AlignVCenter)
+    top_bar_layout.addWidget(self.btn_ip_lungphan, 0, Qt.AlignVCenter)
+    top_bar_layout.addWidget(self.btn_ip_trace, 0, Qt.AlignVCenter)
     top_bar_layout.addWidget(self.connect_status, 0, Qt.AlignVCenter)
     top_bar_layout.addWidget(self.check_touchscreen, 0, Qt.AlignVCenter)
     top_bar_layout.addStretch()
@@ -294,7 +331,7 @@ def build_control_tab(self):
             font-weight: bold;
         }
     """)
-    register_touch_line_edit(self, self.duet_command, label_name="Send Command")
+    register_touch_line_edit(self, self.duet_command, label_name="Send Command", keyboard_mode="full")
 
     self.sendCommandDUET = QPushButton("Send", box_cmd)
     self.sendCommandDUET.setMinimumHeight(40)
@@ -650,8 +687,8 @@ def build_platform_subtab(self):
 
     # 3 Pairs of Axes (2 axes per row)
     axis_pairs = [
-        (('XAXIS', 'LAT'), ('YAXIS', 'SI')),
-        (('ZAXIS', 'AP'), ('ROLL', 'Roll')),
+        (('LATAXIS', 'LAT'), ('SIAXIS', 'SI')),
+        (('APAXIS', 'AP'), ('ROLL', 'Roll')),
         (('PITCH', 'Pitch'), ('YAW', 'Yaw'))
     ]
 
