@@ -4,6 +4,7 @@ from datetime import datetime
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
 from fcn_monitor.fcn_duet import get_clean_duet_ip, duet_request, duet_status_request
+from fcn_init.app_config import get_config_path
 
 
 class ConnectionWorker(QThread):
@@ -1434,7 +1435,7 @@ def save_configuration(self):
         'touchscreen_mode': touch_mode
     }
     try:
-        with open('configuration.json', 'w') as f:
+        with open(get_config_path('configuration.json', for_writing=True), 'w') as f:
             json.dump(data, f, indent=4)
     except Exception as e:
         print(f"Error saving configuration.json: {e}")

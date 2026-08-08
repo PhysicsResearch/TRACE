@@ -6,6 +6,7 @@ import numpy as np
 import requests
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox
+from fcn_init.app_config import get_config_path
 
 
 def get_clean_duet_ip(self):
@@ -1697,7 +1698,7 @@ def duet_status_request(self, ip, timeout=5):
                     "job_raw": job_json
                 }
                 try:
-                    with open('duet_response_debug.json', 'w') as f:
+                    with open(get_config_path('duet_response_debug.json', for_writing=True), 'w') as f:
                         json.dump(debug_data, f, indent=4)
                 except Exception as ex:
                     print(f"Failed to write debug file: {ex}")

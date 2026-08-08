@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt
 import json
+from fcn_init.app_config import get_config_path
 
 def initialize_software_variables(self):
 
@@ -22,7 +23,7 @@ def initialize_software_variables(self):
     self.selected_point_color = "Blue"
     
     try:
-        with open('configuration.json', 'r') as f:
+        with open(get_config_path('configuration.json', for_writing=False), 'r') as f:
             data = json.load(f)
         self.duet_ip = data.get('duet_ip_address', '192.168.8.3')
         self.gcode_folder = data.get('move_folder', '')

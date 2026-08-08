@@ -48,7 +48,14 @@ def create_gui(self):
     logo_layout.setSpacing(0)
     logo_lbl = QLabel(logo_container)
     logo_lbl.setStyleSheet("border: none; background: transparent;")
-    logo_pix = QPixmap("assets/Open-Logo.png")
+    
+    import os
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    logo_path = os.path.join(base_dir, "assets", "Open-Logo.png")
+    if not os.path.exists(logo_path):
+        logo_path = "assets/Open-Logo.png"
+
+    logo_pix = QPixmap(logo_path)
     if not logo_pix.isNull():
         logo_lbl.setPixmap(logo_pix.scaled(44, 44, Qt.KeepAspectRatio, Qt.SmoothTransformation))
     logo_layout.addWidget(logo_lbl)

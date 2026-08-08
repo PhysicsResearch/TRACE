@@ -10,6 +10,7 @@ OutputBaseFilename=TRACE-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=assets\app_icon.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -21,8 +22,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\TRACE\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\TRACE"; Filename: "{app}\Launch_ImGUI.exe"
-Name: "{autodesktop}\TRACE"; Filename: "{app}\Launch_ImGUI.exe"; Tasks: desktopicon
+Name: "{group}\TRACE"; Filename: "{app}\Launch_ImGUI.exe"; IconFilename: "{app}\assets\app_icon.ico"
+Name: "{autodesktop}\TRACE"; Filename: "{app}\Launch_ImGUI.exe"; Tasks: desktopicon; IconFilename: "{app}\assets\app_icon.ico"
 
 [Run]
 Filename: "{app}\Launch_ImGUI.exe"; Description: "{cm:LaunchProgram,TRACE}"; Flags: nowait postinstall skipifsilent

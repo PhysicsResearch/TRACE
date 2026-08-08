@@ -243,8 +243,16 @@ class MyApp(QMainWindow):
 if __name__ == "__main__":
     import sys, os
     from PySide6.QtCore import Qt, QCoreApplication
-    from PySide6.QtGui import QSurfaceFormat, QPixmap
+    from PySide6.QtGui import QSurfaceFormat, QPixmap, QIcon
     from PySide6.QtWidgets import QApplication, QSplashScreen
+
+    # Set explicit AppUserModelID on Windows so taskbar & menu bar display the application icon
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TRACE.App.1.0")
+        except Exception:
+            pass
 
     # --- Keep GL defaults ---
     fmt = QSurfaceFormat()
@@ -284,12 +292,18 @@ if __name__ == "__main__":
         }
     """)
 
+    # Resolve logo asset path relative to script/exe location
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    logo_path = os.path.join(base_dir, "assets", "Open-Logo.png")
+    if not os.path.exists(logo_path):
+        logo_path = "assets/Open-Logo.png"
+
     # Set application window icon
-    app_icon = QIcon("assets/Open-Logo.png")
+    app_icon = QIcon(logo_path)
     app.setWindowIcon(app_icon)
 
     # --- Show splash ASAP ---
-    pix = QPixmap("assets/Open-Logo.png")
+    pix = QPixmap(logo_path)
     if pix.isNull():
         pix = QPixmap(300, 300)
         pix.fill(Qt.transparent)
