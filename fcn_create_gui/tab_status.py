@@ -214,10 +214,10 @@ def build_status_tab(self):
     top_info_layout = QHBoxLayout()
     top_info_layout.setSpacing(15)
 
-    self.labelPrintDuration = QLabel("Print Duration: 00:00:00", self.card_status)
+    self.labelPrintDuration = QLabel("Print Duration: --", self.card_status)
     self.labelPrintDuration.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
     
-    self.labelTimeRemaining = QLabel("Time Remaining: --:--:--", self.card_status)
+    self.labelTimeRemaining = QLabel("Time left: --", self.card_status)
     self.labelTimeRemaining.setStyleSheet("color: #616161; font-size: 14px; font-weight: bold;")
 
     lbl_msg = QLabel("Duet Message:", self.card_status)

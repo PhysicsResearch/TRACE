@@ -6,12 +6,156 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 
+def compute_motion_platform_actuators(self, df):
+    """Computes individual actuator columns (A, B, C, D, 'a, 'c, 'e, 'f) for a Motion Platform DataFrame."""
+    if df is None or len(df) == 0:
+        return df
+
+    df = df.copy()
+
+    # Ensure degrees of freedom exist
+    for col in ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"]:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # Retrieve max limits from settings (or fallback to default 40.0)
+    max_lim_lat = getattr(self, 'settings_max_lim_lat', None)
+    max_lim_si = getattr(self, 'settings_max_lim_si', None)
+    max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
+
+    lim_lat = max_lim_lat.value() if max_lim_lat else 40.0
+    lim_si = max_lim_si.value() if max_lim_si else 40.0
+    lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
+
+    lat_vals = df["LAT"].values
+    si_vals = df["SI"].values
+    ap_vals = df["AP"].values
+    roll_vals = df["Roll"].values
+    pitch_vals = df["Pitch"].values
+    yaw_vals = df["Yaw"].values
+
+    # Read platform offset AP, LAT, SI
+    input_ap = getattr(self, 'input_offset_ap', None) or getattr(self, 'input_offset_ap_plan', None)
+    try:
+        off_ap = float(input_ap.text().strip()) if input_ap and input_ap.text().strip() else 0.0
+    except Exception:
+        off_ap = 0.0
+
+    input_lat = getattr(self, 'input_offset_lat', None) or getattr(self, 'input_offset_lat_plan', None)
+    try:
+        off_lat = float(input_lat.text().strip()) if input_lat and input_lat.text().strip() else 0.0
+    except Exception:
+        off_lat = 0.0
+
+    input_si = getattr(self, 'input_offset_si', None) or getattr(self, 'input_offset_si_plan', None)
+    try:
+        off_si = float(input_si.text().strip()) if input_si and input_si.text().strip() else 0.0
+    except Exception:
+        off_si = 0.0
+
+    # Height above pivot for sway compensation (governed strictly by Offset AP field)
+    roll_rad = np.radians(roll_vals)
+    pitch_rad = np.radians(pitch_vals)
+
+    lat_eff = off_lat + lat_vals + off_ap * np.sin(roll_rad)
+    si_eff = off_si + si_vals + off_ap * np.sin(pitch_rad)
+
+    df["LAT"] = np.clip(lat_eff, 0.0, lim_lat)
+    df["SI"] = np.clip(si_eff, 0.0, lim_si)
+    df["'e"] = df["LAT"]
+    df["'f"] = df["LAT"]
+    df["'a"] = df["SI"]
+    df["'c"] = df["SI"]
+
+    # Read platform dimensions
+    try:
+        lat_dim = float(self.input_plat_lat.text().strip()) if hasattr(self, 'input_plat_lat') and self.input_plat_lat else 100.0
+        if lat_dim <= 0.0: lat_dim = 100.0
+    except Exception:
+        lat_dim = 100.0
+
+    try:
+        si_dim = float(self.input_plat_si.text().strip()) if hasattr(self, 'input_plat_si') and self.input_plat_si else 100.0
+        if si_dim <= 0.0: si_dim = 100.0
+    except Exception:
+        si_dim = 100.0
+
+    support_points = {
+        'A': (-lat_dim / 2.0, -si_dim / 2.0, 0.0),
+        'B': (lat_dim / 2.0, -si_dim / 2.0, 0.0),
+        'C': (lat_dim / 2.0, si_dim / 2.0, 0.0),
+        'D': (-lat_dim / 2.0, si_dim / 2.0, 0.0)
+    }
+
+    n = len(df)
+    A_arr = np.zeros(n)
+    B_arr = np.zeros(n)
+    C_arr = np.zeros(n)
+    D_arr = np.zeros(n)
+
+    for i in range(n):
+        r = np.radians(roll_vals[i])
+        p = -np.radians(pitch_vals[i])
+        y = np.radians(yaw_vals[i])
+
+        cos_r, sin_r = np.cos(r), np.sin(r)
+        cos_p, sin_p = np.cos(p), np.sin(p)
+        cos_y, sin_y = np.cos(y), np.sin(y)
+
+        xc, yc, zc = off_lat, off_si, off_ap
+
+        target_z = {}
+        for name, (px, py, pz) in support_points.items():
+            x1 = px - xc
+            y1 = py - yc
+            z1 = pz - zc
+
+            x2 = cos_y * x1 - sin_y * y1
+            y2 = sin_y * x1 + cos_y * y1
+            z2 = z1
+
+            x3 = x2 * cos_r + z2 * sin_r
+            y3 = y2
+            z3 = -x2 * sin_r + z2 * cos_r
+
+            x4 = x3
+            y4 = y3 * cos_p - z3 * sin_p
+            z4 = y3 * sin_p + z3 * cos_p
+
+            target_z[name] = max(0.0, min(lim_ap, z4 + zc + ap_vals[i]))
+
+        A_arr[i] = target_z['A']
+        B_arr[i] = target_z['B']
+        C_arr[i] = target_z['C']
+        D_arr[i] = target_z['D']
+
+    df["A"] = A_arr
+    df["B"] = B_arr
+    df["C"] = C_arr
+    df["D"] = D_arr
+
+    # Recompute achievable Roll, Pitch, and AP constrained by physical actuator limits [0.0, lim_ap]
+    sin_p = np.clip(np.nan_to_num((D_arr - A_arr) / si_dim, nan=0.0), -1.0, 1.0)
+    p_rad = np.arcsin(sin_p)
+    df["Pitch"] = -np.degrees(p_rad)
+
+    cos_p = np.cos(p_rad)
+    cos_p_safe = np.where(np.abs(cos_p) < 1e-10, 1.0, cos_p)
+    sin_r = np.clip(np.nan_to_num((A_arr - B_arr) / (lat_dim * cos_p_safe), nan=0.0), -1.0, 1.0)
+    df["Roll"] = np.degrees(np.arcsin(sin_r))
+
+    cos_r = np.cos(np.radians(df["Roll"].values))
+    df["AP"] = (A_arr + B_arr + C_arr + D_arr) / 4.0 - off_ap * (1.0 - cos_r * cos_p)
+
+    return df
+
+
 def trigger_plot_update(self):
     device = self.combo_device.currentText()
     if device == "Lung Phantom":
         all_axes = ["X", "Y", "Z"]
     elif device == "Motion Platform":
-        all_axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"]
+        all_axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw", "A", "B", "C", "D", "'a", "'c", "'e", "'f"]
     else:
         exclude_cols = {'timestamp', 'time', 'Command'}
         all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols]
@@ -24,15 +168,34 @@ def trigger_plot_update(self):
 
     # Check if we should plot high resolution or downsampled data
     df_to_plot = self.dfEdit
+    if device == "Motion Platform":
+        df_to_plot = compute_motion_platform_actuators(self, df_to_plot)
+
     high_res_cb = getattr(self, 'check_plot_high_res', None)
     if high_res_cb is not None and not high_res_cb.isChecked():
-        if len(self.dfEdit) > 1:
-            dt = self.dfEdit['time'].iat[1] - self.dfEdit['time'].iat[0]
+        if len(df_to_plot) > 1:
+            dt = df_to_plot['time'].iat[1] - df_to_plot['time'].iat[0]
             if dt > 0:
                 step = max(1, int(round(0.1 / dt)))
-                df_to_plot = self.dfEdit.iloc[::step]
+                df_to_plot = df_to_plot.iloc[::step]
 
     update_plot(self, df_to_plot, checked_axes)
+
+
+def select_all_axes(self):
+    for col, cb in getattr(self, 'create_axis_checkboxes', {}).items():
+        cb.blockSignals(True)
+        cb.setChecked(True)
+        cb.blockSignals(False)
+    trigger_plot_update(self)
+
+
+def clear_all_axes(self):
+    for col, cb in getattr(self, 'create_axis_checkboxes', {}).items():
+        cb.blockSignals(True)
+        cb.setChecked(False)
+        cb.blockSignals(False)
+    trigger_plot_update(self)
 
 
 def rebuild_axis_checkboxes(self, axes):
@@ -54,6 +217,47 @@ def rebuild_axis_checkboxes(self, axes):
             self.create_axis_checkboxes[col] = cb
         
         layout_cb.addStretch()
+
+        # Add Select All and Clear All buttons on the right side
+        self.btn_select_all_axes = QPushButton("Select All", self.create_plot_checkboxes_widget)
+        self.btn_select_all_axes.setMinimumHeight(35)
+        self.btn_select_all_axes.setStyleSheet("""
+            QPushButton {
+                background-color: #455a64;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding-left: 10px;
+                padding-right: 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #37474f;
+            }
+        """)
+        self.btn_select_all_axes.clicked.connect(lambda: select_all_axes(self))
+        layout_cb.addWidget(self.btn_select_all_axes)
+
+        self.btn_clear_all_axes = QPushButton("Clear All", self.create_plot_checkboxes_widget)
+        self.btn_clear_all_axes.setMinimumHeight(35)
+        self.btn_clear_all_axes.setStyleSheet("""
+            QPushButton {
+                background-color: #78909c;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                padding-left: 10px;
+                padding-right: 10px;
+                border-radius: 4px;
+                margin-left: 5px;
+                margin-right: 15px;
+            }
+            QPushButton:hover {
+                background-color: #546e7a;
+            }
+        """)
+        self.btn_clear_all_axes.clicked.connect(lambda: clear_all_axes(self))
+        layout_cb.addWidget(self.btn_clear_all_axes)
 
         # Add Plot High Resolution checkbox on the left of Export GCODE button
         self.check_plot_high_res = QCheckBox("Plot High Resolution", self.create_plot_checkboxes_widget)
@@ -161,7 +365,9 @@ def initialize_default_curve_data(self):
         axes = ["X", "Y", "Z"]
     elif device == "Motion Platform":
         self.dfEdit = self.dfEdit_motion_platform
-        axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"]
+        self.dfEdit = compute_motion_platform_actuators(self, self.dfEdit)
+        self.dfEdit_motion_platform = self.dfEdit
+        axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw", "A", "B", "C", "D", "'a", "'c", "'e", "'f"]
     else:
         self.dfEdit = self.dfEdit_other
         exclude_cols = {'timestamp', 'time', 'Command'}
@@ -341,6 +547,9 @@ def on_table_item_changed(self, item):
             new_val = val_text
         else:
             new_val = float(val_text)
+            if isinstance(new_val, (int, float)) and col_name not in ['time', 'timestamp', 'Roll', 'Pitch', 'Yaw']:
+                if new_val < 0.0:
+                    new_val = 0.0
     except ValueError:
         new_val = val_text
         
@@ -355,6 +564,7 @@ def on_table_item_changed(self, item):
     if device == "Lung Phantom":
         self.dfEdit_lung_phantom = self.dfEdit
     elif device == "Motion Platform":
+        self.dfEdit = compute_motion_platform_actuators(self, self.dfEdit)
         self.dfEdit_motion_platform = self.dfEdit
     else:
         self.dfEdit_other = self.dfEdit
@@ -365,6 +575,8 @@ def create_curve(self):
     Applies/Adds a curve segment to the selected axis over the defined [t_start, t_end] interval,
     overwriting only that interval, keeping the rest of the column data intact,
     and expanding the dataframe range up to t_end if it goes past the current limits.
+    If adding consecutive intervals (t_start > 0), checks previous position and calculates transit time
+    at max_speed, shifting the second segment in time to account for it.
     """
     if not hasattr(self, 'dfEdit') or self.dfEdit is None:
         initialize_default_curve_data(self)
@@ -374,17 +586,73 @@ def create_curve(self):
     func_type = self.combo_func_type.currentText()
 
     amplitude = self.input_amplitude.value()
-    amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
+    if selected_axis in ["Roll", "Pitch", "Yaw"]:
+        amp_offset = 0.0
+    else:
+        amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
     period = self.input_period.value()
     phase_deg = self.input_phase.value()
     phase_rad = np.deg2rad(phase_deg)
     t_start = self.input_start_time.value()
     t_end = self.input_end_time.value()
 
+    # Calculate starting value of the new segment at t_rel = 0
+    if func_type == "sin":
+        val_start = amplitude * np.sin(phase_rad) + amp_offset
+    elif func_type == "cos":
+        val_start = amplitude * np.cos(phase_rad) + amp_offset
+    elif func_type == "cos^1":
+        val_start = amplitude * (np.cos(phase_rad) ** 1) + amp_offset
+    elif func_type == "cos^2":
+        val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
+    elif func_type == "constant":
+        val_start = amplitude + amp_offset
+    else:
+        val_start = amplitude * np.sin(phase_rad) + amp_offset
+
+    if val_start < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+        val_start = 0.0
+
+    # Retrieve max speed setting (mm/s or deg/s)
+    sb_speed = getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None)
+    max_speed = sb_speed.value() if sb_speed else 20.0
+    if max_speed <= 0.0:
+        max_speed = 20.0
+
+    # If adding consecutive interval (t_start > 0), check previous position and calculate required transit time
+    t_prev = 0.0
+    val_prev = 0.0
+    has_prev = False
+    if t_start > 0.0 and selected_axis in self.dfEdit.columns:
+        times_prev = self.dfEdit['time'].values
+        valid_indices = np.where(times_prev <= t_start)[0]
+        if len(valid_indices) > 0:
+            idx_prev = valid_indices[-1]
+            t_prev = times_prev[idx_prev]
+            val_prev = self.dfEdit.at[idx_prev, selected_axis]
+            has_prev = True
+
+            dt_required = abs(val_start - val_prev) / max_speed
+            dt_gap = t_start - t_prev
+            shift_dt = max(0.0, dt_required - dt_gap)
+
+            if shift_dt > 0.0:
+                t_start = round(t_start + shift_dt, 3)
+                t_end = round(t_end + shift_dt, 3)
+
+                # Update UI spinboxes to show shifted times
+                if hasattr(self, 'input_start_time'):
+                    self.input_start_time.blockSignals(True)
+                    self.input_start_time.setValue(t_start)
+                    self.input_start_time.blockSignals(False)
+                if hasattr(self, 'input_end_time'):
+                    self.input_end_time.blockSignals(True)
+                    self.input_end_time.setValue(t_end)
+                    self.input_end_time.blockSignals(False)
+
     # 1. Expand limits if t_end is greater than current maximum time in the dataframe
     t_max = self.dfEdit['time'].max()
     if t_end > t_max:
-        # Detect active step dynamically from existing time steps, fallback to 0.001
         step = 0.001
         if len(self.dfEdit) > 1:
             step = self.dfEdit['time'].iat[1] - self.dfEdit['time'].iat[0]
@@ -397,24 +665,29 @@ def create_curve(self):
                 'timestamp': new_t * 1000.0,
                 'time': new_t
             })
-            # Initialize all active axes columns present in self.dfEdit to 0.0 for new rows
             exclude_cols = {'timestamp', 'time', 'Command'}
             all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols]
             for col in all_axes:
                 new_rows[col] = 0.0
             new_rows['Command'] = ""
             
-            # Append new rows to self.dfEdit
             self.dfEdit = pd.concat([self.dfEdit, new_rows], ignore_index=True)
 
     if 'Command' not in self.dfEdit.columns:
         self.dfEdit['Command'] = ""
 
-    # 2. Re-read the time values from the expanded dataframe
-    t_arr = self.dfEdit['time'].values
+    # 2. Interpolate transition interval at max speed if applicable
+    if has_prev and t_start > t_prev and selected_axis in self.dfEdit.columns:
+        for idx, t_val in enumerate(self.dfEdit['time'].values):
+            if t_prev <= t_val < t_start:
+                frac = (t_val - t_prev) / (t_start - t_prev)
+                interp_val = val_prev + frac * (val_start - val_prev)
+                if interp_val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                    interp_val = 0.0
+                self.dfEdit.at[idx, selected_axis] = interp_val
 
     # 3. Find indices where t_start <= t <= t_end and compute the values
-    for idx, t_val in enumerate(t_arr):
+    for idx, t_val in enumerate(self.dfEdit['time'].values):
         if t_start <= t_val <= t_end:
             t_rel = t_val - t_start
             if func_type == "sin":
@@ -430,7 +703,9 @@ def create_curve(self):
             else:
                 val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
             
-            # Overwrite the selected axis value at this index
+            if val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                val = 0.0
+
             if selected_axis in self.dfEdit.columns:
                 self.dfEdit.at[idx, selected_axis] = val
 
@@ -438,6 +713,7 @@ def create_curve(self):
     if device == "Lung Phantom":
         self.dfEdit_lung_phantom = self.dfEdit
     elif device == "Motion Platform":
+        self.dfEdit = compute_motion_platform_actuators(self, self.dfEdit)
         self.dfEdit_motion_platform = self.dfEdit
     else:
         self.dfEdit_other = self.dfEdit
@@ -492,7 +768,9 @@ def update_plot(self, dataframe, axes_list):
                 elif 'M226' in cmd:
                     ax.axvline(x=t_val, color='#fbc02d', linestyle='--', linewidth=1.5, alpha=0.85)
 
-    ax.legend(loc='upper right', fontsize=10, labelcolor='#333333')
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='upper right', fontsize=10, labelcolor='#333333')
     ax.set_xlim(t_data.min(), t_data.max())
     ax.set_xlabel('Time (s)', fontsize=font_sz, fontweight='bold')
     ax.set_ylabel('Amplitude (mm / deg)', fontsize=font_sz, fontweight='bold')
@@ -637,36 +915,37 @@ def generate_planned_gcode(self):
             )
             return None, None
 
-        if not hasattr(self, 'input_offset_ap') or not self.input_offset_ap or not self.input_offset_ap.text().strip():
+        input_ap = getattr(self, 'input_offset_ap', None) or getattr(self, 'input_offset_ap_plan', None)
+        if not input_ap or not input_ap.text().strip():
             QMessageBox.warning(self, "Export Error", "Offset AP input field is missing or empty.")
             return None, None
         try:
-            off_ap = float(self.input_offset_ap.text().strip())
+            off_ap = float(input_ap.text().strip())
         except ValueError:
-            QMessageBox.warning(self, "Export Error", f"Invalid offset AP value: '{self.input_offset_ap.text()}'")
+            QMessageBox.warning(self, "Export Error", f"Invalid offset AP value: '{input_ap.text()}'")
             return None, None
 
-        if not hasattr(self, 'input_offset_lat') or not self.input_offset_lat or not self.input_offset_lat.text().strip():
+        input_lat = getattr(self, 'input_offset_lat', None) or getattr(self, 'input_offset_lat_plan', None)
+        if not input_lat or not input_lat.text().strip():
             QMessageBox.warning(self, "Export Error", "Offset LAT input field is missing or empty.")
             return None, None
         try:
-            off_lat = float(self.input_offset_lat.text().strip())
+            off_lat = float(input_lat.text().strip())
         except ValueError:
-            QMessageBox.warning(self, "Export Error", f"Invalid offset LAT value: '{self.input_offset_lat.text()}'")
+            QMessageBox.warning(self, "Export Error", f"Invalid offset LAT value: '{input_lat.text()}'")
             return None, None
 
-        if not hasattr(self, 'input_offset_si') or not self.input_offset_si or not self.input_offset_si.text().strip():
+        input_si = getattr(self, 'input_offset_si', None) or getattr(self, 'input_offset_si_plan', None)
+        if not input_si or not input_si.text().strip():
             QMessageBox.warning(self, "Export Error", "Offset SI input field is missing or empty.")
             return None, None
         try:
-            off_si = float(self.input_offset_si.text().strip())
+            off_si = float(input_si.text().strip())
         except ValueError:
-            QMessageBox.warning(self, "Export Error", f"Invalid offset SI value: '{self.input_offset_si.text()}'")
+            QMessageBox.warning(self, "Export Error", f"Invalid offset SI value: '{input_si.text()}'")
             return None, None
 
         axis_y_lo = "'c"
-        if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
-            axis_y_lo = "'b"
 
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
@@ -1085,15 +1364,18 @@ def clear_all_action(self):
 
 def _reverse_motion_platform_kinematics(self, df):
     """
-    Reverse-maps actuator G-code columns (A, B, C, D, 'e, 'f, 'a, 'c/'b)
+    Reverse-maps actuator G-code columns (A, B, C, D, 'e, 'f, 'a, 'c)
     back to Motion Platform DOFs (LAT, SI, AP, Roll, Pitch, Yaw).
     """
     import numpy as np
 
-    A = np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0)
-    B = np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0)
-    C = np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0)
-    D = np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0)
+    max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
+    lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
+
+    A = np.clip(np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0), 0.0, lim_ap)
+    B = np.clip(np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0), 0.0, lim_ap)
+    C = np.clip(np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0), 0.0, lim_ap)
+    D = np.clip(np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0), 0.0, lim_ap)
 
     # LAT from 'e and 'f (average)
     lat_cols = [c for c in df.columns if c in ["'e", "'f", "e", "f"]]
@@ -1102,8 +1384,8 @@ def _reverse_motion_platform_kinematics(self, df):
     else:
         LAT = np.zeros(len(df))
 
-    # SI from 'a, 'c, 'b (average)
-    si_cols = [c for c in df.columns if c in ["'a", "'c", "'b", "a", "c", "b"]]
+    # SI from 'a and 'c (average)
+    si_cols = [c for c in df.columns if c in ["'a", "'c", "a", "c"]]
     if si_cols:
         SI = np.nan_to_num(np.mean([df[c].values for c in si_cols], axis=0), nan=0.0)
     else:
@@ -1143,6 +1425,13 @@ def _reverse_motion_platform_kinematics(self, df):
     # AP: mean of actuators, corrected for rotation center offset
     cos_r = np.cos(np.radians(Roll))
     AP = (A + B + C + D) / 4.0 - off_ap * (1.0 - cos_r * cos_p)
+
+    # Subtract sway compensation offset from LAT and SI
+    roll_rad = np.radians(Roll)
+    pitch_rad = np.radians(Pitch)
+
+    LAT = LAT - off_ap * np.sin(roll_rad)
+    SI = SI - off_ap * np.sin(pitch_rad)
 
     # Yaw = 0 (not recoverable from actuator heights)
     Yaw = np.zeros(len(df))
@@ -1350,7 +1639,7 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         df = _reverse_motion_platform_kinematics(self, df)
         self.dfEdit_motion_platform = df
         self.dfEdit = self.dfEdit_motion_platform
-        axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']
+        axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
     else:
         device = "Other"
         self.dfEdit_other = df
@@ -1371,6 +1660,9 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
             self.settings_stack.setCurrentIndex(1)
         else:
             self.settings_stack.setCurrentIndex(2)
+
+    if hasattr(self, 'offset_rot_widget'):
+        self.offset_rot_widget.setVisible(device == "Motion Platform")
 
     self.combo_axis.clear()
     self.combo_axis.addItems(axis_cols)
@@ -1616,7 +1908,7 @@ def import_gcode_action(self):
             df = _reverse_motion_platform_kinematics(self, df)
             self.dfEdit_motion_platform = df
             self.dfEdit = self.dfEdit_motion_platform
-            axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']
+            axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
         else:
             device = "Other"
             self.dfEdit_other = df
@@ -1639,6 +1931,9 @@ def import_gcode_action(self):
                 self.settings_stack.setCurrentIndex(1)
             else:
                 self.settings_stack.setCurrentIndex(2)
+
+        if hasattr(self, 'offset_rot_widget'):
+            self.offset_rot_widget.setVisible(device == "Motion Platform")
 
         # Refresh axis dropdown list (combo_axis)
         self.combo_axis.clear()

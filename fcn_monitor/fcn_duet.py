@@ -748,15 +748,21 @@ def update_status_tab_dashboard(self):
 
         def format_sec(sec):
             if not sec or sec <= 0:
-                return "--:--:--"
-            m, s = divmod(int(sec), 60)
+                return "--"
+            sec_int = int(round(float(sec)))
+            if sec_int < 60:
+                return f"{sec_int}s"
+            m, s = divmod(sec_int, 60)
             h, m = divmod(m, 60)
-            return f"{h:02d}:{m:02d}:{s:02d}"
+            if h > 0:
+                return f"{h}h {m:02d}m {s:02d}s"
+            else:
+                return f"{m}m {s:02d}s"
 
         if hasattr(self, 'labelPrintDuration') and self.labelPrintDuration:
             self.labelPrintDuration.setText(f"Print Duration: {format_sec(print_dur)}")
         if hasattr(self, 'labelTimeRemaining') and self.labelTimeRemaining:
-            self.labelTimeRemaining.setText(f"Time Remaining: {format_sec(time_left)}")
+            self.labelTimeRemaining.setText(f"Time left: {format_sec(time_left)}")
 
         # 4. Sensors (Z-Probe)
         probe = data.get("sensors", {}).get("probeValue", 0)

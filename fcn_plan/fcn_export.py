@@ -197,7 +197,9 @@ def exportGCODE(self):
     df[f'{col}_speed'] = speed
 
     # Create G-code lines and write to file
-    gcode_lines = ["G90"]  # Initialize G-code lines with absolute positioning command
+    t_vals = df[df.columns[0]].values
+    total_time_seconds = int(round(float(t_vals.max() - t_vals.min())))
+    gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]  # Initialize G-code lines with TIME header and absolute positioning command
     axis_labels         = ['X', 'Y', 'Z']  # Define axis labels
     max_min = df[df.columns[1]].max() + df[df.columns[1]].min()
     

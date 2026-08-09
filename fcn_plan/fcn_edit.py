@@ -110,8 +110,9 @@ def shiftAmpl(self):
     # Create copy for undo
     self.dfEdit_copy = self.dfEdit.copy() 
 
-    # Apply shift to amplitude
+    # Apply shift to amplitude and cut negative values to zero
     self.dfEdit["amplitude"] += self.value_ampl_shift.value()
+    self.dfEdit.loc[self.dfEdit["amplitude"] < 0.0, "amplitude"] = 0.0
 
     # Update plot
     plotViewData_edit(self) 

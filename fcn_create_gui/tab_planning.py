@@ -10,6 +10,72 @@ from PySide6.QtWidgets import (
     QCheckBox, QSlider, QTextEdit, QTableWidget, QLabel, QSplitter, QTabWidget, QStackedWidget
 )
 
+def setup_offset_sync(self):
+    """Synchronizes offset rotation inputs (AP, LAT, SI) between Control tab and Planning tab."""
+    if not (hasattr(self, 'input_offset_ap') and hasattr(self, 'input_offset_ap_plan')):
+        return
+
+    if getattr(self, '_offset_synced', False):
+        return
+    self._offset_synced = True
+
+    # Initialize Planning tab fields with Control tab values
+    self.input_offset_ap_plan.setText(self.input_offset_ap.text())
+    self.input_offset_lat_plan.setText(self.input_offset_lat.text())
+    self.input_offset_si_plan.setText(self.input_offset_si.text())
+
+    def sync_ap_ctl(text):
+        self.input_offset_ap_plan.blockSignals(True)
+        self.input_offset_ap_plan.setText(text)
+        self.input_offset_ap_plan.blockSignals(False)
+
+    def sync_ap_plan(text):
+        self.input_offset_ap.blockSignals(True)
+        self.input_offset_ap.setText(text)
+        self.input_offset_ap.blockSignals(False)
+
+    def sync_lat_ctl(text):
+        self.input_offset_lat_plan.blockSignals(True)
+        self.input_offset_lat_plan.setText(text)
+        self.input_offset_lat_plan.blockSignals(False)
+
+    def sync_lat_plan(text):
+        self.input_offset_lat.blockSignals(True)
+        self.input_offset_lat.setText(text)
+        self.input_offset_lat.blockSignals(False)
+
+    def sync_si_ctl(text):
+        self.input_offset_si_plan.blockSignals(True)
+        self.input_offset_si_plan.setText(text)
+        self.input_offset_si_plan.blockSignals(False)
+
+    def sync_si_plan(text):
+        self.input_offset_si.blockSignals(True)
+        self.input_offset_si.setText(text)
+        self.input_offset_si.blockSignals(False)
+
+    def update_on_offset_change():
+        if hasattr(self, 'combo_device') and self.combo_device.currentText() == "Motion Platform":
+            from fcn_plan.fcn_create import trigger_plot_update, loadTable_create, compute_motion_platform_actuators
+            if hasattr(self, 'dfEdit') and self.dfEdit is not None:
+                self.dfEdit = compute_motion_platform_actuators(self, self.dfEdit)
+                self.dfEdit_motion_platform = self.dfEdit
+                loadTable_create(self, self.dfEdit)
+            trigger_plot_update(self)
+
+    self.input_offset_ap.textChanged.connect(sync_ap_ctl)
+    self.input_offset_ap_plan.textChanged.connect(sync_ap_plan)
+    self.input_offset_ap_plan.textChanged.connect(lambda t: update_on_offset_change())
+
+    self.input_offset_lat.textChanged.connect(sync_lat_ctl)
+    self.input_offset_lat_plan.textChanged.connect(sync_lat_plan)
+    self.input_offset_lat_plan.textChanged.connect(lambda t: update_on_offset_change())
+
+    self.input_offset_si.textChanged.connect(sync_si_ctl)
+    self.input_offset_si_plan.textChanged.connect(sync_si_plan)
+    self.input_offset_si_plan.textChanged.connect(lambda t: update_on_offset_change())
+
+
 def build_planning_tab(self):
     """Build 'Create' interface directly inside self.tab_planning."""
     
@@ -85,7 +151,7 @@ def build_planning_tab(self):
     lbl_set_dev.setStyleSheet("font-weight: bold; font-size: 14px;")
     self.combo_settings_device = QComboBox(settings_tab_widget)
     self.combo_settings_device.setMinimumHeight(40)
-    self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform", "Other"])
+    self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform"])
     settings_tab_layout.addWidget(lbl_set_dev)
     settings_tab_layout.addWidget(self.combo_settings_device)
 
@@ -149,6 +215,7 @@ def build_planning_tab(self):
     self.settings_max_lim_roll = add_platform_spinbox(platform_layout, "Max Lim. Roll (deg):", 40.0, 1, 1)
     self.settings_max_lim_pitch = add_platform_spinbox(platform_layout, "Max Lim. Pitch (deg):", 40.0, 2, 0)
     self.settings_max_lim_yaw = add_platform_spinbox(platform_layout, "Max Lim. Yaw (deg):", 40.0, 2, 1)
+    self.settings_max_speed_plat = add_platform_spinbox(platform_layout, "Max Speed (mm/s):", 20.0, 3, 0)
     self.settings_stack.addWidget(platform_page)
 
     # Page 2: Other device settings (simple info label)
@@ -191,7 +258,7 @@ def build_planning_tab(self):
     # 1. Device Type, Axis, Function Type (Row 0)
     self.combo_device = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_device.setMinimumHeight(40)
-    self.combo_device.addItems(["Lung Phantom", "Motion Platform", "Other"])
+    self.combo_device.addItems(["Lung Phantom", "Motion Platform"])
     add_field("Device Type:", self.combo_device, 0, 0)
 
     self.combo_axis = QComboBox(self.groupBox_BrCv_createCurve)
@@ -217,6 +284,10 @@ def build_planning_tab(self):
             cols = [col for col in getattr(self, 'dfEdit', type('Mock', (), {'columns': []})()).columns if col not in exclude_cols]
             self.combo_axis.addItems(cols)
         
+        # Show/hide offset rot widget based on device selection
+        if hasattr(self, 'offset_rot_widget'):
+            self.offset_rot_widget.setVisible(device == "Motion Platform")
+
         # Synchronize Settings tab dropdown & stack view
         if hasattr(self, 'combo_settings_device'):
             self.combo_settings_device.blockSignals(True)
@@ -279,16 +350,100 @@ def build_planning_tab(self):
     self.input_end_time.setMinimumHeight(40)
     add_field("End Time (s):", self.input_end_time, 2, 2)
 
+    # 4. Offset Rot. (mm) Section (Row 3, below Starting Phase)
+    # Visible only when "Motion Platform" is selected
+    from fcn_create_gui.touch_keyboard import register_touch_line_edit
+
+    self.offset_rot_widget = QWidget(self.groupBox_BrCv_createCurve)
+    offset_grid = QGridLayout(self.offset_rot_widget)
+    offset_grid.setContentsMargins(0, 5, 0, 0)
+    offset_grid.setSpacing(10)
+
+    # Single Label Row (Row 0): "Offset Rot. (mm):" on the left, then AP:, LAT:, SI: in their respective columns
+    lbl_off_title = QLabel("Offset Rot. (mm):", self.offset_rot_widget)
+    lbl_off_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+
+    lbl_off_ap = QLabel("AP:", self.offset_rot_widget)
+    lbl_off_ap.setStyleSheet("font-weight: bold; font-size: 14px;")
+
+    col0_lbl_lay = QHBoxLayout()
+    col0_lbl_lay.setContentsMargins(0, 0, 0, 0)
+    col0_lbl_lay.addWidget(lbl_off_title)
+    col0_lbl_lay.addStretch()
+    col0_lbl_lay.addWidget(lbl_off_ap)
+    offset_grid.addLayout(col0_lbl_lay, 0, 0)
+
+    lbl_off_lat = QLabel("LAT:", self.offset_rot_widget)
+    lbl_off_lat.setStyleSheet("font-weight: bold; font-size: 14px;")
+
+    col1_lbl_lay = QHBoxLayout()
+    col1_lbl_lay.setContentsMargins(0, 0, 0, 0)
+    col1_lbl_lay.addStretch()
+    col1_lbl_lay.addWidget(lbl_off_lat)
+    offset_grid.addLayout(col1_lbl_lay, 0, 1)
+
+    lbl_off_si = QLabel("SI:", self.offset_rot_widget)
+    lbl_off_si.setStyleSheet("font-weight: bold; font-size: 14px;")
+
+    col2_lbl_lay = QHBoxLayout()
+    col2_lbl_lay.setContentsMargins(0, 0, 0, 0)
+    col2_lbl_lay.addStretch()
+    col2_lbl_lay.addWidget(lbl_off_si)
+    offset_grid.addLayout(col2_lbl_lay, 0, 2)
+
+    # Input Fields Row (Row 1): Input fields aligned with columns 0, 1, 2
+    input_style_plan = """
+        QLineEdit {
+            background-color: #ffffff;
+            font-weight: bold;
+            font-size: 14px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            padding: 4px 8px;
+        }
+        QLineEdit:focus {
+            border: 2px solid #1976d2;
+        }
+    """
+
+    self.input_offset_ap_plan = QLineEdit("0.0", self.offset_rot_widget)
+    self.input_offset_ap_plan.setStyleSheet(input_style_plan)
+    self.input_offset_ap_plan.setMinimumHeight(40)
+    register_touch_line_edit(self, self.input_offset_ap_plan, label_name="Offset AP (mm)")
+    offset_grid.addWidget(self.input_offset_ap_plan, 1, 0)
+
+    self.input_offset_lat_plan = QLineEdit("0.0", self.offset_rot_widget)
+    self.input_offset_lat_plan.setStyleSheet(input_style_plan)
+    self.input_offset_lat_plan.setMinimumHeight(40)
+    register_touch_line_edit(self, self.input_offset_lat_plan, label_name="Offset LAT (mm)")
+    offset_grid.addWidget(self.input_offset_lat_plan, 1, 1)
+
+    self.input_offset_si_plan = QLineEdit("0.0", self.offset_rot_widget)
+    self.input_offset_si_plan.setStyleSheet(input_style_plan)
+    self.input_offset_si_plan.setMinimumHeight(40)
+    register_touch_line_edit(self, self.input_offset_si_plan, label_name="Offset SI (mm)")
+    offset_grid.addWidget(self.input_offset_si_plan, 1, 2)
+
+    grid_inputs.addWidget(self.offset_rot_widget, 3, 0, 1, 3)
+
+    # Set initial visibility based on selected device
+    self.offset_rot_widget.setVisible(self.combo_device.currentText() == "Motion Platform")
+
+    # Connect tab synchronization
+    setup_offset_sync(self)
+
     # Connect axis change listener to dynamically modify labels and enable/disable offset inputs
     def update_axis_labels_and_state(axis):
         if not axis:
             return
         if axis in ["Roll", "Pitch", "Yaw"]:
             self.label_amplitude.setText("Amplitude (deg):")
+            self.label_amp_offset.setText("Amp. offset (mm):")
             self.input_amp_offset.setEnabled(False)
             self.input_amp_offset.setValue(0.0)
         else:
             self.label_amplitude.setText("Amplitude (mm):")
+            self.label_amp_offset.setText("Amp. offset (mm):")
             self.input_amp_offset.setEnabled(True)
 
     self.combo_axis.currentTextChanged.connect(update_axis_labels_and_state)
@@ -462,3 +617,71 @@ def build_planning_tab(self):
 
     # Initial trigger to populate axis and default curve data
     update_axis_dropdown()
+
+    # Automatic settings persistence across sessions
+    setup_settings_persistence(self)
+
+
+def setup_settings_persistence(self):
+    """Loads saved settings from configuration.json and connects change listeners for automatic persistence."""
+    import json
+    from fcn_init.app_config import get_config_path
+
+    spinbox_map = {
+        'max_speed': getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None),
+        'max_lim_lat': getattr(self, 'settings_max_lim_lat', None),
+        'max_lim_si': getattr(self, 'settings_max_lim_si', None),
+        'max_lim_ap': getattr(self, 'settings_max_lim_ap', None),
+        'max_lim_roll': getattr(self, 'settings_max_lim_roll', None),
+        'max_lim_pitch': getattr(self, 'settings_max_lim_pitch', None),
+        'max_lim_yaw': getattr(self, 'settings_max_lim_yaw', None),
+        'max_lim_x': getattr(self, 'settings_max_lim_x', None),
+        'max_lim_y': getattr(self, 'settings_max_lim_y', None),
+        'max_lim_z': getattr(self, 'settings_max_lim_z', None),
+    }
+
+    # Load existing config data
+    config_data = {}
+    try:
+        config_path = get_config_path('configuration.json', for_writing=False)
+        with open(config_path, 'r') as f:
+            config_data = json.load(f)
+    except Exception:
+        config_data = {}
+
+    # Set initial values from config if present
+    for key, sb in spinbox_map.items():
+        if sb is not None and key in config_data:
+            try:
+                val = float(config_data[key])
+                sb.blockSignals(True)
+                sb.setValue(val)
+                sb.blockSignals(False)
+            except (ValueError, TypeError):
+                pass
+
+    # Function to save updated settings back to configuration.json
+    def save_current_settings():
+        try:
+            cfg_file = get_config_path('configuration.json', for_writing=False)
+            existing_data = {}
+            try:
+                with open(cfg_file, 'r') as f:
+                    existing_data = json.load(f)
+            except Exception:
+                existing_data = {}
+
+            for key, sb in spinbox_map.items():
+                if sb is not None:
+                    existing_data[key] = sb.value()
+
+            write_file = get_config_path('configuration.json', for_writing=True)
+            with open(write_file, 'w') as f:
+                json.dump(existing_data, f, indent=4)
+        except Exception as e:
+            print(f"Error saving planning settings to configuration.json: {e}")
+
+    # Connect valueChanged listeners
+    for sb in spinbox_map.values():
+        if sb is not None:
+            sb.valueChanged.connect(lambda v: save_current_settings())

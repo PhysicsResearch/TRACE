@@ -915,6 +915,9 @@ def build_platform_subtab(self):
     register_touch_line_edit(self, self.input_offset_si, label_name="Offset SI (mm)")
     config_hlayout.addWidget(self.input_offset_si)
 
+    from fcn_create_gui.tab_planning import setup_offset_sync
+    setup_offset_sync(self)
+
     # Separator Line before buttons
     sep_btn = QFrame(config_frame)
     sep_btn.setFrameShape(QFrame.VLine)

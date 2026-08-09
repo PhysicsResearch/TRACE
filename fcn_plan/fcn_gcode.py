@@ -18,6 +18,7 @@ def generate_gcode_string(
     Supports both "Lung Phantom" and "Motion Platform" devices.
     """
     t_max = t_orig.max()
+    total_time_seconds = int(round(float(t_orig.max() - t_orig.min())))
     
     # Dynamically detect time step dt of the original curve
     if len(t_orig) > 1:
@@ -48,15 +49,15 @@ def generate_gcode_string(
         Y_orig = columns_data["Y"]
         Z_orig = columns_data["Z"]
 
-        X_new = np.interp(t_new, t_orig, X_orig)
-        Y_new = np.interp(t_new, t_orig, Y_orig)
-        Z_new = np.interp(t_new, t_orig, Z_orig)
+        X_new = np.clip(np.interp(t_new, t_orig, X_orig), 0.0, None)
+        Y_new = np.clip(np.interp(t_new, t_orig, Y_orig), 0.0, None)
+        Z_new = np.clip(np.interp(t_new, t_orig, Z_orig), 0.0, None)
 
         lim_x, lim_y, lim_z = max_limits
         if np.any(np.abs(X_new) > lim_x) or np.any(np.abs(Y_new) > lim_y) or np.any(np.abs(Z_new) > lim_z):
             exceeds_limits = True
 
-        gcode_lines = ["G90"]
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
         last_x, last_y, last_z = X_new[0], Y_new[0], Z_new[0]
         dwell_accum = 0.0
         last_pos_written_idx = 0
@@ -128,14 +129,13 @@ def generate_gcode_string(
         Pitch_orig = columns_data["Pitch"]
         Yaw_orig = columns_data["Yaw"]
 
-        LAT_new = np.interp(t_new, t_orig, LAT_orig)
-        SI_new = np.interp(t_new, t_orig, SI_orig)
-        AP_new = np.interp(t_new, t_orig, AP_orig)
+        LAT_new = np.clip(np.interp(t_new, t_orig, LAT_orig), 0.0, lim_lat)
+        SI_new = np.clip(np.interp(t_new, t_orig, SI_orig), 0.0, lim_si)
+        AP_new = np.clip(np.interp(t_new, t_orig, AP_orig), 0.0, lim_ap)
         Roll_new = np.interp(t_new, t_orig, Roll_orig)
         Pitch_new = np.interp(t_new, t_orig, Pitch_orig)
         Yaw_new = np.interp(t_new, t_orig, Yaw_orig)
 
-        lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw = max_limits
         if (np.any(np.abs(LAT_new) > lim_lat) or 
             np.any(np.abs(SI_new) > lim_si) or 
             np.any(np.abs(AP_new) > lim_ap) or 
@@ -197,13 +197,21 @@ def generate_gcode_string(
 
                 target_z[name] = z4 + zc + AP_new[i]
 
-            A_new[i] = target_z['A']
-            B_new[i] = target_z['B']
-            C_new[i] = target_z['C']
-            D_new[i] = target_z['D']
+            A_new[i] = max(0.0, min(lim_ap, target_z['A']))
+            B_new[i] = max(0.0, min(lim_ap, target_z['B']))
+            C_new[i] = max(0.0, min(lim_ap, target_z['C']))
+            D_new[i] = max(0.0, min(lim_ap, target_z['D']))
 
-        gcode_lines = ["G90"]
-        last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[0], B_new[0], C_new[0], D_new[0], LAT_new[0], SI_new[0]
+        # Compute sway compensation offset for LAT and SI
+        roll_rad = np.radians(Roll_new)
+        pitch_rad = np.radians(Pitch_new)
+
+        LAT_eff = np.clip(off_lat + LAT_new + off_ap * np.sin(roll_rad), 0.0, lim_lat)
+        SI_eff = np.clip(off_si + SI_new + off_ap * np.sin(pitch_rad), 0.0, lim_si)
+
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
+        last_A, last_B, last_C, last_D = A_new[0], B_new[0], C_new[0], D_new[0]
+        last_LAT, last_SI = LAT_eff[0], SI_eff[0]
         dwell_accum = 0.0
         last_pos_written_idx = 0
 
@@ -228,8 +236,8 @@ def generate_gcode_string(
 
             # Distinguish between truly stationary and moving steps
             is_stationary = (
-                LAT_new[i] == LAT_new[i-1] and
-                SI_new[i] == SI_new[i-1] and
+                LAT_eff[i] == LAT_eff[i-1] and
+                SI_eff[i] == SI_eff[i-1] and
                 AP_new[i] == AP_new[i-1] and
                 Roll_new[i] == Roll_new[i-1] and
                 Pitch_new[i] == Pitch_new[i-1] and
@@ -255,9 +263,9 @@ def generate_gcode_string(
 
                 gcode_lines.append(
                     f"G1 F{speed:.6f} A{A_new[i]:.6f} B{B_new[i]:.6f} C{C_new[i]:.6f} D{D_new[i]:.6f} "
-                    f"'e{LAT_new[i]:.6f} 'f{LAT_new[i]:.6f} 'a{SI_new[i]:.6f} {axis_y_lo}{SI_new[i]:.6f}"
+                    f"'e{LAT_eff[i]:.6f} 'f{LAT_eff[i]:.6f} 'a{SI_eff[i]:.6f} {axis_y_lo}{SI_eff[i]:.6f}"
                 )
-                last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[i], B_new[i], C_new[i], D_new[i], LAT_new[i], SI_new[i]
+                last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[i], B_new[i], C_new[i], D_new[i], LAT_eff[i], SI_eff[i]
                 last_pos_written_idx = i
 
         dt_elapsed = max(0.001, t_new[-1] - t_new[last_pos_written_idx] - dwell_accum)
@@ -293,7 +301,7 @@ def generate_gcode_string(
                 if np.any(np.abs(new_data[col]) > lim):
                     exceeds_limits = True
 
-        gcode_lines = ["G90"]
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
         last_vals = {col: new_data[col][0] for col in new_data}
         dwell_accum = 0.0
         last_pos_written_idx = 0
