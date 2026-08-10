@@ -1,0 +1,200 @@
+name: Build & Publish TRACE Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "App version to release (e.g. 1.0.0)"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    env:
+      KMP_DUPLICATE_LIB_OK: "TRUE"
+      PYSIDE_DISABLE_INTERNAL_QT_CONF: "1"
+      QT_PLUGIN_PATH: ""
+      QT_QPA_PLATFORM_PLUGIN_PATH: ""
+      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Nuitka cache
+        uses: actions/cache@v4
+        with:
+          path: .nuitka-cache
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('**/*.py', '.github/workflows/*.yml') }}
+          restore-keys: ${{ runner.os }}-nuitka-
+
+      - name: Build Standalone Application with Nuitka
+        shell: powershell
+        env:
+          PYSIDE_DISABLE_INTERNAL_QT_CONF: "1"
+          QT_PLUGIN_PATH: ""
+          QT_QPA_PLATFORM_PLUGIN_PATH: ""
+          MPLBACKEND: "Agg"
+        run: |
+          python -m venv venv-build
+          $venvScripts = "$(Resolve-Path .\venv-build\Scripts)"
+
+          $oldPath = $env:Path
+          $env:Path = "$venvScripts;$env:SystemRoot\system32;$env:SystemRoot"
+
+          python -m pip install --upgrade pip wheel setuptools
+
+          pip install `
+            "PySide6==6.10.0" `
+            "PySide6-Addons==6.10.0" `
+            "PySide6-Essentials==6.10.0" `
+            "shiboken6==6.10.0"
+
+          pip install "numpy==2.4.*" "scipy==1.16.*"
+          pip install "matplotlib==3.10.*"
+          pip install pillow openpyxl certifi
+          pip install "pandas==3.0.*"
+          pip install "requests>=2.32"
+
+          pip install "nuitka>=2.2" ordered-set zstandard
+
+          $qtBase = python -c "import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__),'Qt'))"
+          $qtBase = ($qtBase.Trim() -replace '\\','/')
+          $qtRes  = "$qtBase/resources"
+          $qtTr   = "$qtBase/translations"
+          $qtExec = "$qtBase/libexec"
+
+          $qtArgs = @()
+          if (Test-Path $qtRes)  { $qtArgs += "--include-data-dir=$qtRes=PySide6/Qt/resources" }
+          if (Test-Path $qtTr)   { $qtArgs += "--include-data-dir=$qtTr=PySide6/Qt/translations" }
+          if (Test-Path $qtExec) { $qtArgs += "--include-data-dir=$qtExec=PySide6/Qt/libexec" }
+
+          # Generate Windows ICO icon file from PNG
+          python -c "from PIL import Image; img = Image.open('assets/Open-Logo.png'); img.save('assets/app_icon.ico', format='ICO', sizes=[(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)])"
+
+          $args = @(
+            "Launch_ImGUI.py",
+            "--standalone",
+            "--remove-output",
+            "--output-dir=dist\TRACE",
+            "--enable-plugin=pyside6",
+            "--include-qt-plugins=platforms,imageformats,styles",
+            "--windows-console-mode=disable",
+            "--windows-icon-from-ico=assets/app_icon.ico",
+            "---report=dist\TRACE\build_report.html".Replace("---","--"),
+            "--assume-yes-for-downloads",
+
+            "--include-package=numpy",
+            "--include-package=scipy",
+            "--include-package=matplotlib",
+            "--include-package-data=matplotlib",
+            "--include-package=requests",
+            "--include-package-data=certifi",
+            "--include-package=openpyxl",
+            "--include-package-data=openpyxl",
+            "--include-package=pandas",
+            "--include-package-data=pandas",
+            "--include-package=PIL",
+            
+            "--include-data-dir=assets=assets"
+          )
+
+          $args += $qtArgs
+
+          $oldQtConf = $env:PYSIDE_DISABLE_INTERNAL_QT_CONF
+          $env:PYSIDE_DISABLE_INTERNAL_QT_CONF = ""
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          python -m nuitka @args
+
+          $env:PYSIDE_DISABLE_INTERNAL_QT_CONF = $oldQtConf
+          $env:Path = $oldPath
+
+      - name: Flatten Nuitka dist into dist\TRACE
+        shell: powershell
+        run: |
+          $root = "dist\TRACE"
+          $src  = Join-Path $root "Launch_ImGUI.dist"
+
+          if (!(Test-Path $src)) {
+            throw "Expected $src not found"
+          }
+
+          Copy-Item -Path "$src\*" -Destination $root -Recurse -Force
+          Remove-Item -Path $src -Recurse -Force
+
+      - name: Verify dist contents
+        shell: powershell
+        run: |
+          if (-not (Test-Path "dist\TRACE\Launch_ImGUI.exe")) {
+            throw "Launch_ImGUI.exe missing"
+          }
+
+      - name: Ensure Output directory exists
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path Output | Out-Null
+
+      - name: Create Portable Zip Package
+        shell: powershell
+        run: |
+          $ver = "${{ github.event.inputs.app_version }}"
+          if ([string]::IsNullOrWhiteSpace($ver)) {
+            $ver = "${{ github.ref_name }}".TrimStart('v')
+          }
+          if ([string]::IsNullOrWhiteSpace($ver)) {
+            $ver = "1.0.0"
+          }
+          Compress-Archive -Path "dist\TRACE\*" -DestinationPath "Output\TRACE-Portable-v$ver.zip" -Force
+
+      - name: Ensure Inno Setup is installed
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${Env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if (!(Test-Path $iscc)) {
+              $isccAlt = "${Env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+              if (Test-Path $isccAlt) {
+                $iscc = $isccAlt
+              } else {
+                throw "ISCC.exe not found after install."
+              }
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Build TRACE Installer
+        shell: powershell
+        run: |
+          $iscc = "${Env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            $iscc = "${Env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc TRACE.iss
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.event.inputs.app_version || '1.0.0') }}
+          name: TRACE ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.event.inputs.app_version || '1.0.0') }}
+          files: |
+            Output/TRACE-Setup.exe
+            Output/TRACE-Portable-*.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
