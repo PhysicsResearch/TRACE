@@ -402,13 +402,16 @@ def update_duet_status_ui(self, data=None):
         ip = get_clean_duet_ip(self)
         try:
             fetched_data, status_code = duet_status_request(self, ip, timeout=5)
-            if status_code == 200:
+            if status_code == 200 and fetched_data is not None:
                 data = fetched_data
             else:
+                self.duet_connected = False
+                update_connection_status_ui(self, connected=False)
+                log_to_duet_console(self, "Connection lost: Duet is offline or powered off.", color="#ff3333")
                 return
         except Exception as e:
             print(f"Failed to update Duet status UI: {e}")
-            log_to_duet_console(self, f"Status poll error: {e}")
+            log_to_duet_console(self, f"Connection error: Duet unreachable ({e})", color="#ff3333")
             self.duet_connected = False
             update_connection_status_ui(self, connected=False)
             return
@@ -419,7 +422,90 @@ def update_duet_status_ui(self, data=None):
             axes_homed = coords.get('axesHomed', [])
             xyz = coords.get('xyz', [])
 
-            # Update Cartesian / Motion Home button colors based on is_axis_homed (Green=Not Homed, Blue=Homed)
+            # Update individual motor position displays & homed state FIRST
+            if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
+                self.ext_axes_homed = {}
+            if not hasattr(self, 'axis_min_limits') or not isinstance(self.axis_min_limits, dict):
+                self.axis_min_limits = {}
+            if not hasattr(self, 'axis_max_limits') or not isinstance(self.axis_max_limits, dict):
+                self.axis_max_limits = {}
+
+            # 1. Parse Object Model move.axes if available in RRF status response
+            parsed_from_move_axes = False
+            move_axes = data.get('move', {}).get('axes', [])
+            if isinstance(move_axes, list) and len(move_axes) > 0:
+                configured_axes = []
+                for ax_info in move_axes:
+                    if isinstance(ax_info, dict):
+                        let = str(ax_info.get('letter', '')).strip()
+                        if let:
+                            configured_axes.append(let)
+                            clean_let = let.strip("'").strip()
+
+                            if "homed" in ax_info or "userHomed" in ax_info:
+                                homed_val = ax_info.get('homed', ax_info.get('userHomed', 0))
+                                is_h = (homed_val == 1 or homed_val is True)
+                                self.ext_axes_homed[let] = is_h
+                                self.ext_axes_homed[clean_let] = is_h
+                                self.ext_axes_homed[f"'{clean_let}"] = is_h
+
+                            self.axis_min_limits[let] = ax_info.get('min', 0.0)
+                            self.axis_max_limits[let] = ax_info.get('max', 200.0)
+                            self.axis_min_limits[clean_let] = ax_info.get('min', 0.0)
+                            self.axis_max_limits[clean_let] = ax_info.get('max', 200.0)
+                            self.axis_min_limits[f"'{clean_let}"] = ax_info.get('min', 0.0)
+                            self.axis_max_limits[f"'{clean_let}"] = ax_info.get('max', 200.0)
+                            parsed_from_move_axes = True
+
+                            # Also update current position display
+                            field = getattr(self, f"POS_CURR_{let}", None)
+                            if field is None:
+                                field = getattr(self, f"POS_CURR_{clean_let}", None)
+                            if field is None:
+                                field = getattr(self, f"POS_CURR_'{clean_let}", None)
+                            user_pos = ax_info.get('userPosition', 0.0)
+                            if field is not None:
+                                field.setText(f"{user_pos:.3f}")
+                            if let.upper() == 'W':
+                                fy = getattr(self, "POS_CURR_YAW", None)
+                                if fy is not None:
+                                    fy.setText(f"{user_pos:.3f}")
+                if configured_axes:
+                    self.duet_configured_axes = configured_axes
+
+            # 2. Map axesHomed array using exact board configuration or dynamic length fallback
+            if not parsed_from_move_axes and isinstance(axes_homed, list) and len(axes_homed) > 0:
+                axes_rrf_order = getattr(self, 'duet_configured_axes', None)
+                if not axes_rrf_order:
+                    if len(axes_homed) == 11:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                    else:
+                        axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+
+                for idx, ax_name in enumerate(axes_rrf_order):
+                    if idx < len(axes_homed):
+                        is_h = (axes_homed[idx] == 1)
+                        clean_n = str(ax_name).strip("'")
+                        self.ext_axes_homed[ax_name] = is_h
+                        self.ext_axes_homed[clean_n] = is_h
+                        self.ext_axes_homed[f"'{clean_n}"] = is_h
+
+                        field = getattr(self, f"POS_CURR_{ax_name}", None)
+                        if field is None:
+                            field = getattr(self, f"POS_CURR_{clean_n}", None)
+                        if field is None:
+                            field = getattr(self, f"POS_CURR_'{clean_n}", None)
+                        if field is not None and idx < len(xyz):
+                            field.setText(f"{xyz[idx]:.3f}")
+                        if str(ax_name).upper() == 'W':
+                            fy = getattr(self, "POS_CURR_YAW", None)
+                            if fy is not None and idx < len(xyz):
+                                fy.setText(f"{xyz[idx]:.3f}")
+
+            # Refresh individual motor selector buttons and motion direction buttons
+            refresh_external_axis_styles(self)
+
+            # Update Cartesian / Motion Home button colors based on freshly updated is_axis_homed (Green=Not Homed, Blue=Homed)
             axis_map = [('X', 'X'), ('Y', 'Y'), ('Z', 'Z')]
             all_homed = True
             for name, ax_key in axis_map:
@@ -533,86 +619,6 @@ def update_duet_status_ui(self, data=None):
                     pos_field = getattr(self, f'POS_CURR_{axis_name}', None)
                     if pos_field is not None:
                         pos_field.setText(f"{val:.3f}")
-
-            # Update individual motor position displays & homed state
-            if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
-                self.ext_axes_homed = {}
-            if not hasattr(self, 'axis_min_limits') or not isinstance(self.axis_min_limits, dict):
-                self.axis_min_limits = {}
-            if not hasattr(self, 'axis_max_limits') or not isinstance(self.axis_max_limits, dict):
-                self.axis_max_limits = {}
-
-            # 1. Parse Object Model move.axes if available in RRF status response
-            parsed_from_move_axes = False
-            move_axes = data.get('move', {}).get('axes', [])
-            if isinstance(move_axes, list) and len(move_axes) > 0:
-                configured_axes = []
-                for ax_info in move_axes:
-                    if isinstance(ax_info, dict):
-                        let = str(ax_info.get('letter', '')).strip()
-                        if let:
-                            configured_axes.append(let)
-                            clean_let = let.strip("'").strip()
-
-                            if "homed" in ax_info or "userHomed" in ax_info:
-                                homed_val = ax_info.get('homed', ax_info.get('userHomed', 0))
-                                is_h = (homed_val == 1 or homed_val is True)
-                                self.ext_axes_homed[let] = is_h
-                                self.ext_axes_homed[clean_let] = is_h
-                                self.ext_axes_homed[f"'{clean_let}"] = is_h
-
-                            self.axis_min_limits[let] = ax_info.get('min', 0.0)
-                            self.axis_max_limits[let] = ax_info.get('max', 200.0)
-                            self.axis_min_limits[clean_let] = ax_info.get('min', 0.0)
-                            self.axis_max_limits[clean_let] = ax_info.get('max', 200.0)
-                            self.axis_min_limits[f"'{clean_let}"] = ax_info.get('min', 0.0)
-                            self.axis_max_limits[f"'{clean_let}"] = ax_info.get('max', 200.0)
-                            parsed_from_move_axes = True
-
-                            # Also update current position display
-                            field = getattr(self, f"POS_CURR_{let}", None)
-                            if field is None:
-                                field = getattr(self, f"POS_CURR_{clean_let}", None)
-                            if field is None:
-                                field = getattr(self, f"POS_CURR_'{clean_let}", None)
-                            user_pos = ax_info.get('userPosition', 0.0)
-                            if field is not None:
-                                field.setText(f"{user_pos:.3f}")
-                            if let.upper() == 'W':
-                                fy = getattr(self, "POS_CURR_YAW", None)
-                                if fy is not None:
-                                    fy.setText(f"{user_pos:.3f}")
-                if configured_axes:
-                    self.duet_configured_axes = configured_axes
-
-            # 2. Map axesHomed array using exact board configuration or dynamic length fallback
-            if not parsed_from_move_axes and isinstance(axes_homed, list) and len(axes_homed) > 0:
-                axes_rrf_order = getattr(self, 'duet_configured_axes', None)
-                if not axes_rrf_order:
-                    if len(axes_homed) == 11:
-                        axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
-                    else:
-                        axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
-
-                for idx, ax_name in enumerate(axes_rrf_order):
-                    if idx < len(axes_homed):
-                        is_h = (axes_homed[idx] == 1)
-                        clean_n = str(ax_name).strip("'")
-                        self.ext_axes_homed[ax_name] = is_h
-                        self.ext_axes_homed[clean_n] = is_h
-                        self.ext_axes_homed[f"'{clean_n}"] = is_h
-
-                        field = getattr(self, f"POS_CURR_{ax_name}", None)
-                        if field is None:
-                            field = getattr(self, f"POS_CURR_{clean_n}", None)
-                        if field is None:
-                            field = getattr(self, f"POS_CURR_'{clean_n}", None)
-                        if field is not None and idx < len(xyz):
-                            field.setText(f"{xyz[idx]:.3f}")
-                        if str(ax_name).upper() == 'W':
-                            fy = getattr(self, "POS_CURR_YAW", None)
-                            if fy is not None and idx < len(xyz):
-                                fy.setText(f"{xyz[idx]:.3f}")
 
             # Update position displays for Cartesian axes
             cart_letters = ['X', 'Y', 'Z']
@@ -810,6 +816,20 @@ def update_connection_status_ui(self, connected=False):
             }}
         """)
 
+    # 4. Manage background connection heartbeat timer
+    from PySide6.QtCore import QTimer
+    if connected:
+        if not hasattr(self, '_duet_heartbeat_timer') or self._duet_heartbeat_timer is None:
+            self._duet_heartbeat_timer = QTimer(self)
+            self._duet_heartbeat_timer.setInterval(2000)
+            self._duet_heartbeat_timer.timeout.connect(lambda: update_duet_status_ui(self))
+        if not self._duet_heartbeat_timer.isActive():
+            self._duet_heartbeat_timer.start()
+    else:
+        if hasattr(self, '_duet_heartbeat_timer') and self._duet_heartbeat_timer is not None:
+            if self._duet_heartbeat_timer.isActive():
+                self._duet_heartbeat_timer.stop()
+
 
 def send_cmd(self, cmd=None):
     """
@@ -872,12 +892,36 @@ def home(self, ax):
     else:
         send_cmd(self, f'G28 {ax}')
 
-    # Schedule follow-up status refreshes at 500ms, 1500ms, and 3000ms after G28
-    # to catch instantaneous or fast homing completion reliably
+    # Start repeated status polling timer to catch homing completion even for long movements
     from PySide6.QtCore import QTimer
-    QTimer.singleShot(500, lambda: update_duet_status_ui(self))
-    QTimer.singleShot(1500, lambda: update_duet_status_ui(self))
-    QTimer.singleShot(3000, lambda: update_duet_status_ui(self))
+
+    if hasattr(self, '_homing_poll_timer') and self._homing_poll_timer is not None:
+        try:
+            self._homing_poll_timer.stop()
+        except Exception:
+            pass
+
+    self._homing_poll_count = 0
+    def _poll_homing_step():
+        self._homing_poll_count += 1
+        update_duet_status_ui(self)
+        
+        # Stop polling if requested axis is homed or max timeout (30 seconds) is reached
+        if ax in ['ALL', 'all', 'All']:
+            all_plat_homed = (is_axis_homed(self, 'LAT') and is_axis_homed(self, 'SI') and is_axis_homed(self, 'AP'))
+            all_cart_homed = (is_axis_homed(self, 'X') and is_axis_homed(self, 'Y') and is_axis_homed(self, 'Z'))
+            if (all_plat_homed and all_cart_homed) or self._homing_poll_count >= 30:
+                if hasattr(self, '_homing_poll_timer') and self._homing_poll_timer is not None:
+                    self._homing_poll_timer.stop()
+        else:
+            if is_axis_homed(self, ax) or self._homing_poll_count >= 30:
+                if hasattr(self, '_homing_poll_timer') and self._homing_poll_timer is not None:
+                    self._homing_poll_timer.stop()
+
+    self._homing_poll_timer = QTimer(self)
+    self._homing_poll_timer.setInterval(1000)
+    self._homing_poll_timer.timeout.connect(_poll_homing_step)
+    self._homing_poll_timer.start()
 
 
 def check_relative_move_limits(self, ax, delta):

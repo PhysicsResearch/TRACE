@@ -652,26 +652,33 @@ def update_status_tab_dashboard(self):
     if not getattr(self, 'duet_connected', False):
         return
 
+    ip = get_clean_duet_ip(self)
+    try:
+        data, status_code = duet_status_request(self, ip, timeout=5)
+        if status_code != 200 or data is None:
+            self.duet_connected = False
+            from fcn_control.fcn_control import update_connection_status_ui, log_to_duet_console
+            update_connection_status_ui(self, connected=False)
+            log_to_duet_console(self, "Connection lost: Duet is offline or powered off.", color="#ff3333")
+            return
+    except Exception as ex:
+        self.duet_connected = False
+        from fcn_control.fcn_control import update_connection_status_ui, log_to_duet_console
+        update_connection_status_ui(self, connected=False)
+        log_to_duet_console(self, f"Connection lost: Duet unreachable ({ex})", color="#ff3333")
+        return
+
+    # Update Control tab UI with data even if Status tab widgets aren't instantiated
+    try:
+        from fcn_control.fcn_control import update_duet_status_ui
+        update_duet_status_ui(self, data=data)
+    except Exception as ex:
+        print(f"Error updating Control UI from status poll: {ex}")
 
     if not hasattr(self, 'statusBadgeLabel') or self.statusBadgeLabel is None:
         return
 
-    ip = get_clean_duet_ip(self)
     try:
-        data, status_code = duet_status_request(self, ip, timeout=5)
-        if status_code != 200:
-            self.duet_connected = False
-            from fcn_control.fcn_control import update_connection_status_ui
-            update_connection_status_ui(self, connected=False)
-            return
-
-        # Update Control tab UI with the fetched status data (positions, home button states, etc.)
-        try:
-            from fcn_control.fcn_control import update_duet_status_ui
-            update_duet_status_ui(self, data=data)
-        except Exception as ex:
-            print(f"Error updating Control UI from status poll: {ex}")
-
         # Poll /rr_reply for Duet messages (e.g. M117, macro responses, 'waiting for radiation')
         try:
             res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
