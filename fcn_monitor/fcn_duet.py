@@ -318,6 +318,8 @@ def clear_status_plot_data(self):
         'Roll': [], 'Pitch': [], 'Yaw': [],
         'LAT': [], 'AP': [], 'SI': []
     }
+    self._total_pause_duration = 0.0
+    self._pause_start_perf = None
     if hasattr(self, 'status_plot_lines'):
         self.status_plot_lines.clear()
     if hasattr(self, 'status_ref_lines'):
@@ -1204,9 +1206,53 @@ def update_status_fast(self):
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
         elapsed_t = 0.0
-        # Append to plot data ONLY during active motion (P: Printing/Running, S: Paused, R: Resuming, M: Simulating, B: Busy)
+        # Determine whether to update plot data based on status code and 'Include pause' checkbox
         status_code = getattr(self, 'duet_status_code', 'I')
+        include_pause = True
+        if hasattr(self, 'check_include_pause') and self.check_include_pause is not None:
+            include_pause = self.check_include_pause.isChecked()
+
+        # Detect if machine is in a firmware pause ('S') or macro wait state (e.g. sensor_wait macro)
+        msg_text = ""
+        if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+            msg_text = self.statusDuetMessage.text().strip().lower()
+        reply_text = getattr(self, '_last_duet_reply', '').strip().lower()
+
+        def check_paused_message(text):
+            if not text:
+                return False
+            if any(ok in text for ok in ["detected", "continuing", "resuming", "started", "complete", "completed"]):
+                return False
+            return any(k in text for k in ["waiting", "wait for", "pausing", "paused", "m226", "sensor_wait"])
+
+        is_paused_state = False
+        if status_code == "S":
+            is_paused_state = True
+        elif check_paused_message(msg_text) or check_paused_message(reply_text):
+            is_paused_state = True
+
+        should_update_plot = False
         if status_code in ["P", "S", "R", "M", "B"]:
+            if is_paused_state:
+                if include_pause:
+                    should_update_plot = True
+                else:
+                    should_update_plot = False
+            else:
+                should_update_plot = True
+
+        t_now = time.perf_counter()
+
+        if not should_update_plot:
+            if is_paused_state and not include_pause:
+                if getattr(self, '_pause_start_perf', None) is None:
+                    self._pause_start_perf = t_now
+        else:
+            if getattr(self, '_pause_start_perf', None) is not None:
+                pause_dur = t_now - self._pause_start_perf
+                self._total_pause_duration = getattr(self, '_total_pause_duration', 0.0) + pause_dur
+                self._pause_start_perf = None
+
             if not hasattr(self, 'status_plot_data') or self.status_plot_data is None or 'A' not in self.status_plot_data or 'LAT' not in self.status_plot_data:
                 self.status_plot_data = {
                     't': [], 'X': [], 'Y': [], 'Z': [],
@@ -1215,6 +1261,8 @@ def update_status_fast(self):
                     'Roll': [], 'Pitch': [], 'Yaw': [],
                     'LAT': [], 'AP': [], 'SI': []
                 }
+                self._total_pause_duration = 0.0
+                self._pause_start_perf = None
 
             # Detect physical motion start to align live t=0.0s with reference curve t=0.0s
             if getattr(self, 'waiting_for_motion_start', False):
@@ -1234,10 +1282,9 @@ def update_status_fast(self):
                     return  # Wait until Duet physically starts moving motors
                 else:
                     self.waiting_for_motion_start = False
-                    self.status_t0 = time.perf_counter()
-                    self._last_sample_perf = self.status_t0
-                    self._last_elapsed_t = 0.0
-                    self._last_dt_smooth = 0.01
+                    self.status_t0 = t_now
+                    self._total_pause_duration = 0.0
+                    self._pause_start_perf = None
 
                     # Seed initial t=0.000s baseline origin point from snapshot
                     sn = self._start_pos_snapshot
@@ -1268,25 +1315,16 @@ def update_status_fast(self):
                     self.status_plot_data['AP'].append(sn_ap)
                     self.status_plot_data['SI'].append(sn_si)
 
-            t_now = time.perf_counter()
             if not hasattr(self, 'status_t0') or self.status_t0 is None:
                 self.status_t0 = t_now
-                self._last_sample_perf = t_now
-                self._last_elapsed_t = 0.0
-                self._last_dt_smooth = 0.01
+                self._total_pause_duration = 0.0
+                self._pause_start_perf = None
 
-            dt_raw = t_now - getattr(self, '_last_sample_perf', t_now)
-            self._last_sample_perf = t_now
-
-            # Apply low-pass exponential smoothing filter to eliminate Wi-Fi packet arrival jitter
-            if 0.001 <= dt_raw <= 0.2:
-                dt_smooth = 0.35 * dt_raw + 0.65 * getattr(self, '_last_dt_smooth', dt_raw)
-                self._last_dt_smooth = dt_smooth
-                elapsed_t = getattr(self, '_last_elapsed_t', 0.0) + dt_smooth
+            raw_elapsed = t_now - self.status_t0
+            if include_pause:
+                elapsed_t = max(0.0, raw_elapsed)
             else:
-                elapsed_t = t_now - self.status_t0
-
-            self._last_elapsed_t = elapsed_t
+                elapsed_t = max(0.0, raw_elapsed - getattr(self, '_total_pause_duration', 0.0))
 
             self.status_plot_data['t'].append(elapsed_t)
             self.status_plot_data['X'].append(axis_positions['X'])
@@ -1874,6 +1912,15 @@ def duet_status_request(self, ip, timeout=5):
     except Exception as e:
         if is_explicit_connecting:
             from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"SBC check failed: {e}", color="#ff3333")
-
     return None, 500
+
+
+def release_sensor_wait_action(self):
+    """
+    Sends force release signal to Duet to break out of the sensor_wait macro loop.
+    """
+    from fcn_control.fcn_control import send_cmd, log_to_duet_console
+    log_to_duet_console(self, "Sending force release signal to sensor_wait macro on Duet...", color="#0288d1")
+    send_cmd(self, "global force_release_sensor = true")
+    send_cmd(self, "set global.force_release_sensor = true")
+

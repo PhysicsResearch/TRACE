@@ -70,12 +70,17 @@ def build_status_tab(self):
     self.gcodeStopJob.setFixedSize(85, 38)
     self.gcodeStopJob.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; font-size: 14px; border-radius: 4px;")
 
+    self.gcodeReleaseWait = QPushButton("Release", self.card_status)
+    self.gcodeReleaseWait.setFixedSize(85, 38)
+    self.gcodeReleaseWait.setStyleSheet("background-color: #0288d1; color: white; font-weight: bold; font-size: 14px; border-radius: 4px;")
+
     # Connect buttons
-    from fcn_monitor.fcn_duet import pause_continue_GCODE, cancel_GCODE_job, start_selected_gcode_execution
+    from fcn_monitor.fcn_duet import pause_continue_GCODE, cancel_GCODE_job, start_selected_gcode_execution, release_sensor_wait_action
     self.gcodeStart.clicked.connect(lambda: start_selected_gcode_execution(self))
     self.gcodePause.clicked.connect(lambda: pause_continue_GCODE(self, pause=True))
     self.gcodeResume.clicked.connect(lambda: pause_continue_GCODE(self, pause=False))
     self.gcodeStopJob.clicked.connect(lambda: cancel_GCODE_job(self))
+    self.gcodeReleaseWait.clicked.connect(lambda: release_sensor_wait_action(self))
 
     self.emergencyButton_2 = QPushButton("Emergency STOP", self.card_status)
     self.emergencyButton_2.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 15px; border-radius: 4px;")
@@ -142,7 +147,7 @@ def build_status_tab(self):
     hdr_layout = QHBoxLayout()
     hdr_layout.setSpacing(15)
 
-    # Left 1/3 column: Status badge on left, Start, Pause, Resume, Stop buttons aligned so Stop ends at 1/3 width (end of progress bar)
+    # Left 1/3 column: Status badge on left, Start, Pause, Resume, Stop, Release buttons
     top_left_box = QHBoxLayout()
     top_left_box.setContentsMargins(0, 0, 0, 0)
     top_left_box.addWidget(hdr_label)
@@ -152,6 +157,7 @@ def build_status_tab(self):
     top_left_box.addWidget(self.gcodePause)
     top_left_box.addWidget(self.gcodeResume)
     top_left_box.addWidget(self.gcodeStopJob)
+    top_left_box.addWidget(self.gcodeReleaseWait)
 
     # Right 2/3 column: Speed Factor tightly grouped on left next to field, Auto release, Auto pause, Emergency STOP on right
     top_right_box = QHBoxLayout()
@@ -201,6 +207,12 @@ def build_status_tab(self):
     self.check_auto_pause.setChecked(False)
     self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
     top_right_box.addWidget(self.check_auto_pause)
+
+    top_right_box.addSpacing(12)
+    self.check_include_pause = QCheckBox("Include pause", self.card_status)
+    self.check_include_pause.setChecked(True)
+    self.check_include_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
+    top_right_box.addWidget(self.check_include_pause)
 
     top_right_box.addStretch()
     top_right_box.addWidget(self.emergencyButton_2)
@@ -563,8 +575,8 @@ def build_status_tab(self):
     self.status_polling_timer.timeout.connect(lambda: update_status_tab_dashboard(self))
     self.status_polling_timer.start()
 
-    # Setup fast status polling timer (polls userPositions every 10 milliseconds)
+    # Setup fast status polling timer (polls userPositions every 15 milliseconds)
     self.status_fast_timer = QTimer(self.tab_status)
-    self.status_fast_timer.setInterval(10)
+    self.status_fast_timer.setInterval(15)
     self.status_fast_timer.timeout.connect(lambda: update_status_fast(self))
     self.status_fast_timer.start()

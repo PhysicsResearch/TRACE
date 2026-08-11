@@ -5,7 +5,7 @@ from fcn_init.app_config import get_config_path
 def initialize_software_variables(self):
 
     self.WINDOW_DURATION = 10     # seconds to show on the plot
-    self.UPDATE_INTERVAL = 0.05    # seconds between polls
+    self.UPDATE_INTERVAL = 0.015   # seconds between polls (15ms)
     self.Tab_index = 0
     self.gcode_folder = ''
     self.buffers    = {}
