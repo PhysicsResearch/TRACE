@@ -129,6 +129,8 @@ def generate_gcode_string(
         Pitch_orig = columns_data["Pitch"]
         Yaw_orig = columns_data["Yaw"]
 
+        lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw = max_limits
+
         LAT_new = np.clip(np.interp(t_new, t_orig, LAT_orig), 0.0, lim_lat)
         SI_new = np.clip(np.interp(t_new, t_orig, SI_orig), 0.0, lim_si)
         AP_new = np.clip(np.interp(t_new, t_orig, AP_orig), 0.0, lim_ap)

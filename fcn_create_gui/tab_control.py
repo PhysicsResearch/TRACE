@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QFrame,
-    QPushButton, QLineEdit, QRadioButton, QCheckBox, QTabWidget, QLabel, QTextEdit, QSizePolicy,
+    QPushButton, QLineEdit, QComboBox, QRadioButton, QCheckBox, QTabWidget, QLabel, QTextEdit, QSizePolicy,
     QStylePainter, QStyleOptionButton, QStyle
 )
 from fcn_create_gui.touch_keyboard import register_touch_line_edit
@@ -58,7 +58,6 @@ def build_control_tab(self):
     # --- 1. TOP CONFIGURATION BAR ---
     self.top_bar_frame = QFrame(self.tab_2)
     self.top_bar_frame.setObjectName("top_bar_frame")
-    self.top_bar_frame.setMinimumHeight(52)
     self.top_bar_frame.setStyleSheet("""
         QFrame#top_bar_frame {
             background-color: #ffebee;
@@ -68,39 +67,85 @@ def build_control_tab(self):
     """)
     top_bar_layout = QHBoxLayout(self.top_bar_frame)
     top_bar_layout.setAlignment(Qt.AlignVCenter)
-    top_bar_layout.setContentsMargins(12, 6, 12, 6)
-    top_bar_layout.setSpacing(12)
+    top_bar_layout.setContentsMargins(12, 10, 12, 10)
+    top_bar_layout.setSpacing(8)
 
     label_ip = QLabel("Duet IP:", self.top_bar_frame)
     label_ip.setAlignment(Qt.AlignVCenter)
-    label_ip.setStyleSheet("font-weight: bold; font-size: 15px; color: #263238;")
+    label_ip.setStyleSheet("font-weight: bold; font-size: 14px; color: #263238;")
     
-    self.DuetIPAddress = QLineEdit(self.top_bar_frame)
-    self.DuetIPAddress.setText("192.168.8.3")
-    self.DuetIPAddress.setFixedWidth(180)
-    self.DuetIPAddress.setFixedHeight(36)
+    self.DuetIPAddress = QComboBox(self.top_bar_frame)
+    self.DuetIPAddress.setEditable(True)
+    self.DuetIPAddress.setMinimumWidth(195)
+    self.DuetIPAddress.setFixedHeight(34)
+
+    # Provide compatibility methods for QLineEdit interface
+    self.DuetIPAddress.text = self.DuetIPAddress.currentText
+    self.DuetIPAddress.setText = self.DuetIPAddress.setEditText
+
+    # Populate initial IP history (last 3 used)
+    initial_history = getattr(self, 'duet_ip_history', ["192.168.8.3", "192.168.8.2", "172.18.38.125"])
+    self.DuetIPAddress.clear()
+    for ip_item in initial_history:
+        self.DuetIPAddress.addItem(ip_item)
+    default_ip = getattr(self, 'duet_ip', "192.168.8.3")
+    self.DuetIPAddress.setText(default_ip)
+
     self.DuetIPAddress.setStyleSheet("""
-        QLineEdit {
+        QComboBox {
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 10px;
+            font-size: 14px;
+            padding: 0px 4px 0px 8px;
             border: 1px solid #b0bec5;
             border-radius: 6px;
             background-color: #ffffff;
+            color: #263238;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 24px;
+            border-left-width: 1px;
+            border-left-color: #cfd8dc;
+            border-left-style: solid;
+            border-top-right-radius: 6px;
+            border-bottom-right-radius: 6px;
+            background-color: #eceff1;
+        }
+        QComboBox::drop-down:hover {
+            background-color: #cfd8dc;
+        }
+        QComboBox::down-arrow {
+            image: none;
+            border-top: 5px solid #37474f;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            width: 0;
+            height: 0;
+        }
+        QComboBox QAbstractItemView {
+            font-weight: bold;
+            font-size: 13px;
+            background-color: #ffffff;
+            selection-background-color: #1976d2;
+            selection-color: #ffffff;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
         }
     """)
-    register_touch_line_edit(self, self.DuetIPAddress, label_name="Duet IP Address")
+    if hasattr(self.DuetIPAddress, 'lineEdit') and self.DuetIPAddress.lineEdit():
+        register_touch_line_edit(self, self.DuetIPAddress.lineEdit(), label_name="Duet IP Address")
  
     self.setDuetIP = QPushButton("Connect", self.top_bar_frame)
-    self.setDuetIP.setFixedHeight(36)
-    self.setDuetIP.setMinimumWidth(130)
+    self.setDuetIP.setFixedHeight(34)
+    self.setDuetIP.setMinimumWidth(100)
     self.setDuetIP.setStyleSheet("""
         QPushButton {
             background-color: #1976d2;
             color: white;
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 16px;
+            font-size: 14px;
+            padding: 0px 14px;
             border-radius: 6px;
             border: none;
         }
@@ -108,15 +153,15 @@ def build_control_tab(self):
     """)
     
     self.btn_ip_lungphan = QPushButton("LungPhan", self.top_bar_frame)
-    self.btn_ip_lungphan.setFixedHeight(36)
-    self.btn_ip_lungphan.setFixedWidth(130)
+    self.btn_ip_lungphan.setFixedHeight(34)
+    self.btn_ip_lungphan.setMinimumWidth(110)
     self.btn_ip_lungphan.setStyleSheet("""
         QPushButton {
             background-color: orange;
             color: white;
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 16px;
+            font-size: 14px;
+            padding: 0px 14px;
             border-radius: 6px;
             border: none;
         }
@@ -125,15 +170,15 @@ def build_control_tab(self):
     self.btn_ip_lungphan.clicked.connect(lambda: (self.DuetIPAddress.setText("192.168.8.3"), self.setDuetIP.click()))
 
     self.btn_ip_trace = QPushButton("TRACE", self.top_bar_frame)
-    self.btn_ip_trace.setFixedHeight(36)
-    self.btn_ip_trace.setFixedWidth(130)
+    self.btn_ip_trace.setFixedHeight(34)
+    self.btn_ip_trace.setMinimumWidth(90)
     self.btn_ip_trace.setStyleSheet("""
         QPushButton {
             background-color: purple;
             color: white;
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 16px;
+            font-size: 14px;
+            padding: 0px 14px;
             border-radius: 6px;
             border: none;
         }
@@ -143,32 +188,32 @@ def build_control_tab(self):
 
     self.connect_status = QLabel("NOT CONNECTED", self.top_bar_frame)
     self.connect_status.setAlignment(Qt.AlignCenter)
-    self.connect_status.setFixedHeight(36)
-    self.connect_status.setMinimumWidth(200)
+    self.connect_status.setFixedHeight(34)
+    self.connect_status.setMinimumWidth(160)
     self.connect_status.setStyleSheet("""
         QLabel {
             background-color: #ffebee;
             color: #c62828;
             font-weight: bold;
-            font-size: 14px;
-            padding: 0px 16px;
+            font-size: 13px;
+            padding: 0px 14px;
             border: 1px solid #ef9a9a;
-            border-radius: 18px;
+            border-radius: 17px;
         }
     """)
  
     self.check_touchscreen = QPushButton("Touch Screen: OFF", self.top_bar_frame)
     self.check_touchscreen.setCheckable(True)
     self.check_touchscreen.setChecked(False)
-    self.check_touchscreen.setMinimumWidth(210)
+    self.check_touchscreen.setMinimumWidth(170)
 
     _touchscreen_style_on = """
         QPushButton {
             background-color: #1976d2;
             color: #ffffff;
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 16px;
+            font-size: 14px;
+            padding: 0px 14px;
             border-radius: 6px;
             border: none;
         }
@@ -179,8 +224,8 @@ def build_control_tab(self):
             background-color: #90caf9;
             color: #000000;
             font-weight: bold;
-            font-size: 15px;
-            padding: 0px 16px;
+            font-size: 14px;
+            padding: 0px 14px;
             border-radius: 6px;
             border: none;
         }
@@ -194,7 +239,7 @@ def build_control_tab(self):
         import re
         ref_style = self.setDuetIP.styleSheet()
         font_match = re.search(r'font-size\s*:\s*(\d+)px', ref_style)
-        font_size = font_match.group(1) if font_match else '15'
+        font_size = font_match.group(1) if font_match else '14'
         
         if checked:
             self.check_touchscreen.setText("Touch Screen: ON")
@@ -204,7 +249,7 @@ def build_control_tab(self):
                     color: #ffffff;
                     font-weight: bold;
                     font-size: {font_size}px;
-                    padding: 0px 16px;
+                    padding: 0px 14px;
                     border-radius: 6px;
                     border: none;
                 }}
@@ -218,7 +263,7 @@ def build_control_tab(self):
                     color: #000000;
                     font-weight: bold;
                     font-size: {font_size}px;
-                    padding: 0px 16px;
+                    padding: 0px 14px;
                     border-radius: 6px;
                     border: none;
                 }}
@@ -235,7 +280,7 @@ def build_control_tab(self):
 
     # Apply initial style FIRST, then lock height
     self.check_touchscreen.setStyleSheet(_touchscreen_style_off)
-    self.check_touchscreen.setFixedHeight(36)
+    self.check_touchscreen.setFixedHeight(34)
     self.check_touchscreen.toggled.connect(on_touchscreen_toggled)
 
     top_bar_layout.addWidget(label_ip, 0, Qt.AlignVCenter)
@@ -249,9 +294,9 @@ def build_control_tab(self):
  
     # Emergency Stop Button 1
     self.emergencyButton_1 = QPushButton("Emergency STOP", self.top_bar_frame)
-    self.emergencyButton_1.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; font-size: 15px; padding: 0px 16px; border-radius: 6px;")
-    self.emergencyButton_1.setFixedHeight(36)
-    self.emergencyButton_1.setMinimumWidth(200)
+    self.emergencyButton_1.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; font-size: 14px; padding: 0px 14px; border-radius: 6px;")
+    self.emergencyButton_1.setFixedHeight(34)
+    self.emergencyButton_1.setMinimumWidth(160)
     top_bar_layout.addWidget(self.emergencyButton_1, 0, Qt.AlignVCenter)
 
     layout_main.addWidget(self.top_bar_frame)

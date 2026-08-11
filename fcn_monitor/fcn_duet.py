@@ -207,6 +207,50 @@ def render_status_plot(self):
     for key in stale_keys:
         self.status_plot_lines.pop(key, None)
 
+    # Draw vertical lines for planned pauses from reference data
+    if not hasattr(self, '_ref_pause_lines'):
+        self._ref_pause_lines = []
+    if show_ref and ref_data is not None:
+        pause_list = ref_data.get('pause_times', [])
+        if pause_list:
+            # Read reference time offset
+            ref_offset = getattr(self, '_last_valid_ref_offset', 0.0)
+            if hasattr(self, 'input_ref_offset') and self.input_ref_offset is not None:
+                text_val = self.input_ref_offset.text().strip()
+                try:
+                    ref_offset = float(text_val)
+                except ValueError:
+                    ref_offset = getattr(self, '_last_valid_ref_offset', 0.0)
+
+            # Remove old pause lines if count changed
+            if len(self._ref_pause_lines) != len(pause_list):
+                for old_line in self._ref_pause_lines:
+                    try:
+                        old_line.remove()
+                    except Exception:
+                        pass
+                self._ref_pause_lines = []
+
+            for i, (cmd_type, t_pause) in enumerate(pause_list):
+                t_shifted = t_pause + ref_offset
+                color = '#e53935' if 'sensor_wait' in cmd_type else '#fbc02d'
+                if i < len(self._ref_pause_lines):
+                    self._ref_pause_lines[i].set_xdata([t_shifted, t_shifted])
+                    self._ref_pause_lines[i].set_visible(True)
+                else:
+                    vline = self.ax_status.axvline(
+                        x=t_shifted, color=color, linestyle='--',
+                        linewidth=1.5, alpha=0.85
+                    )
+                    self._ref_pause_lines.append(vline)
+    else:
+        # Hide pause lines when reference is off
+        for vline in self._ref_pause_lines:
+            try:
+                vline.set_visible(False)
+            except Exception:
+                pass
+
     # Parse user-configured time window interval (default 60s)
     time_win = 60.0
     if hasattr(self, 'input_time_interval') and self.input_time_interval is not None:
@@ -278,6 +322,8 @@ def clear_status_plot_data(self):
         self.status_plot_lines.clear()
     if hasattr(self, 'status_ref_lines'):
         self.status_ref_lines.clear()
+    if hasattr(self, '_ref_pause_lines'):
+        self._ref_pause_lines.clear()
     if hasattr(self, 'ax_status') and self.ax_status is not None:
         self.ax_status.clear()
         self.ax_status.set_xlabel("Time (s)", fontsize=13, fontweight='bold')
@@ -319,6 +365,7 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
     current_feedrate = 1000.0
     last_vals = {}
     num_lines = len(lines)
+    pause_times = []  # Track planned pause/wait command timestamps
 
     for idx, line in enumerate(lines):
         if progress_dialog is not None and num_lines > 0 and idx % 200 == 0:
@@ -387,6 +434,12 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
                     dwell_row['timestamp'] = current_time * 1000.0
                     dwell_row['Command'] = ""
                     data_rows.append(dwell_row)
+        elif 'M226' in line_clean or 'M0' == line_clean.split()[0] or 'M1' == line_clean.split()[0]:
+            # Pause / Wait User command
+            pause_times.append(('M226', current_time))
+        elif 'sensor_wait' in line_clean.lower():
+            # Wait Radiation macro call
+            pause_times.append(('sensor_wait', current_time))
 
     if not data_rows:
         return None
@@ -419,7 +472,7 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
             if kin_col in df_kin.columns:
                 df[kin_col] = df_kin[kin_col].values
 
-    ref_dict = {'t': df['time'].values}
+    ref_dict = {'t': df['time'].values, 'pause_times': pause_times}
     for col in df.columns:
         if col not in ['time', 'timestamp', 'Command']:
             ref_dict[col] = df[col].values

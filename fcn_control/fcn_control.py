@@ -1464,15 +1464,38 @@ def move(self, ax):
         send_cmd(self, cmd)
 
 
+def update_ip_history(self, new_ip):
+    if not hasattr(self, 'duet_ip_history') or not isinstance(self.duet_ip_history, list):
+        self.duet_ip_history = ['192.168.8.3', '192.168.8.2', '172.18.38.125']
+    new_ip = new_ip.strip()
+    if new_ip:
+        if new_ip in self.duet_ip_history:
+            self.duet_ip_history.remove(new_ip)
+        self.duet_ip_history.insert(0, new_ip)
+        self.duet_ip_history = self.duet_ip_history[:3]
+        if hasattr(self, 'DuetIPAddress') and self.DuetIPAddress and hasattr(self.DuetIPAddress, 'clear'):
+            curr_text = self.DuetIPAddress.text() if hasattr(self.DuetIPAddress, 'text') else new_ip
+            self.DuetIPAddress.blockSignals(True)
+            self.DuetIPAddress.clear()
+            for ip_item in self.duet_ip_history:
+                self.DuetIPAddress.addItem(ip_item)
+            if hasattr(self.DuetIPAddress, 'setText'):
+                self.DuetIPAddress.setText(curr_text)
+            self.DuetIPAddress.blockSignals(False)
+
+
 def save_configuration(self):
     ip = get_clean_duet_ip(self)
+    update_ip_history(self, ip)
     folder = getattr(self, 'gcode_folder', '')
     lat_dim = self.input_plat_lat.text().strip() if hasattr(self, 'input_plat_lat') and self.input_plat_lat.text().strip() else '100.0'
     si_dim = self.input_plat_si.text().strip() if hasattr(self, 'input_plat_si') and self.input_plat_si.text().strip() else '100.0'
     touch_mode = self.check_touchscreen.isChecked() if hasattr(self, 'check_touchscreen') and self.check_touchscreen is not None else False
+    ip_history = getattr(self, 'duet_ip_history', [ip])
     
     data = {
         'duet_ip_address': ip,
+        'duet_ip_history': ip_history,
         'move_folder': folder,
         'platform_lat_dim': lat_dim,
         'platform_si_dim': si_dim,
@@ -1605,9 +1628,12 @@ def setDuetIP(self, show_dialog=True):
 
             if machine_name:
                 log_to_duet_console(self, f"Machine name: {machine_name}")
-                if machine_name == "TRACE":
+                if "trace" in machine_name.lower():
                     if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab_platform') and self.tab_platform:
                         self.tabWidget.setCurrentWidget(self.tab_platform)
+                elif "lung" in machine_name.lower() or "phan" in machine_name.lower():
+                    if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab') and self.tab:
+                        self.tabWidget.setCurrentWidget(self.tab)
 
             try:
                 update_duet_status_ui(self)

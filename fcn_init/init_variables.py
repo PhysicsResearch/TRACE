@@ -26,6 +26,7 @@ def initialize_software_variables(self):
         with open(get_config_path('configuration.json', for_writing=False), 'r') as f:
             data = json.load(f)
         self.duet_ip = data.get('duet_ip_address', '192.168.8.3')
+        self.duet_ip_history = data.get('duet_ip_history', ['192.168.8.3', '192.168.8.2', '172.18.38.125'])
         self.gcode_folder = data.get('move_folder', '')
         self.plat_lat_dim = data.get('platform_lat_dim', '100.0')
         self.plat_si_dim = data.get('platform_si_dim', '100.0')
@@ -38,12 +39,17 @@ def initialize_software_variables(self):
         self.touchscreen_mode = data.get('touchscreen_mode', False)
     except Exception:
         self.duet_ip = '192.168.8.3'
+        self.duet_ip_history = ['192.168.8.3', '192.168.8.2', '172.18.38.125']
         self.gcode_folder = ''
         self.plat_lat_dim = '100.0'
         self.plat_si_dim = '100.0'
         self.touchscreen_mode = False
 
     if hasattr(self, 'DuetIPAddress') and self.DuetIPAddress is not None:
+        if hasattr(self.DuetIPAddress, 'clear') and hasattr(self, 'duet_ip_history'):
+            self.DuetIPAddress.clear()
+            for hist_ip in self.duet_ip_history:
+                self.DuetIPAddress.addItem(hist_ip)
         self.DuetIPAddress.setText(self.duet_ip)
 
     if hasattr(self, 'PhOperFolder') and self.PhOperFolder is not None:
