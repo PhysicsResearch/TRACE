@@ -207,37 +207,60 @@ class MyApp(QMainWindow):
 
     def open_context_menu(self, position):
         index = self.fileTreeView.indexAt(position)
-
         if not index.isValid():
-            return # clicked empty space
-        
-        item = self.model.itemFromIndex(index)
+            return  # clicked empty space
 
-        path = item.data(self.PATH_ROLE)
+        self.fileTreeView.setCurrentIndex(index)
+        item = self.model.itemFromIndex(index)
+        if not item:
+            return
+
         is_dir = item.data(self.IS_DIR_ROLE)
 
-        menu = QMenu()
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
 
-        if not is_dir:
-            run_action = menu.addAction("Run")
-            download_action = menu.addAction("Download")
-        else:
-            run_action = None
-            download_action = None
-
+        run_action = menu.addAction("Run")
+        edit_action = menu.addAction("Edit File")
+        copy_action = menu.addAction("Copy")
+        move_action = menu.addAction("Move")
+        rename_action = menu.addAction("Rename")
+        planning_action = menu.addAction("To Planning")
+        download_action = menu.addAction("Download File")
         delete_action = menu.addAction("Delete")
+
+        if is_dir:
+            run_action.setEnabled(False)
+            edit_action.setEnabled(False)
+            planning_action.setEnabled(False)
+            download_action.setEnabled(False)
 
         action = menu.exec(self.fileTreeView.viewport().mapToGlobal(position))
 
-        if run_action and action == run_action:
-            start_gcode(self, item.data(self.PATH_ROLE))
-
-        if download_action and action == download_action:
-            from fcn_control.fcn_filesystem import download_file
-            download_file(self, path)
-
-        if action == delete_action:
-            delete_recursively(self, path, is_dir)
+        if action == run_action:
+            from fcn_control.fcn_filesystem import run_selected_gcode_item
+            run_selected_gcode_item(self)
+        elif action == edit_action:
+            from fcn_control.fcn_filesystem import edit_selected_file
+            edit_selected_file(self)
+        elif action == copy_action:
+            from fcn_control.fcn_filesystem import copy_selected_item
+            copy_selected_item(self)
+        elif action == move_action:
+            from fcn_control.fcn_filesystem import move_selected_item
+            move_selected_item(self)
+        elif action == rename_action:
+            from fcn_control.fcn_filesystem import rename_selected_item
+            rename_selected_item(self)
+        elif action == planning_action:
+            from fcn_control.fcn_filesystem import transfer_to_planning_action
+            transfer_to_planning_action(self)
+        elif action == download_action:
+            from fcn_control.fcn_filesystem import download_selected_item
+            download_selected_item(self)
+        elif action == delete_action:
+            from fcn_control.fcn_filesystem import delete_selected_item
+            delete_selected_item(self)
 
 
 if __name__ == "__main__":

@@ -140,6 +140,40 @@ def build_files_tab(self):
         }
     """)
 
+    self.gcodeMove = QPushButton("Move", self.tab_files)
+    self.gcodeMove.setMinimumHeight(50)
+    self.gcodeMove.setStyleSheet("""
+        QPushButton {
+            background-color: #8e24aa;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 16px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #7b1fa2;
+        }
+    """)
+
+    self.gcodeCopy = QPushButton("Copy", self.tab_files)
+    self.gcodeCopy.setMinimumHeight(50)
+    self.gcodeCopy.setStyleSheet("""
+        QPushButton {
+            background-color: #00acc1;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 16px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #00838f;
+        }
+    """)
+
     self.gcodeDelete = QPushButton("Delete", self.tab_files)
     self.gcodeDelete.setMinimumHeight(50)
     self.gcodeDelete.setStyleSheet("""
@@ -154,6 +188,80 @@ def build_files_tab(self):
         }
         QPushButton:hover {
             background-color: #d32f2f;
+        }
+    """)
+
+    from PySide6.QtWidgets import QComboBox
+    self.fileCategoryCombo = QComboBox(self.tab_files)
+    self.fileCategoryCombo.addItems(["GCODE", "Macros", "System"])
+    self.fileCategoryCombo.setMinimumHeight(50)
+    self.fileCategoryCombo.setMinimumWidth(140)
+    self.fileCategoryCombo.setStyleSheet("""
+        QComboBox {
+            background-color: #37474f;
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #263238;
+        }
+        QComboBox:hover {
+            background-color: #455a64;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #37474f;
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: bold;
+            selection-background-color: #1976d2;
+            selection-color: #ffffff;
+            border: 1px solid #263238;
+            padding: 4px;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 40px;
+            color: #ffffff;
+            background-color: #37474f;
+        }
+        QComboBox QAbstractItemView::item:selected {
+            background-color: #1976d2;
+            color: #ffffff;
+        }
+    """)
+
+    self.gcodeEdit = QPushButton("Text Editor", self.tab_files)
+    self.gcodeEdit.setMinimumHeight(50)
+    self.gcodeEdit.setStyleSheet("""
+        QPushButton {
+            background-color: #3949ab;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 16px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #283593;
+        }
+    """)
+
+    self.gcodeRename = QPushButton("Rename", self.tab_files)
+    self.gcodeRename.setMinimumHeight(50)
+    self.gcodeRename.setStyleSheet("""
+        QPushButton {
+            background-color: #00796b;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            min-height: 50px;
+            padding: 6px 16px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #004d40;
         }
     """)
 
@@ -172,13 +280,13 @@ def build_files_tab(self):
     """)
 
     top_layout.addWidget(self.treeViewBack)
-    top_layout.addWidget(self.gcodeRun)
-    top_layout.addWidget(self.gcodeUpload)
-    top_layout.addWidget(self.gcodeDownload)
-    top_layout.addWidget(self.gcodeToPlanning)
     top_layout.addWidget(self.gcodeRefresh)
     top_layout.addWidget(self.gcodeNewFolder)
+    top_layout.addWidget(self.gcodeMove)
+    top_layout.addWidget(self.gcodeCopy)
+    top_layout.addWidget(self.gcodeRename)
     top_layout.addWidget(self.gcodeDelete)
+    top_layout.addWidget(self.fileCategoryCombo)
     top_layout.addStretch()
     top_layout.addWidget(self.emergencyButton_3)
 
@@ -251,6 +359,18 @@ def build_files_tab(self):
         }
     """)
     layout_main.addWidget(self.fileTreeView)
+
+    # Bottom Toolbar (Action Toolbar)
+    bottom_layout = QHBoxLayout()
+    bottom_layout.setSpacing(10)
+    bottom_layout.addWidget(self.gcodeEdit)
+    bottom_layout.addWidget(self.gcodeUpload)
+    bottom_layout.addWidget(self.gcodeDownload)
+    bottom_layout.addWidget(self.gcodeToPlanning)
+    bottom_layout.addStretch()
+    bottom_layout.addWidget(self.gcodeRun)
+
+    layout_main.addLayout(bottom_layout)
 
     # Initialize file explorer model once when tab is constructed
     from fcn_control.fcn_filesystem import setup_file_explorer

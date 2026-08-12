@@ -1,6 +1,23 @@
 import numpy as np
 import math
 
+def format_command_lines(cmd):
+    """Formats planning pause commands with clear descriptive comment lines."""
+    cmd_str = str(cmd).strip()
+    cmd_lower = cmd_str.lower()
+    lines = []
+    
+    if "radiation" in cmd_lower or "rad" in cmd_lower or "m226" in cmd_lower:
+        lines.append("; waiting for radiation")
+    elif "release" in cmd_lower or "user" in cmd_lower or "m400" in cmd_lower or "pause" in cmd_lower:
+        lines.append("; waiting for user release")
+    elif not cmd_str.startswith(";"):
+        lines.append("; waiting for user release")
+
+    lines.append(cmd_str)
+    return lines
+
+
 def generate_gcode_string(
     device,
     t_orig,
@@ -57,10 +74,11 @@ def generate_gcode_string(
         if np.any(np.abs(X_new) > lim_x) or np.any(np.abs(Y_new) > lim_y) or np.any(np.abs(Z_new) > lim_z):
             exceeds_limits = True
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
         last_x, last_y, last_z = X_new[0], Y_new[0], Z_new[0]
         dwell_accum = 0.0
         last_pos_written_idx = 0
+        next_10s_mark = 10.0
 
         # Output first point
         gcode_lines.append(f"G1 F1000.000000 X{last_x:.6f} Y{last_y:.6f} Z{last_z:.6f}")
@@ -74,9 +92,14 @@ def generate_gcode_string(
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
+            t_curr = t_new[i]
+            if t_curr >= next_10s_mark:
+                gcode_lines.append(f"; --- Execution time: {int(next_10s_mark)}s ---")
+                next_10s_mark += 10.0
+
             if i in new_commands_indices:
                 flush_dwell()
-                gcode_lines.append(new_commands_indices[i])
+                gcode_lines.extend(format_command_lines(new_commands_indices[i]))
 
             dx_from_last = X_new[i] - last_x
             dy_from_last = Y_new[i] - last_y
@@ -211,11 +234,12 @@ def generate_gcode_string(
         LAT_eff = np.clip(off_lat + LAT_new + off_ap * np.sin(roll_rad), 0.0, lim_lat)
         SI_eff = np.clip(off_si + SI_new + off_ap * np.sin(pitch_rad), 0.0, lim_si)
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
         last_A, last_B, last_C, last_D = A_new[0], B_new[0], C_new[0], D_new[0]
         last_LAT, last_SI = LAT_eff[0], SI_eff[0]
         dwell_accum = 0.0
         last_pos_written_idx = 0
+        next_10s_mark = 10.0
 
         # Output first point
         gcode_lines.append(
@@ -232,9 +256,14 @@ def generate_gcode_string(
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
+            t_curr = t_new[i]
+            if t_curr >= next_10s_mark:
+                gcode_lines.append(f"; --- Execution time: {int(next_10s_mark)}s ---")
+                next_10s_mark += 10.0
+
             if i in new_commands_indices:
                 flush_dwell()
-                gcode_lines.append(new_commands_indices[i])
+                gcode_lines.extend(format_command_lines(new_commands_indices[i]))
 
             # Distinguish between truly stationary and moving steps
             is_stationary = (
@@ -303,10 +332,11 @@ def generate_gcode_string(
                 if np.any(np.abs(new_data[col]) > lim):
                     exceeds_limits = True
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]
+        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
         last_vals = {col: new_data[col][0] for col in new_data}
         dwell_accum = 0.0
         last_pos_written_idx = 0
+        next_10s_mark = 10.0
 
         # Output first point
         axis_parts = []
@@ -324,9 +354,14 @@ def generate_gcode_string(
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
+            t_curr = t_new[i]
+            if t_curr >= next_10s_mark:
+                gcode_lines.append(f"; --- Execution time: {int(next_10s_mark)}s ---")
+                next_10s_mark += 10.0
+
             if i in new_commands_indices:
                 flush_dwell()
-                gcode_lines.append(new_commands_indices[i])
+                gcode_lines.extend(format_command_lines(new_commands_indices[i]))
 
             max_diff = max(abs(new_data[col][i] - last_vals[col]) for col in new_data)
 

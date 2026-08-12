@@ -68,12 +68,14 @@ def create_gui(self):
     self.tab_status = QWidget()
     self.tab_files = QWidget()
     self.tab_planning = QWidget()
+    self.tab_editor = QWidget()
 
     # Add tabs to tabModules with exact titles expected by software logic
     self.tabModules.addTab(self.tab_2, "Control")
     self.tabModules.addTab(self.tab_status, "Status")
     self.tabModules.addTab(self.tab_files, "Files")
     self.tabModules.addTab(self.tab_planning, "Planning")
+    self.tabModules.addTab(self.tab_editor, "Editor")
 
     # Track loaded main tabs for lazy loading
     self._loaded_tabs = set()
@@ -113,6 +115,10 @@ def on_main_tab_changed(self, index):
     elif index == 3:  # Planning Tab
         build_planning_tab(self)
         self._loaded_tabs.add(3)
+    elif index == 4:  # Editor Tab
+        from .tab_editor import build_editor_tab
+        build_editor_tab(self)
+        self._loaded_tabs.add(4)
 
     # Re-bind software buttons after dynamic tab build
     from fcn_init.init_buttons import initialize_software_buttons

@@ -8,7 +8,7 @@ from fcn_plan.fcn_edit          import scaleAmpl, shiftAmpl, zeroAmpl, clipAmpl,
                                         undoOperation, removeDrift, addDrift, cropRange, smoothAmpl
 from fcn_plan.fcn_export        import exportData, exportGCODE, calcStats, plotViewData
 from fcn_monitor.fcn_duet       import clear_status_plot_data
-from fcn_control.fcn_filesystem import setup_file_explorer, go_back, mkdir, delete_selected_item, download_selected_item, upload_file, run_selected_gcode_item
+from fcn_control.fcn_filesystem import setup_file_explorer, go_back, mkdir, delete_selected_item, move_selected_item, copy_selected_item, download_selected_item, upload_file, run_selected_gcode_item, on_file_category_changed, edit_selected_file, save_and_upload_editor_file, rename_selected_item
 
 
 def initialize_software_buttons(self):
@@ -27,7 +27,7 @@ def initialize_software_buttons(self):
 
     def safe_connect_state_changed(cb, slot):
         if cb is not None and cb not in self._connected_buttons:
-            cb.stateChanged.connect(slot)
+            cb.currentTextChanged.connect(slot)
             self._connected_buttons.add(cb)
 
     # --- CONTROL PAGE ---
@@ -55,9 +55,27 @@ def initialize_software_buttons(self):
     if hasattr(self, 'gcodeNewFolder'):
         safe_connect(self.gcodeNewFolder, lambda: mkdir(self))
         self.gcodeNewFolder.setStyleSheet("background-color: #4caf50; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'gcodeMove'):
+        safe_connect(self.gcodeMove, lambda: move_selected_item(self))
+        self.gcodeMove.setStyleSheet("background-color: #8e24aa; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'gcodeCopy'):
+        safe_connect(self.gcodeCopy, lambda: copy_selected_item(self))
+        self.gcodeCopy.setStyleSheet("background-color: #00acc1; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'gcodeRename'):
+        safe_connect(self.gcodeRename, lambda: rename_selected_item(self))
+        self.gcodeRename.setStyleSheet("background-color: #00796b; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'gcodeEdit'):
+        safe_connect(self.gcodeEdit, lambda: edit_selected_file(self))
+        self.gcodeEdit.setStyleSheet("background-color: #3949ab; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeDelete'):
         safe_connect(self.gcodeDelete, lambda: delete_selected_item(self))
         self.gcodeDelete.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
+    if hasattr(self, 'fileCategoryCombo'):
+        safe_connect_state_changed(self.fileCategoryCombo, lambda text: on_file_category_changed(self, text))
+    if hasattr(self, 'btnSaveEditor'):
+        safe_connect(self.btnSaveEditor, lambda: save_and_upload_editor_file(self))
+    if hasattr(self, 'btnCloseEditor'):
+        safe_connect(self.btnCloseEditor, lambda: self.tabModules.setCurrentIndex(2) if hasattr(self, 'tabModules') else None)
     if hasattr(self, 'gcodeRun'):
         safe_connect(self.gcodeRun, lambda: run_selected_gcode_item(self))
         self.gcodeRun.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; font-size: 16px; min-height: 50px; min-width: 100px; padding: 6px 36px; border-radius: 4px;")

@@ -199,11 +199,17 @@ def exportGCODE(self):
     # Create G-code lines and write to file
     t_vals = df[df.columns[0]].values
     total_time_seconds = int(round(float(t_vals.max() - t_vals.min())))
-    gcode_lines = [f"; TIME: {total_time_seconds}", "G90"]  # Initialize G-code lines with TIME header and absolute positioning command
+    gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
     axis_labels         = ['X', 'Y', 'Z']  # Define axis labels
     max_min = df[df.columns[1]].max() + df[df.columns[1]].min()
+    next_10s_mark = 10.0
     
     for i, row in df.iterrows():
+        t_curr = results['time'].iloc[i] if 'time' in results else (i * 0.1)
+        if t_curr >= next_10s_mark:
+            gcode_lines.append(f"; --- Execution time: {int(next_10s_mark)}s ---")
+            next_10s_mark += 10.0
+
         if i == 0:
             speed = 1000  # Set default speed for fast initialization
         else:
