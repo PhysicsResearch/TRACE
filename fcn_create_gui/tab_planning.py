@@ -267,7 +267,7 @@ def build_planning_tab(self):
 
     self.combo_func_type = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_func_type.setMinimumHeight(40)
-    self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "constant"])
+    self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "constant", "linear"])
     add_field("Function Type:", self.combo_func_type, 0, 2)
 
     # Helper function to dynamically update axes
@@ -308,7 +308,7 @@ def build_planning_tab(self):
 
     # 2. Amplitude, Amp. offset, Period (Row 1)
     self.input_amplitude = QDoubleSpinBox(self.groupBox_BrCv_createCurve)
-    self.input_amplitude.setRange(0.0, 1000.0)
+    self.input_amplitude.setRange(-1000.0, 1000.0)
     self.input_amplitude.setValue(10.0)
     self.input_amplitude.setDecimals(2)
     self.input_amplitude.setMinimumHeight(40)
@@ -322,11 +322,11 @@ def build_planning_tab(self):
     self.label_amp_offset = add_field("Amp. offset (mm):", self.input_amp_offset, 1, 1)
 
     self.input_period = QDoubleSpinBox(self.groupBox_BrCv_createCurve)
-    self.input_period.setRange(0.1, 1000.0)
+    self.input_period.setRange(0.01, 1000.0)
     self.input_period.setValue(4.0)
     self.input_period.setDecimals(2)
     self.input_period.setMinimumHeight(40)
-    add_field("Period (s):", self.input_period, 1, 2)
+    self.label_period = add_field("Period (s):", self.input_period, 1, 2)
 
     # 3. Starting Phase, Start Time, End Time (Row 2)
     self.input_phase = QDoubleSpinBox(self.groupBox_BrCv_createCurve)
@@ -432,21 +432,62 @@ def build_planning_tab(self):
     # Connect tab synchronization
     setup_offset_sync(self)
 
-    # Connect axis change listener to dynamically modify labels and enable/disable offset inputs
-    def update_axis_labels_and_state(axis):
+    # Connect axis & function type change listeners to dynamically modify labels and states
+    def update_curve_input_labels():
+        axis = self.combo_axis.currentText()
+        func_type = self.combo_func_type.currentText()
         if not axis:
             return
-        if axis in ["Roll", "Pitch", "Yaw"]:
-            self.label_amplitude.setText("Amplitude (deg):")
-            self.label_amp_offset.setText("Amp. offset (mm):")
-            self.input_amp_offset.setEnabled(False)
-            self.input_amp_offset.setValue(0.0)
-        else:
-            self.label_amplitude.setText("Amplitude (mm):")
-            self.label_amp_offset.setText("Amp. offset (mm):")
-            self.input_amp_offset.setEnabled(True)
 
-    self.combo_axis.currentTextChanged.connect(update_axis_labels_and_state)
+        is_rotational = axis in ["Roll", "Pitch", "Yaw"]
+
+        if func_type == "linear":
+            if hasattr(self, 'label_amplitude'):
+                self.label_amplitude.setText("Initial pos (deg):" if is_rotational else "Initial pos (mm):")
+            if hasattr(self, 'label_amp_offset'):
+                self.label_amp_offset.setText("Final pos (deg):" if is_rotational else "Final pos (mm):")
+            if hasattr(self, 'label_period'):
+                self.label_period.setText("Duration (s):")
+            if hasattr(self, 'input_amp_offset'):
+                self.input_amp_offset.setEnabled(True)
+            if hasattr(self, 'input_start_time') and hasattr(self, 'input_period') and hasattr(self, 'input_end_time'):
+                self.input_end_time.blockSignals(True)
+                self.input_end_time.setValue(round(self.input_start_time.value() + self.input_period.value(), 3))
+                self.input_end_time.blockSignals(False)
+        else:
+            if hasattr(self, 'label_amplitude'):
+                self.label_amplitude.setText("Amplitude (deg):" if is_rotational else "Amplitude (mm):")
+            if hasattr(self, 'label_amp_offset'):
+                self.label_amp_offset.setText("Amp. offset (mm):")
+            if hasattr(self, 'label_period'):
+                self.label_period.setText("Period (s):")
+            if hasattr(self, 'input_amp_offset'):
+                if is_rotational:
+                    self.input_amp_offset.setEnabled(False)
+                    self.input_amp_offset.setValue(0.0)
+                else:
+                    self.input_amp_offset.setEnabled(True)
+
+    self.combo_axis.currentTextChanged.connect(lambda _: update_curve_input_labels())
+    self.combo_func_type.currentTextChanged.connect(lambda _: update_curve_input_labels())
+    update_curve_input_labels()
+
+    def sync_linear_duration_to_end_time():
+        if self.combo_func_type.currentText() == "linear":
+            self.input_end_time.blockSignals(True)
+            self.input_end_time.setValue(round(self.input_start_time.value() + self.input_period.value(), 3))
+            self.input_end_time.blockSignals(False)
+
+    def sync_linear_end_time_to_duration():
+        if self.combo_func_type.currentText() == "linear":
+            dur = max(0.01, round(self.input_end_time.value() - self.input_start_time.value(), 3))
+            self.input_period.blockSignals(True)
+            self.input_period.setValue(dur)
+            self.input_period.blockSignals(False)
+
+    self.input_period.valueChanged.connect(sync_linear_duration_to_end_time)
+    self.input_start_time.valueChanged.connect(sync_linear_duration_to_end_time)
+    self.input_end_time.valueChanged.connect(sync_linear_end_time_to_duration)
 
     # Action layout for Add Curve and Import G-code buttons
     create_buttons_layout = QHBoxLayout()

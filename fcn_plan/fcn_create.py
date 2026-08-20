@@ -586,7 +586,7 @@ def create_curve(self):
     func_type = self.combo_func_type.currentText()
 
     amplitude = self.input_amplitude.value()
-    if selected_axis in ["Roll", "Pitch", "Yaw"]:
+    if selected_axis in ["Roll", "Pitch", "Yaw"] and func_type != "linear":
         amp_offset = 0.0
     else:
         amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
@@ -594,7 +594,15 @@ def create_curve(self):
     phase_deg = self.input_phase.value()
     phase_rad = np.deg2rad(phase_deg)
     t_start = self.input_start_time.value()
-    t_end = self.input_end_time.value()
+
+    if func_type == "linear":
+        t_end = t_start + period
+        if hasattr(self, 'input_end_time'):
+            self.input_end_time.blockSignals(True)
+            self.input_end_time.setValue(round(t_end, 3))
+            self.input_end_time.blockSignals(False)
+    else:
+        t_end = self.input_end_time.value()
 
     # Calculate starting value of the new segment at t_rel = 0
     if func_type == "sin":
@@ -607,6 +615,8 @@ def create_curve(self):
         val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
     elif func_type == "constant":
         val_start = amplitude + amp_offset
+    elif func_type == "linear":
+        val_start = amplitude
     else:
         val_start = amplitude * np.sin(phase_rad) + amp_offset
 
@@ -700,6 +710,13 @@ def create_curve(self):
                 val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 2) + amp_offset
             elif func_type == "constant":
                 val = amplitude + amp_offset
+            elif func_type == "linear":
+                if period > 0:
+                    frac = t_rel / period
+                    frac = min(max(frac, 0.0), 1.0)
+                    val = amplitude + frac * (amp_offset - amplitude)
+                else:
+                    val = amp_offset
             else:
                 val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
             
