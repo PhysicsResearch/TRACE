@@ -572,24 +572,35 @@ def on_table_item_changed(self, item):
 
 def create_curve(self):
     """
-    Applies/Adds a curve segment to the selected axis over the defined [t_start, t_end] interval,
+    Applies/Adds a curve segment to the selected axes over the defined [t_start, t_end] interval,
     overwriting only that interval, keeping the rest of the column data intact,
     and expanding the dataframe range up to t_end if it goes past the current limits.
     If adding consecutive intervals (t_start > 0), checks previous position and calculates transit time
-    at max_speed, shifting the second segment in time to account for it.
+    at max_speed, shifting the segment in time to account for it.
     """
     if not hasattr(self, 'dfEdit') or self.dfEdit is None:
         initialize_default_curve_data(self)
 
     device = self.combo_device.currentText()
-    selected_axis = self.combo_axis.currentText()
-    func_type = self.combo_func_type.currentText()
+    
+    selected_axes = []
+    if hasattr(self, 'create_curve_axis_checkboxes'):
+        for ax_name, cb in self.create_curve_axis_checkboxes.items():
+            if cb.isChecked() and cb.isEnabled():
+                selected_axes.append(ax_name)
 
+    if not selected_axes and hasattr(self, 'combo_axis'):
+        txt = self.combo_axis.currentText()
+        if txt:
+            selected_axes = [txt]
+
+    if not selected_axes:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(self, "No Axis Selected", "Please select at least one axis checkbox before adding a curve.")
+        return
+
+    func_type = self.combo_func_type.currentText()
     amplitude = self.input_amplitude.value()
-    if selected_axis in ["Roll", "Pitch", "Yaw"] and func_type != "linear":
-        amp_offset = 0.0
-    else:
-        amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
     period = self.input_period.value()
     phase_deg = self.input_phase.value()
     phase_rad = np.deg2rad(phase_deg)
@@ -604,61 +615,73 @@ def create_curve(self):
     else:
         t_end = self.input_end_time.value()
 
-    # Calculate starting value of the new segment at t_rel = 0
-    if func_type == "sin":
-        val_start = amplitude * np.sin(phase_rad) + amp_offset
-    elif func_type == "cos":
-        val_start = amplitude * np.cos(phase_rad) + amp_offset
-    elif func_type == "cos^1":
-        val_start = amplitude * (np.cos(phase_rad) ** 1) + amp_offset
-    elif func_type == "cos^2":
-        val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
-    elif func_type == "constant":
-        val_start = amplitude + amp_offset
-    elif func_type == "linear":
-        val_start = amplitude
-    else:
-        val_start = amplitude * np.sin(phase_rad) + amp_offset
-
-    if val_start < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
-        val_start = 0.0
-
     # Retrieve max speed setting (mm/s or deg/s)
     sb_speed = getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None)
     max_speed = sb_speed.value() if sb_speed else 20.0
     if max_speed <= 0.0:
         max_speed = 20.0
 
-    # If adding consecutive interval (t_start > 0), check previous position and calculate required transit time
+    # Calculate starting values and max required shift time for consecutive intervals
+    max_shift_dt = 0.0
     t_prev = 0.0
-    val_prev = 0.0
     has_prev = False
-    if t_start > 0.0 and selected_axis in self.dfEdit.columns:
-        times_prev = self.dfEdit['time'].values
-        valid_indices = np.where(times_prev <= t_start)[0]
-        if len(valid_indices) > 0:
-            idx_prev = valid_indices[-1]
-            t_prev = times_prev[idx_prev]
-            val_prev = self.dfEdit.at[idx_prev, selected_axis]
-            has_prev = True
+    prev_vals = {}
+    val_starts = {}
 
-            dt_required = abs(val_start - val_prev) / max_speed
-            dt_gap = t_start - t_prev
-            shift_dt = max(0.0, dt_required - dt_gap)
+    for selected_axis in selected_axes:
+        if selected_axis in ["Roll", "Pitch", "Yaw"] and func_type != "linear":
+            amp_offset = 0.0
+        else:
+            amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
 
-            if shift_dt > 0.0:
-                t_start = round(t_start + shift_dt, 3)
-                t_end = round(t_end + shift_dt, 3)
+        if func_type == "sin":
+            val_start = amplitude * np.sin(phase_rad) + amp_offset
+        elif func_type == "cos":
+            val_start = amplitude * np.cos(phase_rad) + amp_offset
+        elif func_type == "cos^1":
+            val_start = amplitude * (np.cos(phase_rad) ** 1) + amp_offset
+        elif func_type == "cos^2":
+            val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
+        elif func_type == "constant":
+            val_start = amplitude + amp_offset
+        elif func_type == "linear":
+            val_start = amplitude
+        else:
+            val_start = amplitude * np.sin(phase_rad) + amp_offset
 
-                # Update UI spinboxes to show shifted times
-                if hasattr(self, 'input_start_time'):
-                    self.input_start_time.blockSignals(True)
-                    self.input_start_time.setValue(t_start)
-                    self.input_start_time.blockSignals(False)
-                if hasattr(self, 'input_end_time'):
-                    self.input_end_time.blockSignals(True)
-                    self.input_end_time.setValue(t_end)
-                    self.input_end_time.blockSignals(False)
+        if val_start < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+            val_start = 0.0
+
+        val_starts[selected_axis] = val_start
+
+        if t_start > 0.0 and selected_axis in self.dfEdit.columns:
+            times_prev = self.dfEdit['time'].values
+            valid_indices = np.where(times_prev <= t_start)[0]
+            if len(valid_indices) > 0:
+                idx_prev = valid_indices[-1]
+                t_prev = times_prev[idx_prev]
+                val_prev = self.dfEdit.at[idx_prev, selected_axis]
+                prev_vals[selected_axis] = val_prev
+                has_prev = True
+
+                dt_required = abs(val_start - val_prev) / max_speed
+                dt_gap = t_start - t_prev
+                shift_dt = max(0.0, dt_required - dt_gap)
+                if shift_dt > max_shift_dt:
+                    max_shift_dt = shift_dt
+
+    if max_shift_dt > 0.0:
+        t_start = round(t_start + max_shift_dt, 3)
+        t_end = round(t_end + max_shift_dt, 3)
+
+        if hasattr(self, 'input_start_time'):
+            self.input_start_time.blockSignals(True)
+            self.input_start_time.setValue(t_start)
+            self.input_start_time.blockSignals(False)
+        if hasattr(self, 'input_end_time'):
+            self.input_end_time.blockSignals(True)
+            self.input_end_time.setValue(t_end)
+            self.input_end_time.blockSignals(False)
 
     # 1. Expand limits if t_end is greater than current maximum time in the dataframe
     t_max = self.dfEdit['time'].max()
@@ -686,45 +709,55 @@ def create_curve(self):
     if 'Command' not in self.dfEdit.columns:
         self.dfEdit['Command'] = ""
 
-    # 2. Interpolate transition interval at max speed if applicable
-    if has_prev and t_start > t_prev and selected_axis in self.dfEdit.columns:
+    # Apply calculations for each selected axis
+    for selected_axis in selected_axes:
+        val_start = val_starts[selected_axis]
+
+        if selected_axis in ["Roll", "Pitch", "Yaw"] and func_type != "linear":
+            amp_offset = 0.0
+        else:
+            amp_offset = self.input_amp_offset.value() if hasattr(self, 'input_amp_offset') else 0.0
+
+        # 2. Interpolate transition interval at max speed if applicable
+        if has_prev and selected_axis in prev_vals and t_start > t_prev and selected_axis in self.dfEdit.columns:
+            val_prev = prev_vals[selected_axis]
+            for idx, t_val in enumerate(self.dfEdit['time'].values):
+                if t_prev <= t_val < t_start:
+                    frac = (t_val - t_prev) / (t_start - t_prev)
+                    interp_val = val_prev + frac * (val_start - val_prev)
+                    if interp_val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                        interp_val = 0.0
+                    self.dfEdit.at[idx, selected_axis] = interp_val
+
+        # 3. Find indices where t_start <= t <= t_end and compute the values
         for idx, t_val in enumerate(self.dfEdit['time'].values):
-            if t_prev <= t_val < t_start:
-                frac = (t_val - t_prev) / (t_start - t_prev)
-                interp_val = val_prev + frac * (val_start - val_prev)
-                if interp_val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
-                    interp_val = 0.0
-                self.dfEdit.at[idx, selected_axis] = interp_val
-
-    # 3. Find indices where t_start <= t <= t_end and compute the values
-    for idx, t_val in enumerate(self.dfEdit['time'].values):
-        if t_start <= t_val <= t_end:
-            t_rel = t_val - t_start
-            if func_type == "sin":
-                val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
-            elif func_type == "cos":
-                val = amplitude * np.cos(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
-            elif func_type == "cos^1":
-                val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 1) + amp_offset
-            elif func_type == "cos^2":
-                val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 2) + amp_offset
-            elif func_type == "constant":
-                val = amplitude + amp_offset
-            elif func_type == "linear":
-                if period > 0:
-                    frac = t_rel / period
-                    frac = min(max(frac, 0.0), 1.0)
-                    val = amplitude + frac * (amp_offset - amplitude)
+            if t_start <= t_val <= t_end:
+                t_rel = t_val - t_start
+                if func_type == "sin":
+                    val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
+                elif func_type == "cos":
+                    val = amplitude * np.cos(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
+                elif func_type == "cos^1":
+                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 1) + amp_offset
+                elif func_type == "cos^2":
+                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 2) + amp_offset
+                elif func_type == "constant":
+                    val = amplitude + amp_offset
+                elif func_type == "linear":
+                    if period > 0:
+                        frac = t_rel / period
+                        frac = min(max(frac, 0.0), 1.0)
+                        val = amplitude + frac * (amp_offset - amplitude)
+                    else:
+                        val = amp_offset
                 else:
-                    val = amp_offset
-            else:
-                val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
-            
-            if val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
-                val = 0.0
+                    val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
+                
+                if val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                    val = 0.0
 
-            if selected_axis in self.dfEdit.columns:
-                self.dfEdit.at[idx, selected_axis] = val
+                if selected_axis in self.dfEdit.columns:
+                    self.dfEdit.at[idx, selected_axis] = val
 
     # Save the reference back to the appropriate persistent dataframe
     if device == "Lung Phantom":
@@ -994,7 +1027,13 @@ def generate_planned_gcode(self):
             return None, None
 
     func_type = self.combo_func_type.currentText()
-    selected_axis = self.combo_axis.currentText()
+    if hasattr(self, 'combo_axis') and self.combo_axis.currentText():
+        selected_axis = self.combo_axis.currentText()
+    elif hasattr(self, 'create_curve_axis_checkboxes'):
+        checked = [a for a, cb in self.create_curve_axis_checkboxes.items() if cb.isChecked()]
+        selected_axis = "_".join(checked) if checked else "axis"
+    else:
+        selected_axis = "axis"
     default_name = f"planned_{device.lower().replace(' ', '_')}_{selected_axis}_{func_type}.gcode"
     return gcode_content, default_name
 

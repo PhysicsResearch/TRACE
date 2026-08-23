@@ -232,7 +232,8 @@ def build_planning_tab(self):
         self.combo_device.blockSignals(True)
         self.combo_device.setCurrentText(text)
         self.combo_device.blockSignals(False)
-        update_axis_dropdown()
+        if hasattr(self, 'axis_checkboxes_layout'):
+            update_axis_checkboxes()
 
     self.combo_settings_device.currentTextChanged.connect(update_settings_device_sync)
     settings_tab_layout.addStretch()
@@ -255,56 +256,16 @@ def build_planning_tab(self):
         grid_inputs.addLayout(sub_lay, row, col)
         return lbl
 
-    # 1. Device Type, Axis, Function Type (Row 0)
+    # 1. Device Type & Function Type (Row 0)
     self.combo_device = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_device.setMinimumHeight(40)
     self.combo_device.addItems(["Lung Phantom", "Motion Platform"])
     add_field("Device Type:", self.combo_device, 0, 0)
 
-    self.combo_axis = QComboBox(self.groupBox_BrCv_createCurve)
-    self.combo_axis.setMinimumHeight(40)
-    add_field("Axis:", self.combo_axis, 0, 1)
-
     self.combo_func_type = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_func_type.setMinimumHeight(40)
     self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "constant", "linear"])
-    add_field("Function Type:", self.combo_func_type, 0, 2)
-
-    # Helper function to dynamically update axes
-    def update_axis_dropdown():
-        self.combo_axis.clear()
-        device = self.combo_device.currentText()
-        if device == "Lung Phantom":
-            self.combo_axis.addItems(["X", "Y", "Z"])
-        elif device == "Motion Platform":
-            self.combo_axis.addItems(["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"])
-        else: # Other
-            # Add all columns present in self.dfEdit excluding timestamp, time, Command
-            exclude_cols = {'timestamp', 'time', 'Command'}
-            cols = [col for col in getattr(self, 'dfEdit', type('Mock', (), {'columns': []})()).columns if col not in exclude_cols]
-            self.combo_axis.addItems(cols)
-        
-        # Show/hide offset rot widget based on device selection
-        if hasattr(self, 'offset_rot_widget'):
-            self.offset_rot_widget.setVisible(device == "Motion Platform")
-
-        # Synchronize Settings tab dropdown & stack view
-        if hasattr(self, 'combo_settings_device'):
-            self.combo_settings_device.blockSignals(True)
-            self.combo_settings_device.setCurrentText(device)
-            self.combo_settings_device.blockSignals(False)
-        if hasattr(self, 'settings_stack'):
-            if device == "Lung Phantom":
-                self.settings_stack.setCurrentIndex(0)
-            elif device == "Motion Platform":
-                self.settings_stack.setCurrentIndex(1)
-            else:
-                self.settings_stack.setCurrentIndex(2)
-        
-        from fcn_plan.fcn_create import initialize_default_curve_data
-        initialize_default_curve_data(self)
-
-    self.combo_device.currentTextChanged.connect(update_axis_dropdown)
+    add_field("Function Type:", self.combo_func_type, 0, 1)
 
     # 2. Amplitude, Amp. offset, Period (Row 1)
     self.input_amplitude = QDoubleSpinBox(self.groupBox_BrCv_createCurve)
@@ -426,20 +387,40 @@ def build_planning_tab(self):
 
     grid_inputs.addWidget(self.offset_rot_widget, 3, 0, 1, 3)
 
+    # 5. Axis Selection Checkboxes (Row 4)
+    self.axis_selection_widget = QWidget(self.groupBox_BrCv_createCurve)
+    axis_sec_lay = QVBoxLayout(self.axis_selection_widget)
+    axis_sec_lay.setContentsMargins(0, 5, 0, 0)
+    axis_sec_lay.setSpacing(4)
+
+    lbl_axis_title = QLabel("Axis:", self.axis_selection_widget)
+    lbl_axis_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+    axis_sec_lay.addWidget(lbl_axis_title)
+
+    self.axis_checkboxes_layout = QHBoxLayout()
+    self.axis_checkboxes_layout.setSpacing(15)
+    axis_sec_lay.addLayout(self.axis_checkboxes_layout)
+
+    grid_inputs.addWidget(self.axis_selection_widget, 4, 0, 1, 3)
+
     # Set initial visibility based on selected device
     self.offset_rot_widget.setVisible(self.combo_device.currentText() == "Motion Platform")
 
     # Connect tab synchronization
     setup_offset_sync(self)
 
-    # Connect axis & function type change listeners to dynamically modify labels and states
+    # Dynamic label and state updater
     def update_curve_input_labels():
-        axis = self.combo_axis.currentText()
         func_type = self.combo_func_type.currentText()
-        if not axis:
-            return
+        rotational_axes = {"Roll", "Pitch", "Yaw"}
 
-        is_rotational = axis in ["Roll", "Pitch", "Yaw"]
+        is_rotational = False
+        if hasattr(self, 'create_curve_axis_checkboxes'):
+            for rot_ax in rotational_axes:
+                cb = self.create_curve_axis_checkboxes.get(rot_ax)
+                if cb and cb.isChecked():
+                    is_rotational = True
+                    break
 
         if func_type == "linear":
             if hasattr(self, 'label_amplitude'):
@@ -468,9 +449,86 @@ def build_planning_tab(self):
                 else:
                     self.input_amp_offset.setEnabled(True)
 
-    self.combo_axis.currentTextChanged.connect(lambda _: update_curve_input_labels())
+    def update_axis_checkboxes():
+        if hasattr(self, 'axis_checkboxes_layout') and self.axis_checkboxes_layout is not None:
+            while self.axis_checkboxes_layout.count():
+                child = self.axis_checkboxes_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+        self.create_curve_axis_checkboxes = {}
+        device = self.combo_device.currentText()
+
+        if device == "Lung Phantom":
+            axes_list = [("X", True), ("Y", False), ("Z", False)]
+        elif device == "Motion Platform":
+            axes_list = [
+                ("SI", True), ("LAT", False), ("AP", False),
+                ("X", False), ("Y", False), ("Z", False),
+                ("Roll", False), ("Pitch", False), ("Yaw", False)
+            ]
+        else:
+            exclude_cols = {'timestamp', 'time', 'Command'}
+            cols = [col for col in getattr(self, 'dfEdit', type('Mock', (), {'columns': []})()).columns if col not in exclude_cols]
+            axes_list = [(c, i == 0) for i, c in enumerate(cols)]
+
+        linear_axes = {"SI", "LAT", "AP", "X", "Y", "Z"}
+        rotational_axes = {"Roll", "Pitch", "Yaw"}
+
+        def on_axis_toggled(changed_axis, is_checked):
+            if is_checked:
+                if changed_axis in linear_axes:
+                    for rot_ax in rotational_axes:
+                        cb_rot = self.create_curve_axis_checkboxes.get(rot_ax)
+                        if cb_rot and cb_rot.isChecked():
+                            cb_rot.blockSignals(True)
+                            cb_rot.setChecked(False)
+                            cb_rot.blockSignals(False)
+                elif changed_axis in rotational_axes:
+                    for lin_ax in linear_axes:
+                        cb_lin = self.create_curve_axis_checkboxes.get(lin_ax)
+                        if cb_lin and cb_lin.isChecked():
+                            cb_lin.blockSignals(True)
+                            cb_lin.setChecked(False)
+                            cb_lin.blockSignals(False)
+            update_curve_input_labels()
+
+        for ax_name, default_check in axes_list:
+            cb = QCheckBox(ax_name, self.axis_selection_widget)
+            cb.setStyleSheet("font-weight: bold; font-size: 14px;")
+            cb.setChecked(default_check)
+            if ax_name == "Yaw":
+                cb.setEnabled(False)
+                cb.setToolTip("Yaw is currently disabled")
+
+            cb.toggled.connect(lambda chk, a=ax_name: on_axis_toggled(a, chk))
+            self.axis_checkboxes_layout.addWidget(cb)
+            self.create_curve_axis_checkboxes[ax_name] = cb
+
+        self.axis_checkboxes_layout.addStretch()
+
+        if hasattr(self, 'offset_rot_widget'):
+            self.offset_rot_widget.setVisible(device == "Motion Platform")
+
+        if hasattr(self, 'combo_settings_device'):
+            self.combo_settings_device.blockSignals(True)
+            self.combo_settings_device.setCurrentText(device)
+            self.combo_settings_device.blockSignals(False)
+        if hasattr(self, 'settings_stack'):
+            if device == "Lung Phantom":
+                self.settings_stack.setCurrentIndex(0)
+            elif device == "Motion Platform":
+                self.settings_stack.setCurrentIndex(1)
+            else:
+                self.settings_stack.setCurrentIndex(2)
+
+        if hasattr(self, 'create_table_view'):
+            from fcn_plan.fcn_create import initialize_default_curve_data
+            initialize_default_curve_data(self)
+        update_curve_input_labels()
+
+    self.combo_device.currentTextChanged.connect(update_axis_checkboxes)
     self.combo_func_type.currentTextChanged.connect(lambda _: update_curve_input_labels())
-    update_curve_input_labels()
 
     def sync_linear_duration_to_end_time():
         if self.combo_func_type.currentText() == "linear":
@@ -657,7 +715,7 @@ def build_planning_tab(self):
     bottom_splitter.setSizes([280, 620])
 
     # Initial trigger to populate axis and default curve data
-    update_axis_dropdown()
+    update_axis_checkboxes()
 
     # Automatic settings persistence across sessions
     setup_settings_persistence(self)
