@@ -1,7 +1,10 @@
 # Import necessary libraries and modules
 import numpy as np
 import pandas as pd
-from PySide6.QtWidgets import QTableWidgetItem, QVBoxLayout
+from PySide6.QtWidgets import (
+    QTableWidgetItem, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget, QDialog, QListWidget,
+    QScrollArea, QGroupBox, QLabel, QPushButton, QCheckBox, QRadioButton, QDoubleSpinBox, QMessageBox
+)
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
@@ -2020,3 +2023,799 @@ def import_gcode_action(self):
         
     except Exception as e:
         QMessageBox.critical(self, "Error", f"Failed to import G-code:\n{str(e)}")
+
+
+class CopyAxisDialog(QDialog):
+    def __init__(self, parent_ui):
+        parent_widget = parent_ui if isinstance(parent_ui, QWidget) else None
+        super().__init__(parent_widget)
+        self.parent_ui = parent_ui
+        self.setWindowTitle("Copy Axis Data")
+        self.setMinimumSize(520, 420)
+        self.resize(560, 450)
+
+        # Style dialog
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                background-color: #ffffff;
+                border: 1px solid #cfd8dc;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #263238;
+            }
+            QListWidget {
+                background-color: #ffffff;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                padding: 6px 10px;
+            }
+            QListWidget::item:selected {
+                background-color: #bbdefb;
+                color: #0d47a1;
+                font-weight: bold;
+            }
+            QCheckBox {
+                font-size: 14px;
+                padding: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
+
+        # Header label
+        header_lbl = QLabel("Select the source axis on the left and target destination axes on the right:", self)
+        header_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #37474f;")
+        layout.addWidget(header_lbl)
+
+        # Split layout: Left (Source) vs Right (Destination)
+        panels_layout = QHBoxLayout()
+        panels_layout.setSpacing(15)
+
+        # 1. Left Panel (Source Axis)
+        gb_source = QGroupBox("Source Axis (Copy From)", self)
+        gb_src_lay = QVBoxLayout(gb_source)
+        gb_src_lay.setContentsMargins(10, 15, 10, 10)
+
+        self.list_source = QListWidget(gb_source)
+        gb_src_lay.addWidget(self.list_source)
+        panels_layout.addWidget(gb_source, 1)
+
+        # 2. Right Panel (Destination Axes)
+        gb_dest = QGroupBox("Destination Axes (Copy To)", self)
+        gb_dst_lay = QVBoxLayout(gb_dest)
+        gb_dst_lay.setContentsMargins(10, 15, 10, 10)
+
+        self.dst_scroll_widget = QWidget(gb_dest)
+        self.dst_checkboxes_layout = QVBoxLayout(self.dst_scroll_widget)
+        self.dst_checkboxes_layout.setContentsMargins(5, 5, 5, 5)
+        self.dst_checkboxes_layout.setSpacing(6)
+
+        from PySide6.QtWidgets import QScrollArea
+        scroll = QScrollArea(gb_dest)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.dst_scroll_widget)
+        scroll.setStyleSheet("QScrollArea { border: 1px solid #b0bec5; background-color: #ffffff; border-radius: 4px; }")
+        gb_dst_lay.addWidget(scroll)
+
+        panels_layout.addWidget(gb_dest, 1)
+        layout.addLayout(panels_layout)
+
+        # Get available axes from dfEdit (excluding metadata and derived actuator columns)
+        exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
+        df = getattr(parent_ui, 'dfEdit', None)
+        if df is not None:
+            self.available_axes = [col for col in df.columns if col not in exclude_cols]
+        else:
+            self.available_axes = ["X", "Y", "Z"]
+
+        # Populate Left List (Source Axis)
+        for ax in self.available_axes:
+            self.list_source.addItem(ax)
+
+        # Populate Right Checkboxes (Destination Axes)
+        self.dst_checkboxes = {}
+        for ax in self.available_axes:
+            cb = QCheckBox(ax, self.dst_scroll_widget)
+            cb.setStyleSheet("font-weight: bold; font-size: 14px;")
+            self.dst_checkboxes_layout.addWidget(cb)
+            self.dst_checkboxes[ax] = cb
+
+        self.dst_checkboxes_layout.addStretch()
+
+        # Connect source selection change
+        self.list_source.currentItemChanged.connect(self.on_source_axis_changed)
+
+        # Select first item by default on left list
+        if self.list_source.count() > 0:
+            self.list_source.setCurrentRow(0)
+
+        # Bottom Button Row
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        self.btn_select_all = QPushButton("Select All Target", self)
+        self.btn_select_all.setMinimumHeight(38)
+        self.btn_select_all.setStyleSheet("""
+            QPushButton {
+                background-color: #eceff1;
+                color: #37474f;
+                font-weight: bold;
+                font-size: 13px;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #cfd8dc;
+            }
+        """)
+        self.btn_select_all.clicked.connect(self.select_all_enabled_targets)
+        btn_layout.addWidget(self.btn_select_all)
+
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel.setMinimumHeight(38)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #e0e0e0;
+                color: #333333;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover {
+                background-color: #d6d6d6;
+            }
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_copy = QPushButton("Copy Axis Data", self)
+        self.btn_copy.setMinimumHeight(38)
+        self.btn_copy.setStyleSheet("""
+            QPushButton {
+                background-color: #2e7d32;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #1b5e20;
+            }
+        """)
+        self.btn_copy.clicked.connect(self.execute_copy)
+        btn_layout.addWidget(self.btn_copy)
+
+        layout.addLayout(btn_layout)
+
+    def on_source_axis_changed(self, current_item, previous_item):
+        if not current_item:
+            return
+        src_axis = current_item.text()
+        for ax_name, cb in self.dst_checkboxes.items():
+            if ax_name == src_axis:
+                cb.setChecked(False)
+                cb.setEnabled(False)
+                cb.setToolTip("Cannot copy source axis into itself")
+            else:
+                cb.setEnabled(True)
+                cb.setToolTip("")
+
+    def select_all_enabled_targets(self):
+        for cb in self.dst_checkboxes.values():
+            if cb.isEnabled():
+                cb.setChecked(True)
+
+    def execute_copy(self):
+        curr = self.list_source.currentItem()
+        if not curr:
+            QMessageBox.warning(self, "Selection Warning", "Please select a source axis from the left list.")
+            return
+
+        source_axis = curr.text()
+        target_axes = [ax for ax, cb in self.dst_checkboxes.items() if cb.isChecked() and cb.isEnabled()]
+
+        if not target_axes:
+            QMessageBox.warning(self, "Selection Warning", "Please select at least one destination axis checkbox on the right.")
+            return
+
+        parent = self.parent_ui
+        if not hasattr(parent, 'dfEdit') or parent.dfEdit is None:
+            return
+
+        # Perform copy
+        for target_ax in target_axes:
+            parent.dfEdit[target_ax] = parent.dfEdit[source_axis].copy()
+
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        if device == "Lung Phantom":
+            parent.dfEdit_lung_phantom = parent.dfEdit
+        elif device == "Motion Platform":
+            parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            parent.dfEdit_motion_platform = parent.dfEdit
+        else:
+            parent.dfEdit_other = parent.dfEdit
+
+        loadTable_create(parent, parent.dfEdit)
+        trigger_plot_update(parent)
+
+        QMessageBox.information(
+            self,
+            "Copy Successful",
+            f"Successfully copied motion curve data from '{source_axis}' to: {', '.join(target_axes)}."
+        )
+        self.accept()
+
+
+def open_copy_axis_dialog(self):
+    dlg = CopyAxisDialog(self)
+    dlg.exec_()
+
+
+class CropTrimDialog(QDialog):
+    def __init__(self, parent_ui, mode="crop"):
+        parent_widget = parent_ui if isinstance(parent_ui, QWidget) else None
+        super().__init__(parent_widget)
+        self.parent_ui = parent_ui
+        self.mode = mode.lower()
+
+        title = "Crop Interval (Keep Selection)" if self.mode == "crop" else "Trim Interval (Remove Selection)"
+        self.setWindowTitle(title)
+        self.setMinimumSize(420, 300)
+        self.resize(460, 320)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                background-color: #ffffff;
+                border: 1px solid #cfd8dc;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #263238;
+            }
+            QLabel {
+                font-size: 13px;
+            }
+            QDoubleSpinBox {
+                background-color: #ffffff;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Description text
+        if self.mode == "crop":
+            desc = "Crop keeps <b>ONLY</b> the motion curve data within the selected time interval [Start Time, End Time], discarding everything outside. Time is re-indexed from 0.0s."
+        else:
+            desc = "Trim <b>REMOVES</b> the motion curve data within the selected time interval [Start Time, End Time]. Remaining segments before and after are spliced together seamlessly."
+
+        desc_lbl = QLabel(desc, self)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: #37474f; font-size: 13px; line-height: 1.4;")
+        layout.addWidget(desc_lbl)
+
+        # Interval Spinboxes
+        gb_range = QGroupBox("Select Time Interval", self)
+        gb_range_lay = QGridLayout(gb_range)
+        gb_range_lay.setContentsMargins(15, 20, 15, 15)
+        gb_range_lay.setSpacing(10)
+
+        lbl_start = QLabel("Start Time (s):", gb_range)
+        lbl_start.setStyleSheet("font-weight: bold;")
+        self.input_start = QDoubleSpinBox(gb_range)
+        self.input_start.setRange(0.0, 10000.0)
+        self.input_start.setDecimals(3)
+        self.input_start.setMinimumHeight(38)
+
+        def_start = parent_ui.input_start_time.value() if hasattr(parent_ui, 'input_start_time') else 0.0
+        self.input_start.setValue(def_start)
+
+        lbl_end = QLabel("End Time (s):", gb_range)
+        lbl_end.setStyleSheet("font-weight: bold;")
+        self.input_end = QDoubleSpinBox(gb_range)
+        self.input_end.setRange(0.0, 10000.0)
+        self.input_end.setDecimals(3)
+        self.input_end.setMinimumHeight(38)
+
+        def_end = parent_ui.input_end_time.value() if hasattr(parent_ui, 'input_end_time') else 10.0
+        self.input_end.setValue(def_end)
+
+        gb_range_lay.addWidget(lbl_start, 0, 0)
+        gb_range_lay.addWidget(self.input_start, 0, 1)
+        gb_range_lay.addWidget(lbl_end, 1, 0)
+        gb_range_lay.addWidget(self.input_end, 1, 1)
+
+        layout.addWidget(gb_range)
+        layout.addStretch()
+
+        # Action Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel.setMinimumHeight(38)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #e0e0e0;
+                color: #333333;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover {
+                background-color: #d6d6d6;
+            }
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        btn_text = "Crop Data" if self.mode == "crop" else "Trim Data"
+        btn_bg = "#2e7d32" if self.mode == "crop" else "#c62828"
+        btn_hover = "#1b5e20" if self.mode == "crop" else "#b71c1c"
+
+        self.btn_action = QPushButton(btn_text, self)
+        self.btn_action.setMinimumHeight(38)
+        self.btn_action.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_bg};
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px;
+                padding: 0 20px;
+            }}
+            QPushButton:hover {{
+                background-color: {btn_hover};
+            }}
+        """)
+        self.btn_action.clicked.connect(self.execute_action)
+        btn_layout.addWidget(self.btn_action)
+
+        layout.addLayout(btn_layout)
+
+    def execute_action(self):
+        t_start = round(self.input_start.value(), 3)
+        t_end = round(self.input_end.value(), 3)
+
+        if t_start >= t_end:
+            QMessageBox.warning(self, "Invalid Time Range", "Start Time must be strictly less than End Time.")
+            return
+
+        parent = self.parent_ui
+        if not hasattr(parent, 'dfEdit') or parent.dfEdit is None or len(parent.dfEdit) == 0:
+            QMessageBox.warning(self, "Data Warning", "No active curve data found to process.")
+            return
+
+        df = parent.dfEdit
+
+        if self.mode == "crop":
+            # Crop logic: keep t_start <= time <= t_end
+            df_cropped = df[(df['time'] >= t_start) & (df['time'] <= t_end)].copy()
+            if len(df_cropped) == 0:
+                QMessageBox.warning(self, "Crop Error", f"No data points found within [{t_start} s, {t_end} s].")
+                return
+
+            min_t = df_cropped['time'].min()
+            df_cropped['time'] = (df_cropped['time'] - min_t).round(3)
+            df_cropped['timestamp'] = (df_cropped['time'] * 1000.0).round(1)
+            df_cropped.reset_index(drop=True, inplace=True)
+
+            parent.dfEdit = df_cropped
+
+        else:
+            # Trim logic: remove t_start <= time <= t_end
+            part1 = df[df['time'] < t_start].copy()
+            part3 = df[df['time'] > t_end].copy()
+
+            if len(part1) == 0 and len(part3) == 0:
+                QMessageBox.warning(self, "Trim Error", "Trimming the entire interval would leave no data points.")
+                return
+
+            if len(part1) > 0 and len(part3) > 0:
+                dt_step = 0.001
+                if len(df) > 1:
+                    dt_step = df['time'].iat[1] - df['time'].iat[0]
+                    if dt_step <= 0:
+                        dt_step = 0.001
+
+                t_last = part1['time'].max()
+                t3_start = part3['time'].min()
+                shift_amount = t3_start - (t_last + dt_step)
+                part3['time'] = (part3['time'] - shift_amount).round(3)
+                part3['timestamp'] = (part3['time'] * 1000.0).round(1)
+                df_trimmed = pd.concat([part1, part3], ignore_index=True)
+            elif len(part1) == 0:
+                t3_start = part3['time'].min()
+                part3['time'] = (part3['time'] - t3_start).round(3)
+                part3['timestamp'] = (part3['time'] * 1000.0).round(1)
+                df_trimmed = part3.reset_index(drop=True)
+            else:
+                df_trimmed = part1.reset_index(drop=True)
+
+            parent.dfEdit = df_trimmed
+
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        if device == "Lung Phantom":
+            parent.dfEdit_lung_phantom = parent.dfEdit
+        elif device == "Motion Platform":
+            parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            parent.dfEdit_motion_platform = parent.dfEdit
+        else:
+            parent.dfEdit_other = parent.dfEdit
+
+        loadTable_create(parent, parent.dfEdit)
+        trigger_plot_update(parent)
+
+        action_name = "cropped to" if self.mode == "crop" else "trimmed from"
+        QMessageBox.information(
+            self,
+            "Success",
+            f"Successfully {action_name} range [{t_start} s, {t_end} s]. Total curve duration is now {parent.dfEdit['time'].max():.3f} s."
+        )
+        self.accept()
+
+
+def open_crop_interval_dialog(self):
+    dlg = CropTrimDialog(self, mode="crop")
+    dlg.exec_()
+
+
+def open_trim_interval_dialog(self):
+    dlg = CropTrimDialog(self, mode="trim")
+    dlg.exec_()
+
+
+class MathOperationsDialog(QDialog):
+    def __init__(self, parent_ui):
+        parent_widget = parent_ui if isinstance(parent_ui, QWidget) else None
+        super().__init__(parent_widget)
+        self.parent_ui = parent_ui
+        self.setWindowTitle("Curve Math Operations")
+        self.setMinimumSize(540, 520)
+        self.resize(580, 560)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                background-color: #ffffff;
+                border: 1px solid #cfd8dc;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #263238;
+            }
+            QLabel {
+                font-size: 13px;
+            }
+            QRadioButton {
+                font-size: 13px;
+                font-weight: bold;
+                padding: 3px;
+            }
+            QDoubleSpinBox {
+                background-color: #ffffff;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        # 1. Operation Selection GroupBox
+        gb_op = QGroupBox("1. Select Operation & Value", self)
+        gb_op_lay = QGridLayout(gb_op)
+        gb_op_lay.setContentsMargins(15, 15, 15, 15)
+        gb_op_lay.setSpacing(10)
+
+        self.radio_offset = QRadioButton("Offset (+/-)", gb_op)
+        self.radio_multiply = QRadioButton("Multiply (x)", gb_op)
+        self.radio_divide = QRadioButton("Divide (/)", gb_op)
+        self.radio_invert = QRadioButton("Invert (-1 x)", gb_op)
+        self.radio_offset.setChecked(True)
+
+        gb_op_lay.addWidget(self.radio_offset, 0, 0)
+        gb_op_lay.addWidget(self.radio_multiply, 0, 1)
+        gb_op_lay.addWidget(self.radio_divide, 1, 0)
+        gb_op_lay.addWidget(self.radio_invert, 1, 1)
+
+        lbl_val = QLabel("Value (k):", gb_op)
+        lbl_val.setStyleSheet("font-weight: bold;")
+        self.input_val_k = QDoubleSpinBox(gb_op)
+        self.input_val_k.setRange(-10000.0, 10000.0)
+        self.input_val_k.setValue(1.0)
+        self.input_val_k.setDecimals(3)
+        self.input_val_k.setMinimumHeight(38)
+
+        gb_op_lay.addWidget(lbl_val, 2, 0)
+        gb_op_lay.addWidget(self.input_val_k, 2, 1)
+
+        layout.addWidget(gb_op)
+
+        # Connect radio buttons to toggle value spinbox state
+        self.radio_offset.toggled.connect(self.on_op_changed)
+        self.radio_multiply.toggled.connect(self.on_op_changed)
+        self.radio_divide.toggled.connect(self.on_op_changed)
+        self.radio_invert.toggled.connect(self.on_op_changed)
+
+        # 2. Time Scope Selection GroupBox
+        gb_scope = QGroupBox("2. Time Scope", self)
+        gb_scope_lay = QVBoxLayout(gb_scope)
+        gb_scope_lay.setContentsMargins(15, 15, 15, 15)
+        gb_scope_lay.setSpacing(8)
+
+        self.radio_entire = QRadioButton("Entire Curve", gb_scope)
+        self.radio_segment = QRadioButton("Specific Segment [t_start, t_end]", gb_scope)
+        self.radio_entire.setChecked(True)
+
+        gb_scope_lay.addWidget(self.radio_entire)
+        gb_scope_lay.addWidget(self.radio_segment)
+
+        # Segment inputs container
+        self.segment_widget = QWidget(gb_scope)
+        seg_lay = QHBoxLayout(self.segment_widget)
+        seg_lay.setContentsMargins(20, 0, 0, 0)
+        seg_lay.setSpacing(10)
+
+        lbl_tstart = QLabel("Start (s):", self.segment_widget)
+        lbl_tstart.setStyleSheet("font-weight: bold;")
+        self.input_t_start = QDoubleSpinBox(self.segment_widget)
+        self.input_t_start.setRange(0.0, 10000.0)
+        self.input_t_start.setDecimals(3)
+        self.input_t_start.setMinimumHeight(36)
+        def_start = parent_ui.input_start_time.value() if hasattr(parent_ui, 'input_start_time') else 0.0
+        self.input_t_start.setValue(def_start)
+
+        lbl_tend = QLabel("End (s):", self.segment_widget)
+        lbl_tend.setStyleSheet("font-weight: bold;")
+        self.input_t_end = QDoubleSpinBox(self.segment_widget)
+        self.input_t_end.setRange(0.0, 10000.0)
+        self.input_t_end.setDecimals(3)
+        self.input_t_end.setMinimumHeight(36)
+        def_end = parent_ui.input_end_time.value() if hasattr(parent_ui, 'input_end_time') else 10.0
+        self.input_t_end.setValue(def_end)
+
+        seg_lay.addWidget(lbl_tstart)
+        seg_lay.addWidget(self.input_t_start)
+        seg_lay.addWidget(lbl_tend)
+        seg_lay.addWidget(self.input_t_end)
+
+        self.segment_widget.setEnabled(False)
+        gb_scope_lay.addWidget(self.segment_widget)
+        layout.addWidget(gb_scope)
+
+        self.radio_entire.toggled.connect(lambda chk: self.segment_widget.setEnabled(not chk))
+
+        # 3. Target Axes GroupBox
+        gb_axes = QGroupBox("3. Target Axes (Multi-Select)", self)
+        gb_axes_lay = QVBoxLayout(gb_axes)
+        gb_axes_lay.setContentsMargins(15, 15, 15, 15)
+        gb_axes_lay.setSpacing(8)
+
+        # Helper buttons top row
+        axes_btn_lay = QHBoxLayout()
+        axes_btn_lay.setSpacing(10)
+        self.btn_select_all = QPushButton("Select All", gb_axes)
+        self.btn_select_all.setStyleSheet("font-size: 12px; font-weight: bold; padding: 4px 10px;")
+        self.btn_select_all.clicked.connect(self.select_all_axes)
+
+        self.btn_clear_all = QPushButton("Clear All", gb_axes)
+        self.btn_clear_all.setStyleSheet("font-size: 12px; font-weight: bold; padding: 4px 10px;")
+        self.btn_clear_all.clicked.connect(self.clear_all_axes)
+
+        axes_btn_lay.addWidget(self.btn_select_all)
+        axes_btn_lay.addWidget(self.btn_clear_all)
+        axes_btn_lay.addStretch()
+        gb_axes_lay.addLayout(axes_btn_lay)
+
+        # Checkboxes grid (excluding metadata and derived actuator columns)
+        exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
+        df = getattr(parent_ui, 'dfEdit', None)
+        if df is not None:
+            available_axes = [col for col in df.columns if col not in exclude_cols]
+        else:
+            available_axes = ["X", "Y", "Z"]
+
+        self.axis_checkboxes = {}
+        cb_grid = QGridLayout()
+        cb_grid.setSpacing(10)
+
+        for i, ax_name in enumerate(available_axes):
+            cb = QCheckBox(ax_name, gb_axes)
+            cb.setStyleSheet("font-weight: bold; font-size: 14px;")
+            cb.setChecked(True)
+            row = i // 4
+            col = i % 4
+            cb_grid.addWidget(cb, row, col)
+            self.axis_checkboxes[ax_name] = cb
+
+        gb_axes_lay.addLayout(cb_grid)
+        layout.addWidget(gb_axes)
+        layout.addStretch()
+
+        # Action Buttons Bottom
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel.setMinimumHeight(38)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #e0e0e0;
+                color: #333333;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 4px;
+                padding: 0 15px;
+            }
+            QPushButton:hover {
+                background-color: #d6d6d6;
+            }
+        """)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_action = QPushButton("Apply Operation", self)
+        self.btn_action.setMinimumHeight(38)
+        self.btn_action.setStyleSheet("""
+            QPushButton {
+                background-color: #5e35b1;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #4527a0;
+            }
+        """)
+        self.btn_action.clicked.connect(self.execute_math_op)
+        btn_layout.addWidget(self.btn_action)
+
+        layout.addLayout(btn_layout)
+
+    def on_op_changed(self):
+        if self.radio_invert.isChecked():
+            self.input_val_k.setEnabled(False)
+        else:
+            self.input_val_k.setEnabled(True)
+
+    def select_all_axes(self):
+        for cb in self.axis_checkboxes.values():
+            cb.setChecked(True)
+
+    def clear_all_axes(self):
+        for cb in self.axis_checkboxes.values():
+            cb.setChecked(False)
+
+    def execute_math_op(self):
+        parent = self.parent_ui
+        if not hasattr(parent, 'dfEdit') or parent.dfEdit is None or len(parent.dfEdit) == 0:
+            QMessageBox.warning(self, "Data Warning", "No active curve data found to process.")
+            return
+
+        target_axes = [ax for ax, cb in self.axis_checkboxes.items() if cb.isChecked()]
+        if not target_axes:
+            QMessageBox.warning(self, "Selection Warning", "Please select at least one target axis checkbox.")
+            return
+
+        val_k = self.input_val_k.value()
+
+        # Determine operation
+        if self.radio_offset.isChecked():
+            op_type = "offset"
+        elif self.radio_multiply.isChecked():
+            op_type = "multiply"
+        elif self.radio_divide.isChecked():
+            op_type = "divide"
+            if val_k == 0.0:
+                QMessageBox.warning(self, "Division Error", "Division by zero (k = 0.0) is not allowed.")
+                return
+        else:
+            op_type = "invert"
+
+        # Determine time mask
+        df = parent.dfEdit
+        if self.radio_entire.isChecked():
+            t_mask = pd.Series([True] * len(df), index=df.index)
+            scope_str = "entire curve"
+        else:
+            t_start = round(self.input_t_start.value(), 3)
+            t_end = round(self.input_t_end.value(), 3)
+            if t_start >= t_end:
+                QMessageBox.warning(self, "Invalid Time Range", "Start Time must be strictly less than End Time.")
+                return
+            t_mask = (df['time'] >= t_start) & (df['time'] <= t_end)
+            if not t_mask.any():
+                QMessageBox.warning(self, "Scope Error", f"No data points found within [{t_start} s, {t_end} s].")
+                return
+            scope_str = f"segment [{t_start} s, {t_end} s]"
+
+        # Apply math operation
+        for ax in target_axes:
+            if ax not in df.columns:
+                continue
+            if op_type == "offset":
+                df.loc[t_mask, ax] = df.loc[t_mask, ax] + val_k
+            elif op_type == "multiply":
+                df.loc[t_mask, ax] = df.loc[t_mask, ax] * val_k
+            elif op_type == "divide":
+                df.loc[t_mask, ax] = df.loc[t_mask, ax] / val_k
+            elif op_type == "invert":
+                df.loc[t_mask, ax] = -df.loc[t_mask, ax]
+
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        if device == "Lung Phantom":
+            parent.dfEdit_lung_phantom = parent.dfEdit
+        elif device == "Motion Platform":
+            parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            parent.dfEdit_motion_platform = parent.dfEdit
+        else:
+            parent.dfEdit_other = parent.dfEdit
+
+        loadTable_create(parent, parent.dfEdit)
+        trigger_plot_update(parent)
+
+        QMessageBox.information(
+            self,
+            "Operation Successful",
+            f"Successfully applied {op_type.upper()} operation across {scope_str} to axes: {', '.join(target_axes)}."
+        )
+        self.accept()
+
+
+def open_math_operations_dialog(self):
+    dlg = MathOperationsDialog(self)
+    dlg.exec_()

@@ -134,9 +134,126 @@ def build_planning_tab(self):
     
     self.create_settings_tab_widget.addTab(curve_tab_widget, "Curve")
 
-    # Tools Tab Setup (Empty for now)
+    # Tools Tab Setup
     tools_tab_widget = QWidget(self.create_settings_tab_widget)
     tools_tab_layout = QVBoxLayout(tools_tab_widget)
+    tools_tab_layout.setContentsMargins(15, 15, 15, 15)
+    tools_tab_layout.setSpacing(15)
+
+    gb_axis_tools = QGroupBox("Axis Data Operations", tools_tab_widget)
+    gb_axis_tools_layout = QVBoxLayout(gb_axis_tools)
+    gb_axis_tools_layout.setContentsMargins(15, 15, 15, 15)
+    gb_axis_tools_layout.setSpacing(10)
+
+    lbl_tools_desc = QLabel("Copy motion curve data from one source axis to multiple destination axes simultaneously.", gb_axis_tools)
+    lbl_tools_desc.setWordWrap(True)
+    lbl_tools_desc.setStyleSheet("font-size: 13px; color: #555555;")
+    gb_axis_tools_layout.addWidget(lbl_tools_desc)
+
+    self.btn_copy_axis_to = QPushButton("Copy Axis To...", gb_axis_tools)
+    self.btn_copy_axis_to.setMinimumHeight(45)
+    self.btn_copy_axis_to.setStyleSheet("""
+        QPushButton {
+            background-color: #1976d2;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border-radius: 6px;
+            padding: 0px 15px;
+        }
+        QPushButton:hover {
+            background-color: #1565c0;
+        }
+    """)
+    gb_axis_tools_layout.addWidget(self.btn_copy_axis_to)
+
+    from fcn_plan.fcn_create import open_copy_axis_dialog
+    self.btn_copy_axis_to.clicked.connect(lambda: open_copy_axis_dialog(self))
+
+    gb_time_tools = QGroupBox("Time Interval Operations", tools_tab_widget)
+    gb_time_tools_layout = QVBoxLayout(gb_time_tools)
+    gb_time_tools_layout.setContentsMargins(15, 15, 15, 15)
+    gb_time_tools_layout.setSpacing(10)
+
+    lbl_time_desc = QLabel("Crop to keep only a specific interval or Trim to remove a specific interval from the motion curve.", gb_time_tools)
+    lbl_time_desc.setWordWrap(True)
+    lbl_time_desc.setStyleSheet("font-size: 13px; color: #555555;")
+    gb_time_tools_layout.addWidget(lbl_time_desc)
+
+    time_btn_lay = QHBoxLayout()
+    time_btn_lay.setSpacing(10)
+
+    self.btn_crop_interval = QPushButton("Crop Interval...", gb_time_tools)
+    self.btn_crop_interval.setMinimumHeight(45)
+    self.btn_crop_interval.setStyleSheet("""
+        QPushButton {
+            background-color: #2e7d32;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #1b5e20;
+        }
+    """)
+
+    self.btn_trim_interval = QPushButton("Trim Interval...", gb_time_tools)
+    self.btn_trim_interval.setMinimumHeight(45)
+    self.btn_trim_interval.setStyleSheet("""
+        QPushButton {
+            background-color: #c62828;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #b71c1c;
+        }
+    """)
+
+    from fcn_plan.fcn_create import open_crop_interval_dialog, open_trim_interval_dialog
+    self.btn_crop_interval.clicked.connect(lambda: open_crop_interval_dialog(self))
+    self.btn_trim_interval.clicked.connect(lambda: open_trim_interval_dialog(self))
+
+    time_btn_lay.addWidget(self.btn_crop_interval)
+    time_btn_lay.addWidget(self.btn_trim_interval)
+    gb_time_tools_layout.addLayout(time_btn_lay)
+
+    gb_math_tools = QGroupBox("Mathematical Operations", tools_tab_widget)
+    gb_math_tools_layout = QVBoxLayout(gb_math_tools)
+    gb_math_tools_layout.setContentsMargins(15, 15, 15, 15)
+    gb_math_tools_layout.setSpacing(10)
+
+    lbl_math_desc = QLabel("Apply mathematical operations (Offset, Multiply, Divide, Invert) to entire curves or specific segments across selected axes.", gb_math_tools)
+    lbl_math_desc.setWordWrap(True)
+    lbl_math_desc.setStyleSheet("font-size: 13px; color: #555555;")
+    gb_math_tools_layout.addWidget(lbl_math_desc)
+
+    self.btn_math_operations = QPushButton("Math Operations...", gb_math_tools)
+    self.btn_math_operations.setMinimumHeight(45)
+    self.btn_math_operations.setStyleSheet("""
+        QPushButton {
+            background-color: #5e35b1;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border-radius: 6px;
+            padding: 0px 15px;
+        }
+        QPushButton:hover {
+            background-color: #4527a0;
+        }
+    """)
+    gb_math_tools_layout.addWidget(self.btn_math_operations)
+
+    from fcn_plan.fcn_create import open_math_operations_dialog
+    self.btn_math_operations.clicked.connect(lambda: open_math_operations_dialog(self))
+
+    tools_tab_layout.addWidget(gb_axis_tools)
+    tools_tab_layout.addWidget(gb_time_tools)
+    tools_tab_layout.addWidget(gb_math_tools)
     tools_tab_layout.addStretch()
     self.create_settings_tab_widget.addTab(tools_tab_widget, "Tools")
 
@@ -464,7 +581,6 @@ def build_planning_tab(self):
         elif device == "Motion Platform":
             axes_list = [
                 ("SI", True), ("LAT", False), ("AP", False),
-                ("X", False), ("Y", False), ("Z", False),
                 ("Roll", False), ("Pitch", False), ("Yaw", False)
             ]
         else:
