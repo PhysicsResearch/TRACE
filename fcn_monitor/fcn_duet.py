@@ -243,13 +243,35 @@ def render_status_plot(self):
                         linewidth=1.5, alpha=0.85
                     )
                     self._ref_pause_lines.append(vline)
-    else:
-        # Hide pause lines when reference is off
-        for vline in self._ref_pause_lines:
-            try:
-                vline.set_visible(False)
-            except Exception:
-                pass
+    # Render transparent red background shading for active radiation intervals (probe != 0)
+    if not hasattr(self, '_probe_span_patches'):
+        self._probe_span_patches = []
+
+    for patch in self._probe_span_patches:
+        try:
+            patch.remove()
+        except Exception:
+            pass
+    self._probe_span_patches = []
+
+    probe_data = plot_data.get('probe', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
+    if len(probe_data) > 0 and len(t_data) == len(probe_data):
+        in_rad = False
+        rad_start = 0.0
+        for i in range(len(t_data)):
+            val = probe_data[i]
+            if val != 0 and not in_rad:
+                in_rad = True
+                rad_start = t_data[i]
+            elif val == 0 and in_rad:
+                in_rad = False
+                rad_end = t_data[i]
+                span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
+                self._probe_span_patches.append(span)
+        if in_rad:
+            rad_end = t_data[-1]
+            span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
+            self._probe_span_patches.append(span)
 
     # Parse user-configured time window interval (default 60s)
     time_win = 60.0
@@ -316,7 +338,7 @@ def clear_status_plot_data(self):
         'A': [], 'B': [], 'C': [], 'D': [],
         "'e": [], "'f": [], "'a": [], "'c": [],
         'Roll': [], 'Pitch': [], 'Yaw': [],
-        'LAT': [], 'AP': [], 'SI': []
+        'LAT': [], 'AP': [], 'SI': [], 'probe': []
     }
     self._total_pause_duration = 0.0
     self._pause_start_perf = None
@@ -326,6 +348,8 @@ def clear_status_plot_data(self):
         self.status_ref_lines.clear()
     if hasattr(self, '_ref_pause_lines'):
         self._ref_pause_lines.clear()
+    if hasattr(self, '_probe_span_patches'):
+        self._probe_span_patches.clear()
     if hasattr(self, 'ax_status') and self.ax_status is not None:
         self.ax_status.clear()
         self.ax_status.set_xlabel("Time (s)", fontsize=13, fontweight='bold')
@@ -615,6 +639,8 @@ def start_selected_gcode_execution(self):
                     norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
                     snapshot[norm_axis] = float(val)
 
+    if getattr(self, 'active_log_file', None) is not None:
+        close_data_log_file(self)
     self.status_t0 = None
     self.status_plot_data = None
     self.status_stopped = False
@@ -641,9 +667,9 @@ def start_selected_gcode_execution(self):
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
-def log_data_point(self, t, x, y, z):
+def log_data_point(self, t, x, y, z, probe=0):
     """
-    Writes live position and time data to an auto-named log file log_HH_MM_SS_.txt
+    Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.txt
     inside the selected output folder (default Desktop).
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
@@ -661,7 +687,7 @@ def log_data_point(self, t, x, y, z):
 
         try:
             f = open(filepath, "a", encoding="utf-8")
-            f.write("Time_s,Pos_X_mm,Pos_Y_mm,Pos_Z_mm\n")
+            f.write("Time_s,Pos_X_mm,Pos_Y_mm,Pos_Z_mm,Probe\n")
             self.active_log_file = f
             self.active_log_filepath = filepath
             print(f"Started recording data log to file: {filepath}")
@@ -670,7 +696,8 @@ def log_data_point(self, t, x, y, z):
             return
 
     try:
-        self.active_log_file.write(f"{t:.2f},{x:.3f},{y:.3f},{z:.3f}\n")
+        p_val = probe if probe is not None else 0
+        self.active_log_file.write(f"{t:.2f},{x:.3f},{y:.3f},{z:.3f},{p_val}\n")
         self.active_log_file.flush()
     except Exception as e:
         print(f"Error writing to data log file: {e}")
@@ -828,6 +855,7 @@ def update_status_tab_dashboard(self):
 
         # 4. Sensors (Z-Probe)
         probe = data.get("sensors", {}).get("probeValue", 0)
+        self._last_probe_val = probe
         if hasattr(self, 'statusProbe') and self.statusProbe:
             self.statusProbe.setText(f"Probe: {probe}")
             
@@ -873,7 +901,8 @@ def update_status_tab_dashboard(self):
             except Exception as pe:
                 print(f"Error rendering status plot: {pe}")
         if status_code == "I":
-            close_data_log_file(self)
+            if getattr(self, 'active_log_file', None) is not None:
+                close_data_log_file(self)
 
     except Exception as e:
         print(f"Error updating status tab dashboard: {e}")
@@ -1314,6 +1343,10 @@ def update_status_fast(self):
                     self.status_plot_data['LAT'].append(sn_lat)
                     self.status_plot_data['AP'].append(sn_ap)
                     self.status_plot_data['SI'].append(sn_si)
+                    curr_p = getattr(self, '_last_probe_val', 0)
+                    if 'probe' not in self.status_plot_data:
+                        self.status_plot_data['probe'] = []
+                    self.status_plot_data['probe'].append(curr_p)
 
             if not hasattr(self, 'status_t0') or self.status_t0 is None:
                 self.status_t0 = t_now
@@ -1344,22 +1377,24 @@ def update_status_fast(self):
             self.status_plot_data['LAT'].append(current_lat)
             self.status_plot_data['AP'].append(current_ap)
             self.status_plot_data['SI'].append(current_si)
+            curr_p = getattr(self, '_last_probe_val', 0)
+            if 'probe' not in self.status_plot_data:
+                self.status_plot_data['probe'] = []
+            self.status_plot_data['probe'].append(curr_p)
 
             # Cap history buffer at 100,000 points to retain full plot history for panning & zoom inspection
             if len(self.status_plot_data['t']) > 100000:
                 for k in self.status_plot_data.keys():
                     self.status_plot_data[k].pop(0)
 
-            # File logging
-            check_log = getattr(self, 'check_record_data', None)
-            if check_log is not None and check_log.isChecked():
-                log_data_point(self, elapsed_t, current_lat, current_ap, current_si)
+            # File logging (only during active motion / plot update)
+            if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
+                log_data_point(self, elapsed_t, x_val, y_val, z_val, curr_p)
 
-        # File logging
-        if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
-            log_data_point(self, elapsed_t, x_val, y_val, z_val)
-        else:
-            close_data_log_file(self)
+        # Close active log file if recording was unchecked
+        if hasattr(self, 'check_record_log') and self.check_record_log and not self.check_record_log.isChecked():
+            if getattr(self, 'active_log_file', None) is not None:
+                close_data_log_file(self)
 
     except Exception as e:
         print(f"Error in fast status loop: {e}")
@@ -1515,6 +1550,8 @@ def cancel_GCODE_job(self):
 
     result = msg.exec()
     if result == QMessageBox.StandardButton.Ok:
+        if getattr(self, 'active_log_file', None) is not None:
+            close_data_log_file(self)
         self.status_t0 = None
         self.status_plot_data = None
         self.status_stopped = True

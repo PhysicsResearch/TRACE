@@ -7,7 +7,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QPushButton, QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox,
-    QCheckBox, QSlider, QTextEdit, QTableWidget, QLabel, QSplitter, QTabWidget, QStackedWidget
+    QCheckBox, QSlider, QTextEdit, QTableWidget, QLabel, QSplitter, QTabWidget, QStackedWidget,
+    QScrollArea, QFrame
 )
 
 def setup_offset_sync(self):
@@ -92,6 +93,8 @@ def build_planning_tab(self):
 
     # Main vertical splitter (separates top graph and bottom settings/table)
     main_splitter = QSplitter(Qt.Vertical, self.tab_planning)
+    main_splitter.setHandleWidth(8)
+    main_splitter.setChildrenCollapsible(False)
     layout.addWidget(main_splitter)
 
     # 1. Preview canvas area (Top panel)
@@ -115,32 +118,76 @@ def build_planning_tab(self):
 
     # 2. Bottom panel: horizontal splitter (separates settings and table)
     bottom_splitter = QSplitter(Qt.Horizontal, self.tab_planning)
+    bottom_splitter.setHandleWidth(8)
+    bottom_splitter.setChildrenCollapsible(False)
     main_splitter.addWidget(bottom_splitter)
+
+    # Apply distinct styling for splitter handles
+    splitter_style = """
+        QSplitter::handle:vertical {
+            background-color: #cfd8dc;
+            border-top: 1px solid #b0bec5;
+            border-bottom: 1px solid #b0bec5;
+            height: 8px;
+        }
+        QSplitter::handle:vertical:hover {
+            background-color: #1976d2;
+        }
+        QSplitter::handle:horizontal {
+            background-color: #cfd8dc;
+            border-left: 1px solid #b0bec5;
+            border-right: 1px solid #b0bec5;
+            width: 8px;
+        }
+        QSplitter::handle:horizontal:hover {
+            background-color: #1976d2;
+        }
+    """
+    main_splitter.setStyleSheet(splitter_style)
+    bottom_splitter.setStyleSheet(splitter_style)
 
     # Options Tab Widget (Bottom Left panel)
     self.create_settings_tab_widget = QTabWidget(self.tab_planning)
     self.create_settings_tab_widget.setStyleSheet("QTabBar::tab { font-weight: bold; font-size: 13px; padding: 6px 12px; }")
     bottom_splitter.addWidget(self.create_settings_tab_widget)
 
-    # Curve Tab Setup
+    # Curve Tab Setup (wrapped in QScrollArea for vertical flexibility)
     curve_tab_widget = QWidget(self.create_settings_tab_widget)
-    curve_tab_layout = QVBoxLayout(curve_tab_widget)
+    curve_tab_outer_layout = QVBoxLayout(curve_tab_widget)
+    curve_tab_outer_layout.setContentsMargins(0, 0, 0, 0)
+
+    curve_scroll = QScrollArea(curve_tab_widget)
+    curve_scroll.setWidgetResizable(True)
+    curve_scroll.setFrameShape(QFrame.NoFrame)
+
+    curve_scroll_content = QWidget()
+    curve_tab_layout = QVBoxLayout(curve_scroll_content)
     curve_tab_layout.setContentsMargins(5, 5, 5, 5)
     
-    self.groupBox_BrCv_createCurve = QGroupBox("Curve Options", curve_tab_widget)
+    self.groupBox_BrCv_createCurve = QGroupBox("Curve Options", curve_scroll_content)
     gb_layout = QVBoxLayout(self.groupBox_BrCv_createCurve)
     gb_layout.setContentsMargins(15, 10, 15, 10)
     curve_tab_layout.addWidget(self.groupBox_BrCv_createCurve)
-    
+
+    curve_scroll.setWidget(curve_scroll_content)
+    curve_tab_outer_layout.addWidget(curve_scroll)
     self.create_settings_tab_widget.addTab(curve_tab_widget, "Curve")
 
-    # Tools Tab Setup
+    # Tools Tab Setup (wrapped in QScrollArea for vertical flexibility)
     tools_tab_widget = QWidget(self.create_settings_tab_widget)
-    tools_tab_layout = QVBoxLayout(tools_tab_widget)
+    tools_tab_outer_layout = QVBoxLayout(tools_tab_widget)
+    tools_tab_outer_layout.setContentsMargins(0, 0, 0, 0)
+
+    tools_scroll = QScrollArea(tools_tab_widget)
+    tools_scroll.setWidgetResizable(True)
+    tools_scroll.setFrameShape(QFrame.NoFrame)
+
+    tools_scroll_content = QWidget()
+    tools_tab_layout = QVBoxLayout(tools_scroll_content)
     tools_tab_layout.setContentsMargins(15, 15, 15, 15)
     tools_tab_layout.setSpacing(15)
 
-    gb_axis_tools = QGroupBox("Axis Data Operations", tools_tab_widget)
+    gb_axis_tools = QGroupBox("Axis Data Operations", tools_scroll_content)
     gb_axis_tools_layout = QVBoxLayout(gb_axis_tools)
     gb_axis_tools_layout.setContentsMargins(15, 15, 15, 15)
     gb_axis_tools_layout.setSpacing(10)
@@ -170,7 +217,7 @@ def build_planning_tab(self):
     from fcn_plan.fcn_create import open_copy_axis_dialog
     self.btn_copy_axis_to.clicked.connect(lambda: open_copy_axis_dialog(self))
 
-    gb_time_tools = QGroupBox("Time Interval Operations", tools_tab_widget)
+    gb_time_tools = QGroupBox("Time Interval Operations", tools_scroll_content)
     gb_time_tools_layout = QVBoxLayout(gb_time_tools)
     gb_time_tools_layout.setContentsMargins(15, 15, 15, 15)
     gb_time_tools_layout.setSpacing(10)
@@ -221,7 +268,7 @@ def build_planning_tab(self):
     time_btn_lay.addWidget(self.btn_trim_interval)
     gb_time_tools_layout.addLayout(time_btn_lay)
 
-    gb_math_tools = QGroupBox("Mathematical Operations", tools_tab_widget)
+    gb_math_tools = QGroupBox("Mathematical Operations", tools_scroll_content)
     gb_math_tools_layout = QVBoxLayout(gb_math_tools)
     gb_math_tools_layout.setContentsMargins(15, 15, 15, 15)
     gb_math_tools_layout.setSpacing(10)
@@ -255,25 +302,36 @@ def build_planning_tab(self):
     tools_tab_layout.addWidget(gb_time_tools)
     tools_tab_layout.addWidget(gb_math_tools)
     tools_tab_layout.addStretch()
+
+    tools_scroll.setWidget(tools_scroll_content)
+    tools_tab_outer_layout.addWidget(tools_scroll)
     self.create_settings_tab_widget.addTab(tools_tab_widget, "Tools")
 
-    # Settings Tab Setup
+    # Settings Tab Setup (wrapped in QScrollArea for vertical flexibility)
     settings_tab_widget = QWidget(self.create_settings_tab_widget)
-    settings_tab_layout = QVBoxLayout(settings_tab_widget)
+    settings_tab_outer_layout = QVBoxLayout(settings_tab_widget)
+    settings_tab_outer_layout.setContentsMargins(0, 0, 0, 0)
+
+    settings_scroll = QScrollArea(settings_tab_widget)
+    settings_scroll.setWidgetResizable(True)
+    settings_scroll.setFrameShape(QFrame.NoFrame)
+
+    settings_scroll_content = QWidget()
+    settings_tab_layout = QVBoxLayout(settings_scroll_content)
     settings_tab_layout.setContentsMargins(15, 15, 15, 15)
     settings_tab_layout.setSpacing(10)
 
     # Settings: Device Type Selector
-    lbl_set_dev = QLabel("Device Type:", settings_tab_widget)
+    lbl_set_dev = QLabel("Device Type:", settings_scroll_content)
     lbl_set_dev.setStyleSheet("font-weight: bold; font-size: 14px;")
-    self.combo_settings_device = QComboBox(settings_tab_widget)
+    self.combo_settings_device = QComboBox(settings_scroll_content)
     self.combo_settings_device.setMinimumHeight(40)
     self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform"])
     settings_tab_layout.addWidget(lbl_set_dev)
     settings_tab_layout.addWidget(self.combo_settings_device)
 
     # Settings: Stacked Layout
-    self.settings_stack = QStackedWidget(settings_tab_widget)
+    self.settings_stack = QStackedWidget(settings_scroll_content)
     settings_tab_layout.addWidget(self.settings_stack)
 
     # Page 0: Lung Phantom settings
@@ -354,6 +412,9 @@ def build_planning_tab(self):
 
     self.combo_settings_device.currentTextChanged.connect(update_settings_device_sync)
     settings_tab_layout.addStretch()
+
+    settings_scroll.setWidget(settings_scroll_content)
+    settings_tab_outer_layout.addWidget(settings_scroll)
     self.create_settings_tab_widget.addTab(settings_tab_widget, "Settings")
 
     grid_inputs = QGridLayout()
@@ -381,7 +442,7 @@ def build_planning_tab(self):
 
     self.combo_func_type = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_func_type.setMinimumHeight(40)
-    self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "constant", "linear"])
+    self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "cos^4", "cos^6", "constant", "linear"])
     add_field("Function Type:", self.combo_func_type, 0, 1)
 
     # 2. Amplitude, Amp. offset, Period (Row 1)

@@ -9,7 +9,7 @@ import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-    QPushButton, QLabel, QSlider, QToolButton, QFrame, QProgressBar, QLineEdit, QCheckBox, QSizePolicy
+    QPushButton, QLabel, QSlider, QToolButton, QFrame, QProgressBar, QLineEdit, QCheckBox, QSizePolicy, QScrollArea
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -389,6 +389,7 @@ def build_status_tab(self):
 
     self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.txt)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
+    self.check_record_log.toggled.connect(lambda checked: __import__('fcn_monitor.fcn_duet', fromlist=['close_data_log_file']).close_data_log_file(self) if not checked else None)
 
     # Max Speed Adjustment Limit control (default 20%)
     lbl_max_speed_adj = QLabel("Max Speed Adj (%):", plot_box)
@@ -499,17 +500,24 @@ def build_status_tab(self):
 
 
 
-    # Checkboxes stacked vertically in a single column (Right side of the graph)
-    self.status_checks_container = QWidget(plot_box)
-    v_checks_layout = QVBoxLayout(self.status_checks_container)
-    v_checks_layout.setContentsMargins(0, 0, 0, 0)
-    v_checks_layout.setSpacing(2)
+    # Checkboxes organized in 2 columns wrapped in QScrollArea (Right side of the graph)
+    self.status_checks_scroll = QScrollArea(plot_box)
+    self.status_checks_scroll.setWidgetResizable(True)
+    self.status_checks_scroll.setFrameShape(QFrame.NoFrame)
+    self.status_checks_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    self.status_checks_scroll.setStyleSheet("QScrollArea { background: transparent; }")
 
-    # Show reference checkbox (always visible next to the plot)
+    self.status_checks_container = QWidget()
+    grid_checks_layout = QGridLayout(self.status_checks_container)
+    grid_checks_layout.setContentsMargins(0, 0, 5, 0)
+    grid_checks_layout.setHorizontalSpacing(10)
+    grid_checks_layout.setVerticalSpacing(4)
+
+    # Show reference checkbox (row 0, spanning 2 columns)
     self.check_show_reference = QCheckBox("Show reference", self.status_checks_container)
     self.check_show_reference.setChecked(False)
     self.check_show_reference.setVisible(True)
-    self.check_show_reference.setStyleSheet("QCheckBox { font-weight: bold; font-size: 15px; color: #1565c0; margin-bottom: 4px; }")
+    self.check_show_reference.setStyleSheet("QCheckBox { font-weight: bold; font-size: 13px; color: #1565c0; margin-bottom: 4px; }")
 
     def on_show_reference_toggled(checked):
         if checked:
@@ -522,7 +530,7 @@ def build_status_tab(self):
             render_status_plot(self)
 
     self.check_show_reference.toggled.connect(on_show_reference_toggled)
-    v_checks_layout.addWidget(self.check_show_reference)
+    grid_checks_layout.addWidget(self.check_show_reference, 0, 0, 1, 2)
 
     checkbox_specs = [
         # (attribute, label, color)
@@ -545,16 +553,20 @@ def build_status_tab(self):
         ('status_check_SI', "Show SI", '#01579b')
     ]
 
-    for attr, label, color in checkbox_specs:
+    for idx, (attr, label, color) in enumerate(checkbox_specs):
         cb = QCheckBox(label, self.status_checks_container)
         if label in ["Show X", "Show Y", "Show Z"]:
             cb.setChecked(True)
-        cb.setStyleSheet(f"QCheckBox {{ font-weight: bold; font-size: 15px; color: {color}; }}")
+        cb.setStyleSheet(f"QCheckBox {{ font-weight: bold; font-size: 13px; color: {color}; }}")
         cb.clicked.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
         setattr(self, attr, cb)
-        v_checks_layout.addWidget(cb)
 
-    plot_content_layout.addWidget(self.status_checks_container)
+        row = (idx // 2) + 1
+        col = idx % 2
+        grid_checks_layout.addWidget(cb, row, col)
+
+    self.status_checks_scroll.setWidget(self.status_checks_container)
+    plot_content_layout.addWidget(self.status_checks_scroll)
     plot_vlayout.addLayout(plot_content_layout)
 
     # Add Navigation Toolbar for zoom and pan below the graph

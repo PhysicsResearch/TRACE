@@ -17,9 +17,9 @@ TRACE allows you to generate synthetic mathematical motion curves to simulate st
    - $\phi$: Phase offset (rad)
    - $z_0$: Baseline offset (mm)
 
-2. **Modified $\cos^4$ Breathing Curve**:
-   Simulates realistic asymmetry between inspiration and expiration phases:
-   $$z(t) = A \cdot \cos^4\left(\frac{\pi}{T} t\right) + z_0$$
+2. **Modified $\cos^4$ & $\cos^6$ Breathing Curves**:
+   Simulates realistic asymmetry between inspiration and expiration phases (Lujan respiratory model):
+   $$z(t) = A \cdot \cos^{2n}\left(\frac{\pi}{T} t + \phi\right) + z_0 \quad (2n = 2, 4, 6)$$
 
 3. **Trapezoidal / Step Motion**:
    Used for step response tests and static phantom offset calibrations.

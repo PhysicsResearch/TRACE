@@ -1,12 +1,14 @@
 # Import necessary libraries and modules
 import numpy as np
 import pandas as pd
+from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget, QDialog, QListWidget,
     QScrollArea, QGroupBox, QLabel, QPushButton, QCheckBox, QRadioButton, QDoubleSpinBox, QMessageBox
 )
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 
 def compute_motion_platform_actuators(self, df):
@@ -645,6 +647,10 @@ def create_curve(self):
             val_start = amplitude * (np.cos(phase_rad) ** 1) + amp_offset
         elif func_type == "cos^2":
             val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
+        elif func_type == "cos^4":
+            val_start = amplitude * (np.cos(phase_rad) ** 4) + amp_offset
+        elif func_type == "cos^6":
+            val_start = amplitude * (np.cos(phase_rad) ** 6) + amp_offset
         elif func_type == "constant":
             val_start = amplitude + amp_offset
         elif func_type == "linear":
@@ -744,6 +750,10 @@ def create_curve(self):
                     val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 1) + amp_offset
                 elif func_type == "cos^2":
                     val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 2) + amp_offset
+                elif func_type == "cos^4":
+                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 4) + amp_offset
+                elif func_type == "cos^6":
+                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 6) + amp_offset
                 elif func_type == "constant":
                     val = amplitude + amp_offset
                 elif func_type == "linear":
@@ -788,9 +798,33 @@ def remove_row(self):
 
 def update_plot(self, dataframe, axes_list):
     """This function plots the created curves from the dataframe."""
-    self.plot_fig = Figure()
-    ax = self.plot_fig.add_subplot(111)
-    
+    container = self.create_plot_canvas_container
+    if container.layout() is None:
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        container.setLayout(layout)
+
+    # Initialize persistent Figure, Canvas, and Toolbar once
+    if not hasattr(self, 'create_plot_canvas') or self.create_plot_canvas is None or self.create_plot_canvas.parent() != container:
+        while container.layout().count():
+            child = container.layout().takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        self.plot_fig = Figure()
+        self.create_plot_ax = self.plot_fig.add_subplot(111)
+        self.create_plot_canvas = FigureCanvas(self.plot_fig)
+        self.create_plot_canvas.setStyleSheet("background-color:Transparent;")
+        container.layout().addWidget(self.create_plot_canvas)
+
+        self.create_plot_toolbar = NavigationToolbar(self.create_plot_canvas, container)
+        self.create_plot_toolbar.setStyleSheet("background-color: #f5f5f5; border: none; font-weight: bold;")
+        container.layout().addWidget(self.create_plot_toolbar)
+
+    ax = self.create_plot_ax
+    ax.clear()
+
     # Set plot background to transparent
     ax.patch.set_alpha(0.0)
     self.plot_fig.patch.set_alpha(0.0)
@@ -824,40 +858,14 @@ def update_plot(self, dataframe, axes_list):
     handles, labels = ax.get_legend_handles_labels()
     if handles:
         ax.legend(loc='upper right', fontsize=10, labelcolor='#333333')
-    ax.set_xlim(t_data.min(), t_data.max())
+    if len(t_data) > 0:
+        ax.set_xlim(t_data.min(), t_data.max())
     ax.set_xlabel('Time (s)', fontsize=font_sz, fontweight='bold')
     ax.set_ylabel('Amplitude (mm / deg)', fontsize=font_sz, fontweight='bold')
     ax.grid(True, linestyle=":", alpha=0.5, color="#888888")
 
     self.plot_fig.tight_layout()
-
-    # Create a canvas
-    canvas = FigureCanvas(self.plot_fig)
-    canvas.setStyleSheet("background-color:Transparent;")
-
-
-
-    container = self.create_plot_canvas_container
-    if container.layout() is None:
-        layout = QVBoxLayout(container)
-        container.setLayout(layout)
-    else:
-        # Clear existing content in the container
-        while container.layout().count():
-            child = container.layout().takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-    # Add the canvas to the container
-    container.layout().addWidget(canvas)
-
-    # Add Navigation Toolbar for zoom and pan below the graph
-    from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-    toolbar = NavigationToolbar(canvas, container)
-    toolbar.setStyleSheet("background-color: #f5f5f5; border: none; font-weight: bold;")
-    container.layout().addWidget(toolbar)
-
-    canvas.draw()
+    self.create_plot_canvas.draw()
 
 
 from .fcn_import import addColumns, loadTable
@@ -1723,8 +1731,9 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
     if hasattr(self, 'offset_rot_widget'):
         self.offset_rot_widget.setVisible(device == "Motion Platform")
 
-    self.combo_axis.clear()
-    self.combo_axis.addItems(axis_cols)
+    if hasattr(self, 'combo_axis'):
+        self.combo_axis.clear()
+        self.combo_axis.addItems(axis_cols)
     self.curve_origin = 'create'
 
     # Switch to Planning Tab before loading table to update UI context
@@ -1994,9 +2003,10 @@ def import_gcode_action(self):
         if hasattr(self, 'offset_rot_widget'):
             self.offset_rot_widget.setVisible(device == "Motion Platform")
 
-        # Refresh axis dropdown list (combo_axis)
-        self.combo_axis.clear()
-        self.combo_axis.addItems(axis_cols)
+        # Refresh axis dropdown list if present
+        if hasattr(self, 'combo_axis'):
+            self.combo_axis.clear()
+            self.combo_axis.addItems(axis_cols)
         
         self.curve_origin = 'create'
         
@@ -2562,7 +2572,7 @@ class MathOperationsDialog(QDialog):
         self.radio_offset = QRadioButton("Offset (+/-)", gb_op)
         self.radio_multiply = QRadioButton("Multiply (x)", gb_op)
         self.radio_divide = QRadioButton("Divide (/)", gb_op)
-        self.radio_invert = QRadioButton("Invert (-1 x)", gb_op)
+        self.radio_invert = QRadioButton("Invert (Flip Y)", gb_op)
         self.radio_offset.setChecked(True)
 
         gb_op_lay.addWidget(self.radio_offset, 0, 0)
@@ -2570,15 +2580,15 @@ class MathOperationsDialog(QDialog):
         gb_op_lay.addWidget(self.radio_divide, 1, 0)
         gb_op_lay.addWidget(self.radio_invert, 1, 1)
 
-        lbl_val = QLabel("Value (k):", gb_op)
-        lbl_val.setStyleSheet("font-weight: bold;")
+        self.lbl_val = QLabel("Value (k):", gb_op)
+        self.lbl_val.setStyleSheet("font-weight: bold;")
         self.input_val_k = QDoubleSpinBox(gb_op)
         self.input_val_k.setRange(-10000.0, 10000.0)
         self.input_val_k.setValue(1.0)
         self.input_val_k.setDecimals(3)
         self.input_val_k.setMinimumHeight(38)
 
-        gb_op_lay.addWidget(lbl_val, 2, 0)
+        gb_op_lay.addWidget(self.lbl_val, 2, 0)
         gb_op_lay.addWidget(self.input_val_k, 2, 1)
 
         layout.addWidget(gb_op)
@@ -2684,11 +2694,17 @@ class MathOperationsDialog(QDialog):
         layout.addWidget(gb_axes)
         layout.addStretch()
 
+        # Status message label
+        self.lbl_status = QLabel("", self)
+        self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.lbl_status)
+
         # Action Buttons Bottom
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
 
-        self.btn_cancel = QPushButton("Cancel", self)
+        self.btn_cancel = QPushButton("Close", self)
         self.btn_cancel.setMinimumHeight(38)
         self.btn_cancel.setStyleSheet("""
             QPushButton {
@@ -2703,7 +2719,7 @@ class MathOperationsDialog(QDialog):
                 background-color: #d6d6d6;
             }
         """)
-        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel.clicked.connect(self.accept)
         btn_layout.addWidget(self.btn_cancel)
 
         self.btn_action = QPushButton("Apply Operation", self)
@@ -2729,8 +2745,17 @@ class MathOperationsDialog(QDialog):
     def on_op_changed(self):
         if self.radio_invert.isChecked():
             self.input_val_k.setEnabled(False)
-        else:
+            self.lbl_val.setText("Offset:")
+            self.lbl_val.setToolTip("Inverts curve vertically while preserving the Y center/range so values remain non-negative.")
+        elif self.radio_offset.isChecked():
             self.input_val_k.setEnabled(True)
+            self.lbl_val.setText("Offset (mm):")
+        elif self.radio_multiply.isChecked():
+            self.input_val_k.setEnabled(True)
+            self.lbl_val.setText("Factor (x):")
+        elif self.radio_divide.isChecked():
+            self.input_val_k.setEnabled(True)
+            self.lbl_val.setText("Divisor (/):")
 
     def select_all_axes(self):
         for cb in self.axis_checkboxes.values():
@@ -2783,6 +2808,9 @@ class MathOperationsDialog(QDialog):
                 return
             scope_str = f"segment [{t_start} s, {t_end} s]"
 
+        # Save copy for undo
+        parent.dfEdit_copy = df.copy()
+
         # Apply math operation
         for ax in target_axes:
             if ax not in df.columns:
@@ -2794,7 +2822,19 @@ class MathOperationsDialog(QDialog):
             elif op_type == "divide":
                 df.loc[t_mask, ax] = df.loc[t_mask, ax] / val_k
             elif op_type == "invert":
-                df.loc[t_mask, ax] = -df.loc[t_mask, ax]
+                vals = df.loc[t_mask, ax]
+                if len(vals) > 0:
+                    y_min = vals.min()
+                    y_max = vals.max()
+                    # Invert vertically while keeping center/range in Y identical:
+                    # y_new = (y_max + y_min) - y
+                    # Flips peaks/troughs while ensuring numbers never turn negative for linear axes.
+                    df.loc[t_mask, ax] = (y_max + y_min) - vals
+
+        # Ensure linear axes are never negative
+        for ax in target_axes:
+            if ax not in ["Roll", "Pitch", "Yaw"] and ax in df.columns:
+                df.loc[t_mask, ax] = df.loc[t_mask, ax].clip(lower=0.0)
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
         if device == "Lung Phantom":
@@ -2807,13 +2847,11 @@ class MathOperationsDialog(QDialog):
 
         loadTable_create(parent, parent.dfEdit)
         trigger_plot_update(parent)
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
 
-        QMessageBox.information(
-            self,
-            "Operation Successful",
-            f"Successfully applied {op_type.upper()} operation across {scope_str} to axes: {', '.join(target_axes)}."
-        )
-        self.accept()
+        self.lbl_status.setText(f"✓ Applied {op_type.upper()} across {scope_str} to: {', '.join(target_axes)}")
+        self.lbl_status.setStyleSheet("color: #2e7d32; font-weight: bold; font-size: 13px;")
 
 
 def open_math_operations_dialog(self):
