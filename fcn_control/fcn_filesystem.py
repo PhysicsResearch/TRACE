@@ -482,9 +482,12 @@ def download_file(self, filepath):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before downloading files.")
         return
 
-    # filepath is relative to '0:/gcodes' (e.g. 'subfolder/file.gcode' or 'file.gcode')
     clean_path = filepath.strip('/')
-    rrf_path = f"0:/gcodes/{clean_path}" if clean_path else "0:/gcodes"
+    root_prefix = get_root_prefix(self)
+    if clean_path.startswith("0:/") or clean_path.startswith("0:"):
+        rrf_path = clean_path
+    else:
+        rrf_path = f"{root_prefix}/{clean_path}" if clean_path else root_prefix
 
     # Get local destination filename from QFileDialog
     filename = filepath.split('/')[-1]
@@ -593,7 +596,11 @@ def transfer_to_planning_action(self):
     import os
     filename = os.path.basename(rel_path)
     clean_path = rel_path.strip('/')
-    rrf_path = f"0:/gcodes/{clean_path}" if clean_path else "0:/gcodes"
+    root_prefix = get_root_prefix(self)
+    if clean_path.startswith("0:/") or clean_path.startswith("0:"):
+        rrf_path = clean_path
+    else:
+        rrf_path = f"{root_prefix}/{clean_path}" if clean_path else root_prefix
 
     # Ensure Planning tab is loaded
     if 3 not in getattr(self, '_loaded_tabs', set()):
@@ -739,7 +746,11 @@ def upload_file(self):
 
     filename = os.path.basename(local_path)
     curr_dir = getattr(self, 'current_directory', '/').strip('/')
-    rrf_path = f"0:/gcodes/{filename}" if not curr_dir else f"0:/gcodes/{curr_dir}/{filename}"
+    root_prefix = get_root_prefix(self)
+    if not curr_dir or curr_dir == '/':
+        rrf_path = f"{root_prefix}/{filename}"
+    else:
+        rrf_path = f"{root_prefix}/{curr_dir}/{filename}"
 
     ip = get_clean_duet_ip(self)
     url = f"http://{ip}/rr_upload"
@@ -1110,7 +1121,8 @@ def copy_selected_item(self):
 
     def copy_folder_recursive(src, dst):
         duet_request(f"http://{ip}/rr_mkdir", params={'dir': dst}, timeout=4)
-        sub_rel = src.replace("0:/gcodes/", "").replace("0:/gcodes", "")
+        root_prefix = get_root_prefix(self)
+        sub_rel = src.replace(f"{root_prefix}/", "").replace(root_prefix, "").replace("0:/gcodes/", "").replace("0:/gcodes", "").strip('/')
         sub_items = get_files_for_dir(self, sub_rel)
         for s in sub_items:
             s_name = s.get("name", "")

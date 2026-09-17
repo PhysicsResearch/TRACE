@@ -1,0 +1,6 @@
+echo "Connecting to home WiFi..."
+
+M552 S0                            ; stop WiFi
+G4 P1000
+M552 S1 P"MAASTRO-ResearchlabINET"                            ; connect as station
+
