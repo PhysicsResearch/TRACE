@@ -52,7 +52,7 @@ const unsigned long WINDOW_MS = 50;
 // 3 = three or more pulses trigger
 // 4 = four or more pulses trigger
 //
-const unsigned int COUNT_THRESHOLD = 3;
+const unsigned int COUNT_THRESHOLD = 10;
 
 
 // LED visible flash duration

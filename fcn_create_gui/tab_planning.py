@@ -217,6 +217,23 @@ def build_planning_tab(self):
     from fcn_plan.fcn_create import open_copy_axis_dialog
     self.btn_copy_axis_to.clicked.connect(lambda: open_copy_axis_dialog(self))
 
+    self.btn_import_motion_tools = QPushButton("Import Motion File (VXP / CSV)...", gb_axis_tools)
+    self.btn_import_motion_tools.setMinimumHeight(45)
+    self.btn_import_motion_tools.setStyleSheet("""
+        QPushButton {
+            background-color: #5e35b1;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border-radius: 6px;
+            padding: 0px 15px;
+        }
+        QPushButton:hover {
+            background-color: #4527a0;
+        }
+    """)
+    gb_axis_tools_layout.addWidget(self.btn_import_motion_tools)
+
     gb_time_tools = QGroupBox("Time Interval Operations", tools_scroll_content)
     gb_time_tools_layout = QVBoxLayout(gb_time_tools)
     gb_time_tools_layout.setContentsMargins(15, 15, 15, 15)
@@ -743,6 +760,21 @@ def build_planning_tab(self):
         }
     """)
 
+    self.button_import_curve = QPushButton("Import File", self.groupBox_BrCv_createCurve)
+    self.button_import_curve.setMinimumHeight(45)
+    self.button_import_curve.setStyleSheet("""
+        QPushButton {
+            background-color: #5e35b1;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #4527a0;
+        }
+    """)
+
     self.button_import_gcode = QPushButton("Import G-code", self.groupBox_BrCv_createCurve)
     self.button_import_gcode.setMinimumHeight(45)
     self.button_import_gcode.setStyleSheet("""
@@ -774,6 +806,7 @@ def build_planning_tab(self):
     """)
 
     create_buttons_layout.addWidget(self.button_create_curve)
+    create_buttons_layout.addWidget(self.button_import_curve)
     create_buttons_layout.addWidget(self.button_import_gcode)
     create_buttons_layout.addWidget(self.button_clear_all)
     gb_layout.addLayout(create_buttons_layout)

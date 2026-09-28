@@ -858,7 +858,7 @@ def update_plot(self, dataframe, axes_list):
     handles, labels = ax.get_legend_handles_labels()
     if handles:
         ax.legend(loc='upper right', fontsize=10, labelcolor='#333333')
-    if len(t_data) > 0:
+    if len(t_data) > 0 and t_data.min() < t_data.max():
         ax.set_xlim(t_data.min(), t_data.max())
     ax.set_xlabel('Time (s)', fontsize=font_sz, fontweight='bold')
     ax.set_ylabel('Amplitude (mm / deg)', fontsize=font_sz, fontweight='bold')
@@ -868,7 +868,7 @@ def update_plot(self, dataframe, axes_list):
     self.create_plot_canvas.draw()
 
 
-from .fcn_import import addColumns, loadTable
+from .fcn_import import addColumns, loadTable, open_import_motion_dialog
 
 
 def createCurve(self):

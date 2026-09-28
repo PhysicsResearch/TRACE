@@ -197,9 +197,17 @@ def initialize_software_buttons(self):
         from fcn_plan.fcn_create import clear_all_action
         safe_connect(self.button_clear_all, lambda: clear_all_action(self))
 
-    if hasattr(self, 'import_button'):
-        safe_connect(self.import_button, lambda: openCSVFile_BrCv(self))
-        self.import_button.setStyleSheet("background-color: green; color: white;")
+    if hasattr(self, 'button_import_curve'):
+        from fcn_plan.fcn_import import open_import_motion_dialog
+        safe_connect(self.button_import_curve, lambda: open_import_motion_dialog(self))
+
+    if hasattr(self, 'btn_import_motion_tools'):
+        from fcn_plan.fcn_import import open_import_motion_dialog
+        safe_connect(self.btn_import_motion_tools, lambda: open_import_motion_dialog(self))
+
+    if hasattr(self, 'import_button') and self.import_button != getattr(self, 'button_import_curve', None):
+        from fcn_plan.fcn_import import open_import_motion_dialog
+        safe_connect(self.import_button, lambda: open_import_motion_dialog(self))
 
     if hasattr(self, 'button_scale_ampl'):
         safe_connect(self.button_scale_ampl, lambda: scaleAmpl(self))
