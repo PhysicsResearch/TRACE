@@ -627,7 +627,6 @@ def unified_import_action(self, file_path=None):
     try:
         selected_filter = ""
         if file_path is None:
-            options = QFileDialog.Options()
             # Default to Downloads folder if available
             start_dir = os.path.join(os.path.expanduser("~"), "Downloads")
             if not os.path.exists(start_dir):
@@ -643,8 +642,7 @@ def unified_import_action(self, file_path=None):
                 self if isinstance(self, QWidget) else None,
                 "Select File to Import (G-code or Motion Data)",
                 start_dir,
-                filters,
-                options=options
+                filters
             )
 
         if not file_path or not os.path.isfile(file_path):
@@ -670,6 +668,17 @@ def unified_import_action(self, file_path=None):
         else:
             dialog = ImportMotionDialog(self, file_path)
             dialog.exec()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            QMessageBox.critical(
+                self if isinstance(self, QWidget) else None,
+                "Import Error",
+                f"An error occurred while importing file:\n{e}"
+            )
+        except Exception:
+            pass
     finally:
         self._import_dialog_open = False
 

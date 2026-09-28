@@ -75,8 +75,7 @@ def exportData(self):
     copyCurve(self)
 
     # Prompt user to select a folder
-    options = QFileDialog.Options()
-    folder = QFileDialog.getExistingDirectory(self, options=options)
+    folder = QFileDialog.getExistingDirectory(self, "Select Folder for Metadata Export")
 
     # Save the DataFrame to a CSV file in the selected folder
     fileName = os.path.join(folder, self.export_filename.text()+"_metadata.csv")
