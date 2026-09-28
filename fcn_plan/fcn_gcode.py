@@ -85,10 +85,12 @@ def generate_gcode_string(
 
         def flush_dwell():
             nonlocal dwell_accum
-            if dwell_accum > 0.0:
+            if dwell_accum >= 0.05:
                 ms = int(round(dwell_accum * 1000.0))
                 if ms > 0:
                     gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+            elif dwell_accum > 0.0:
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
@@ -106,11 +108,28 @@ def generate_gcode_string(
             dz_from_last = Z_new[i] - last_z
             max_diff = max(abs(dx_from_last), abs(dy_from_last), abs(dz_from_last))
 
-            # Distinguish between truly stationary and decimated steps
-            is_stationary = (X_new[i] == X_new[i-1]) and (Y_new[i] == Y_new[i-1]) and (Z_new[i] == Z_new[i-1])
+            # Distinguish between truly stationary and moving steps
+            dt_step = t_new[i] - t_new[i-1]
+            step_dx = abs(X_new[i] - X_new[i-1])
+            step_dy = abs(Y_new[i] - Y_new[i-1])
+            step_dz = abs(Z_new[i] - Z_new[i-1])
+            step_max = max(step_dx, step_dy, step_dz)
+            step_speed = (step_max / dt_step) if dt_step > 0 else 0.0
+            is_stationary = (step_speed < 0.1) or (X_new[i] == X_new[i-1] and Y_new[i] == Y_new[i-1] and Z_new[i] == Z_new[i-1])
 
             if is_stationary:
-                dwell_accum += (t_new[i] - t_new[i-1])
+                # If entering stationary dwell period, ensure the machine arrives at this position first
+                if dwell_accum == 0.0 and max_diff > 0.001:
+                    dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx])
+                    dx = X_new[i] - last_x
+                    dy = Y_new[i] - last_y
+                    dz = Z_new[i] - last_z
+                    dist = np.sqrt(dx*dx + dy*dy + dz*dz)
+                    speed = max(0.1, (dist / dt_elapsed) * 60.0)
+                    gcode_lines.append(f"G1 F{speed:.6f} X{X_new[i]:.6f} Y{Y_new[i]:.6f} Z{Z_new[i]:.6f}")
+                    last_x, last_y, last_z = X_new[i], Y_new[i], Z_new[i]
+                    last_pos_written_idx = i
+                dwell_accum += dt_step
             elif max_diff < 0.01:
                 # Decimated step (skip G1, don't accumulate dwell)
                 pass
@@ -249,10 +268,12 @@ def generate_gcode_string(
 
         def flush_dwell():
             nonlocal dwell_accum
-            if dwell_accum > 0.0:
+            if dwell_accum >= 0.05:
                 ms = int(round(dwell_accum * 1000.0))
                 if ms > 0:
                     gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+            elif dwell_accum > 0.0:
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
@@ -266,7 +287,16 @@ def generate_gcode_string(
                 gcode_lines.extend(format_command_lines(new_commands_indices[i]))
 
             # Distinguish between truly stationary and moving steps
-            is_stationary = (
+            dt_step = t_new[i] - t_new[i-1]
+            step_dlat = abs(LAT_eff[i] - LAT_eff[i-1])
+            step_dsi = abs(SI_eff[i] - SI_eff[i-1])
+            step_dap = abs(AP_new[i] - AP_new[i-1])
+            step_droll = abs(Roll_new[i] - Roll_new[i-1])
+            step_dpitch = abs(Pitch_new[i] - Pitch_new[i-1])
+            step_dyaw = abs(Yaw_new[i] - Yaw_new[i-1])
+            step_max = max(step_dlat, step_dsi, step_dap, step_droll, step_dpitch, step_dyaw)
+            step_speed = (step_max / dt_step) if dt_step > 0 else 0.0
+            is_stationary = (step_speed < 0.1) or (
                 LAT_eff[i] == LAT_eff[i-1] and
                 SI_eff[i] == SI_eff[i-1] and
                 AP_new[i] == AP_new[i-1] and
@@ -276,7 +306,22 @@ def generate_gcode_string(
             )
 
             if is_stationary:
-                dwell_accum += (t_new[i] - t_new[i-1])
+                if dwell_accum == 0.0:
+                    dA = A_new[i] - last_A
+                    dB = B_new[i] - last_B
+                    dC = C_new[i] - last_C
+                    dD = D_new[i] - last_D
+                    dist = np.sqrt(dA*dA + dB*dB + dC*dC + dD*dD)
+                    if dist > 0.001:
+                        dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx])
+                        speed = max(0.1, (dist / dt_elapsed) * 60.0)
+                        gcode_lines.append(
+                            f"G1 F{speed:.6f} A{A_new[i]:.6f} B{B_new[i]:.6f} C{C_new[i]:.6f} D{D_new[i]:.6f} "
+                            f"'e{LAT_eff[i]:.6f} 'f{LAT_eff[i]:.6f} 'a{SI_eff[i]:.6f} {axis_y_lo}{SI_eff[i]:.6f}"
+                        )
+                        last_A, last_B, last_C, last_D, last_LAT, last_SI = A_new[i], B_new[i], C_new[i], D_new[i], LAT_eff[i], SI_eff[i]
+                        last_pos_written_idx = i
+                dwell_accum += dt_step
             else:
                 # Calculate dt_elapsed BEFORE flushing dwell_accum
                 dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx] - dwell_accum)
@@ -347,10 +392,12 @@ def generate_gcode_string(
 
         def flush_dwell():
             nonlocal dwell_accum
-            if dwell_accum > 0.0:
+            if dwell_accum >= 0.05:
                 ms = int(round(dwell_accum * 1000.0))
                 if ms > 0:
                     gcode_lines.append(f"G4 P{ms}")
+                dwell_accum = 0.0
+            elif dwell_accum > 0.0:
                 dwell_accum = 0.0
 
         for i in range(1, len(t_new)):
@@ -365,10 +412,23 @@ def generate_gcode_string(
 
             max_diff = max(abs(new_data[col][i] - last_vals[col]) for col in new_data)
 
-            is_stationary = all(new_data[col][i] == new_data[col][i-1] for col in new_data)
+            dt_step = t_new[i] - t_new[i-1]
+            step_max = max(abs(new_data[col][i] - new_data[col][i-1]) for col in new_data)
+            step_speed = (step_max / dt_step) if dt_step > 0 else 0.0
+            is_stationary = (step_speed < 0.1) or all(new_data[col][i] == new_data[col][i-1] for col in new_data)
 
             if is_stationary:
-                dwell_accum += (t_new[i] - t_new[i-1])
+                if dwell_accum == 0.0 and max_diff > 0.001:
+                    dt_elapsed = max(0.001, t_new[i] - t_new[last_pos_written_idx])
+                    dist_sq = sum((new_data[col][i] - last_vals[col])**2 for col in new_data)
+                    dist = np.sqrt(dist_sq)
+                    speed = max(0.1, (dist / dt_elapsed) * 60.0)
+                    axis_parts = [f"{col}{new_data[col][i]:.6f}" for col in sorted(new_data.keys())]
+                    gcode_lines.append(f"G1 F{speed:.6f} {' '.join(axis_parts)}")
+                    for col in new_data:
+                        last_vals[col] = new_data[col][i]
+                    last_pos_written_idx = i
+                dwell_accum += dt_step
             elif max_diff < 0.01:
                 # Decimated step
                 pass

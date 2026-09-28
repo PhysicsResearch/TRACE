@@ -421,7 +421,8 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
     if dataframe.shape[0] > 1:
         dt = dataframe['time'].iat[1] - dataframe['time'].iat[0]
         if dt > 0:
-            step = max(1, int(round(0.1 / dt)))
+            target_dt = max(0.1, dataframe['time'].max() / 5000.0)
+            step = max(1, int(round(target_dt / dt)))
             
     # Always include indices that are multiples of step, plus any rows containing active commands
     display_indices = list(range(0, dataframe.shape[0], step))
@@ -641,16 +642,14 @@ def create_curve(self):
 
         if func_type == "sin":
             val_start = amplitude * np.sin(phase_rad) + amp_offset
-        elif func_type == "cos":
+        elif func_type in ["cos", "cos^1"]:
             val_start = amplitude * np.cos(phase_rad) + amp_offset
-        elif func_type == "cos^1":
-            val_start = amplitude * (np.cos(phase_rad) ** 1) + amp_offset
         elif func_type == "cos^2":
-            val_start = amplitude * (np.cos(phase_rad) ** 2) + amp_offset
+            val_start = amplitude * (np.cos(phase_rad / 2.0) ** 2) + amp_offset
         elif func_type == "cos^4":
-            val_start = amplitude * (np.cos(phase_rad) ** 4) + amp_offset
+            val_start = amplitude * (np.cos(phase_rad / 2.0) ** 4) + amp_offset
         elif func_type == "cos^6":
-            val_start = amplitude * (np.cos(phase_rad) ** 6) + amp_offset
+            val_start = amplitude * (np.cos(phase_rad / 2.0) ** 6) + amp_offset
         elif func_type == "constant":
             val_start = amplitude + amp_offset
         elif func_type == "linear":
@@ -744,16 +743,14 @@ def create_curve(self):
                 t_rel = t_val - t_start
                 if func_type == "sin":
                     val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
-                elif func_type == "cos":
+                elif func_type in ["cos", "cos^1"]:
                     val = amplitude * np.cos(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
-                elif func_type == "cos^1":
-                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 1) + amp_offset
                 elif func_type == "cos^2":
-                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 2) + amp_offset
+                    val = amplitude * (np.cos(np.pi * t_rel / period + phase_rad / 2.0) ** 2) + amp_offset
                 elif func_type == "cos^4":
-                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 4) + amp_offset
+                    val = amplitude * (np.cos(np.pi * t_rel / period + phase_rad / 2.0) ** 4) + amp_offset
                 elif func_type == "cos^6":
-                    val = amplitude * (np.cos(2.0 * np.pi * t_rel / period + phase_rad) ** 6) + amp_offset
+                    val = amplitude * (np.cos(np.pi * t_rel / period + phase_rad / 2.0) ** 6) + amp_offset
                 elif func_type == "constant":
                     val = amplitude + amp_offset
                 elif func_type == "linear":
@@ -1593,14 +1590,22 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
                 cancelled = True
                 break
 
-        line = line.strip()
-        if not line or line.startswith(';'):
+        line_clean = line.split(';', 1)[0].strip()
+        if not line_clean:
             continue
         
-        if line.startswith('G1'):
+        first_word = line_clean.split()[0].upper()
+        is_movement = False
+        if first_word.startswith(('G0', 'G1', 'G00', 'G01')):
+            rem = first_word[2:] if first_word.startswith(('G0', 'G1')) else first_word[3:]
+            if not rem or not rem[0].isdigit():
+                is_movement = True
+
+        if is_movement:
             row_data = {}
-            matches = pattern.findall(line)
+            matches = pattern.findall(line_clean)
             for axis, val in matches:
+                axis = axis.upper() if not axis.startswith("'") else axis
                 if axis == 'F':
                     current_feedrate = float(val)
                 elif axis != 'G':
@@ -1638,8 +1643,8 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
                 row_data['Command'] = ""
             
             data_rows.append(row_data)
-        elif line.startswith('G4'):
-            p_match = re.search(r'[pP](\d+)', line)
+        elif line_clean.upper().startswith('G4'):
+            p_match = re.search(r'[pP](\d+)', line_clean)
             if p_match:
                 ms = float(p_match.group(1))
                 dwell_sec = ms / 1000.0
@@ -1650,15 +1655,15 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
                     dwell_row['timestamp'] = current_time * 1000.0
                     dwell_row['Command'] = ""
                     data_rows.append(dwell_row)
-        elif line.startswith('M'):
-            current_commands.append(line)
+        elif line_clean.upper().startswith('M'):
+            current_commands.append(line_clean)
 
     if cancelled:
         QMessageBox.information(self, "Import Cancelled", "G-code import was cancelled by the user.")
         return
 
     if not data_rows:
-        QMessageBox.warning(self, "Import Warning", "No G1 movement commands found in the G-code content.")
+        QMessageBox.warning(self, "Import Warning", "No G0/G1 movement commands found in the G-code content.")
         return
 
     df = pd.DataFrame(data_rows)
@@ -1681,12 +1686,12 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         resampled_data['Command'] = [""] * len(t_grid)
 
         if 'Command' in df.columns:
-            for idx, row in df.iterrows():
-                cmd = str(row['Command']).strip()
-                if cmd:
-                    t_val = row['time']
-                    grid_idx = np.argmin(np.abs(t_grid - t_val))
-                    resampled_data['Command'][grid_idx] = cmd
+            cmd_mask = df['Command'].astype(str).str.strip().ne('')
+            if cmd_mask.any():
+                for t_val, cmd in zip(df.loc[cmd_mask, 'time'], df.loc[cmd_mask, 'Command']):
+                    grid_idx = int(round(t_val / 0.01))
+                    if 0 <= grid_idx < len(t_grid):
+                        resampled_data['Command'][grid_idx] = str(cmd).strip()
 
         df = pd.DataFrame(resampled_data)
 
@@ -1770,19 +1775,27 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
     progress.close()
 
 
-def import_gcode_action(self):
+def import_gcode_action(self, file_path=None):
     """
     Imports a GCODE file, parses its axes coordinates and commands,
     automatically detects device type, and populates the planning workspace.
+    If file_path is None, prompts user with a file dialog.
     """
-    from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog
+    from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog, QWidget
     from PySide6.QtCore import Qt, QCoreApplication
     import pandas as pd
     import numpy as np
     import re
+    import os
 
-    file_path, _ = QFileDialog.getOpenFileName(self, "Open G-code File", "", "G-code Files (*.gcode *.g);;All Files (*)")
-    if not file_path:
+    if file_path is None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self if isinstance(self, QWidget) else None,
+            "Open G-code File",
+            "",
+            "G-code Files (*.gcode *.g *.nc);;All Files (*)"
+        )
+    if not file_path or not os.path.isfile(file_path):
         return
 
     try:
@@ -1842,22 +1855,30 @@ def import_gcode_action(self):
         with open(file_path, 'r') as f:
             for line_idx, line in enumerate(f):
                 # Update progress bar and process events to keep Cancel button responsive
-                if line_idx % 500 == 0:
+                if line_idx % 2000 == 0:
                     progress.setValue(line_idx)
                     QCoreApplication.processEvents()
                     if progress.wasCanceled():
                         cancelled = True
                         break
 
-                line = line.strip()
-                if not line or line.startswith(';'):
+                line_clean = line.split(';', 1)[0].strip()
+                if not line_clean:
                     continue
-                
-                if line.startswith('G1'):
+
+                first_word = line_clean.split()[0].upper()
+                is_movement = False
+                if first_word.startswith(('G0', 'G1', 'G00', 'G01')):
+                    rem = first_word[2:] if first_word.startswith(('G0', 'G1')) else first_word[3:]
+                    if not rem or not rem[0].isdigit():
+                        is_movement = True
+
+                if is_movement:
                     # Parse axes
                     row_data = {}
-                    matches = pattern.findall(line)
+                    matches = pattern.findall(line_clean)
                     for axis, val in matches:
+                        axis = axis.upper() if not axis.startswith("'") else axis
                         if axis == 'F':
                             current_feedrate = float(val)
                         elif axis != 'G':  # Ignore G command type
@@ -1897,8 +1918,8 @@ def import_gcode_action(self):
                         row_data['Command'] = ""
                     
                     data_rows.append(row_data)
-                elif line.startswith('G4'):
-                    p_match = re.search(r'[pP](\d+)', line)
+                elif line_clean.upper().startswith('G4'):
+                    p_match = re.search(r'[pP](\d+)', line_clean)
                     if p_match:
                         ms = float(p_match.group(1))
                         dwell_sec = ms / 1000.0
@@ -1909,16 +1930,16 @@ def import_gcode_action(self):
                             dwell_row['timestamp'] = current_time * 1000.0
                             dwell_row['Command'] = ""
                             data_rows.append(dwell_row)
-                elif line.startswith('M'):
-                    # Store command to attach to the next G1 row
-                    current_commands.append(line)
+                elif line_clean.upper().startswith('M'):
+                    # Store command to attach to the next movement row
+                    current_commands.append(line_clean)
 
         if cancelled:
             QMessageBox.information(self, "Import Cancelled", "G-code import was cancelled by the user.")
             return
 
         if not data_rows:
-            QMessageBox.warning(self, "Import Warning", "No G1 movement commands found in the selected G-code file.")
+            QMessageBox.warning(self, "Import Warning", "No G0/G1 movement commands found in the selected G-code file.")
             return
             
         # Reconstruct DataFrame
@@ -1944,12 +1965,12 @@ def import_gcode_action(self):
             resampled_data['Command'] = [""] * len(t_grid)
 
             if 'Command' in df.columns:
-                for idx, row in df.iterrows():
-                    cmd = str(row['Command']).strip()
-                    if cmd:
-                        t_val = row['time']
-                        grid_idx = np.argmin(np.abs(t_grid - t_val))
-                        resampled_data['Command'][grid_idx] = cmd
+                cmd_mask = df['Command'].astype(str).str.strip().ne('')
+                if cmd_mask.any():
+                    for t_val, cmd in zip(df.loc[cmd_mask, 'time'], df.loc[cmd_mask, 'Command']):
+                        grid_idx = int(round(t_val / 0.01))
+                        if 0 <= grid_idx < len(t_grid):
+                            resampled_data['Command'][grid_idx] = str(cmd).strip()
 
             df = pd.DataFrame(resampled_data)
                 

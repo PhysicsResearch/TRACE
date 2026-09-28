@@ -217,7 +217,7 @@ def build_planning_tab(self):
     from fcn_plan.fcn_create import open_copy_axis_dialog
     self.btn_copy_axis_to.clicked.connect(lambda: open_copy_axis_dialog(self))
 
-    self.btn_import_motion_tools = QPushButton("Import Motion File (VXP / CSV)...", gb_axis_tools)
+    self.btn_import_motion_tools = QPushButton("Import File (G-code / Motion)...", gb_axis_tools)
     self.btn_import_motion_tools.setMinimumHeight(45)
     self.btn_import_motion_tools.setStyleSheet("""
         QPushButton {
@@ -459,7 +459,7 @@ def build_planning_tab(self):
 
     self.combo_func_type = QComboBox(self.groupBox_BrCv_createCurve)
     self.combo_func_type.setMinimumHeight(40)
-    self.combo_func_type.addItems(["sin", "cos", "cos^1", "cos^2", "cos^4", "cos^6", "constant", "linear"])
+    self.combo_func_type.addItems(["sin", "cos", "cos^2", "cos^4", "cos^6", "constant", "linear"])
     add_field("Function Type:", self.combo_func_type, 0, 1)
 
     # 2. Amplitude, Amp. offset, Period (Row 1)
@@ -762,6 +762,7 @@ def build_planning_tab(self):
 
     self.button_import_curve = QPushButton("Import File", self.groupBox_BrCv_createCurve)
     self.button_import_curve.setMinimumHeight(45)
+    self.button_import_curve.setToolTip("Import G-code (.gcode, .nc) or Motion / Respiratory files (.vxp, .csv, .txt)")
     self.button_import_curve.setStyleSheet("""
         QPushButton {
             background-color: #5e35b1;
@@ -774,21 +775,8 @@ def build_planning_tab(self):
             background-color: #4527a0;
         }
     """)
-
-    self.button_import_gcode = QPushButton("Import G-code", self.groupBox_BrCv_createCurve)
-    self.button_import_gcode.setMinimumHeight(45)
-    self.button_import_gcode.setStyleSheet("""
-        QPushButton {
-            background-color: #0d47a1;
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
-            border-radius: 6px;
-        }
-        QPushButton:hover {
-            background-color: #0a3780;
-        }
-    """)
+    # Alias for backward compatibility
+    self.button_import_gcode = self.button_import_curve
 
     self.button_clear_all = QPushButton("Clear All", self.groupBox_BrCv_createCurve)
     self.button_clear_all.setMinimumHeight(45)
@@ -807,7 +795,6 @@ def build_planning_tab(self):
 
     create_buttons_layout.addWidget(self.button_create_curve)
     create_buttons_layout.addWidget(self.button_import_curve)
-    create_buttons_layout.addWidget(self.button_import_gcode)
     create_buttons_layout.addWidget(self.button_clear_all)
     gb_layout.addLayout(create_buttons_layout)
 

@@ -578,16 +578,54 @@ class ImportMotionDialog(QDialog):
         )
 
 
-def open_import_motion_dialog(self, file_path=None):
+def detect_file_format(file_path):
     """
-    Action invoked to import a VXP or CSV file directly into the Planning workspace.
-    If file_path is None, opens a file picker dialog.
+    Detects whether a file is a G-code file or a Motion/Respiratory file (VXP/CSV).
+    Returns 'gcode' or 'motion'.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in ['.gcode', '.g', '.nc']:
+        return 'gcode'
+    if ext == '.vxp':
+        return 'motion'
+
+    # Sample beginning of file to detect format
+    try:
+        with open(file_path, 'r', errors='ignore') as f:
+            sample_lines = [f.readline() for _ in range(60)]
+    except Exception:
+        return 'motion'
+
+    content = "".join(sample_lines)
+    if "[Data]" in content or "[Patient_Data]" in content or "Samples_per_second" in content:
+        return 'motion'
+
+    gcode_count = 0
+    for line in sample_lines:
+        clean = line.split(';', 1)[0].strip().upper()
+        if not clean:
+            continue
+        first_word = clean.split()[0]
+        if first_word.startswith(('G0', 'G1', 'G2', 'G3', 'G4', 'G28', 'G90', 'G91', 'G92', 'M')):
+            gcode_count += 1
+
+    if gcode_count >= 2:
+        return 'gcode'
+    return 'motion'
+
+
+def unified_import_action(self, file_path=None):
+    """
+    Unified import entry point. Prompts the user with a file dialog supporting
+    both G-code files (*.gcode, *.nc, *.g) and Motion files (*.vxp, *.csv, *.txt).
+    Automatically identifies the file format and applies the appropriate workflow.
     Guarded against duplicate re-entrant calls.
     """
     if getattr(self, '_import_dialog_open', False):
         return
     self._import_dialog_open = True
     try:
+        selected_filter = ""
         if file_path is None:
             options = QFileDialog.Options()
             # Default to Downloads folder if available
@@ -595,11 +633,17 @@ def open_import_motion_dialog(self, file_path=None):
             if not os.path.exists(start_dir):
                 start_dir = ""
 
-            file_path, _ = QFileDialog.getOpenFileName(
+            filters = (
+                "All Supported Files (*.gcode *.g *.nc *.vxp *.csv *.txt);;"
+                "G-code Files (*.gcode *.g *.nc);;"
+                "Motion / Respiratory Files (*.vxp *.csv *.txt);;"
+                "All Files (*)"
+            )
+            file_path, selected_filter = QFileDialog.getOpenFileName(
                 self if isinstance(self, QWidget) else None,
-                "Open Motion File (VXP / CSV)",
+                "Select File to Import (G-code or Motion Data)",
                 start_dir,
-                "Motion Files (*.vxp *.csv *.txt);;VXP Files (*.vxp);;CSV Files (*.csv);;All Files (*)",
+                filters,
                 options=options
             )
 
@@ -610,15 +654,36 @@ def open_import_motion_dialog(self, file_path=None):
         if hasattr(self, 'tabModules') and self.tabModules.currentIndex() != 3:
             self.tabModules.setCurrentIndex(3)
 
-        dialog = ImportMotionDialog(self, file_path)
-        dialog.exec()
+        # Determine format based on user filter selection or content detection
+        if "G-code Files" in selected_filter:
+            fmt = 'gcode'
+        elif "Motion / Respiratory Files" in selected_filter:
+            fmt = 'motion'
+        else:
+            fmt = detect_file_format(file_path)
+
+        if fmt == 'gcode':
+            from fcn_plan.fcn_create import import_gcode_action
+            # Temporarily release guard so import_gcode_action can execute cleanly
+            self._import_dialog_open = False
+            import_gcode_action(self, file_path=file_path)
+        else:
+            dialog = ImportMotionDialog(self, file_path)
+            dialog.exec()
     finally:
         self._import_dialog_open = False
 
 
+def open_import_motion_dialog(self, file_path=None):
+    """
+    Backward-compatible action invoked to import motion files or unified files.
+    """
+    unified_import_action(self, file_path=file_path)
+
+
 def openCSVFile_BrCv(self):
     """Backward-compatible function connected to import button."""
-    open_import_motion_dialog(self)
+    unified_import_action(self)
 
 
 def preprocess_vxp(dataframe):

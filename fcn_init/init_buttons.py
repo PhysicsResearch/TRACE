@@ -173,9 +173,9 @@ def initialize_software_buttons(self):
     if hasattr(self, 'button_create_curve'):
         safe_connect(self.button_create_curve, lambda: createCurve(self))
 
-    if hasattr(self, 'button_import_gcode'):
-        from fcn_plan.fcn_create import import_gcode_action
-        safe_connect(self.button_import_gcode, lambda: import_gcode_action(self))
+    if hasattr(self, 'button_import_gcode') and self.button_import_gcode != getattr(self, 'button_import_curve', None):
+        from fcn_plan.fcn_import import unified_import_action
+        safe_connect(self.button_import_gcode, lambda: unified_import_action(self))
 
     if hasattr(self, 'button_wait_radiation'):
         from fcn_plan.fcn_create import add_wait_radiation_action
@@ -198,16 +198,16 @@ def initialize_software_buttons(self):
         safe_connect(self.button_clear_all, lambda: clear_all_action(self))
 
     if hasattr(self, 'button_import_curve'):
-        from fcn_plan.fcn_import import open_import_motion_dialog
-        safe_connect(self.button_import_curve, lambda: open_import_motion_dialog(self))
+        from fcn_plan.fcn_import import unified_import_action
+        safe_connect(self.button_import_curve, lambda: unified_import_action(self))
 
     if hasattr(self, 'btn_import_motion_tools'):
-        from fcn_plan.fcn_import import open_import_motion_dialog
-        safe_connect(self.btn_import_motion_tools, lambda: open_import_motion_dialog(self))
+        from fcn_plan.fcn_import import unified_import_action
+        safe_connect(self.btn_import_motion_tools, lambda: unified_import_action(self))
 
     if hasattr(self, 'import_button') and self.import_button != getattr(self, 'button_import_curve', None):
-        from fcn_plan.fcn_import import open_import_motion_dialog
-        safe_connect(self.import_button, lambda: open_import_motion_dialog(self))
+        from fcn_plan.fcn_import import unified_import_action
+        safe_connect(self.import_button, lambda: unified_import_action(self))
 
     if hasattr(self, 'button_scale_ampl'):
         safe_connect(self.button_scale_ampl, lambda: scaleAmpl(self))
