@@ -577,6 +577,76 @@ def on_table_item_changed(self, item):
         self.dfEdit_other = self.dfEdit
 
 
+def update_undo_button_state(self):
+    """Updates the Planning Curve tab Undo button enabled status based on whether an undo state is available."""
+    btn = getattr(self, 'button_undo_curve', None)
+    if btn is not None:
+        has_undo = bool(getattr(self, '_curve_undo_stack', []))
+        btn.setEnabled(has_undo)
+        btn.setText("Undo")
+        if has_undo:
+            btn.setToolTip("Revert last curve action")
+        else:
+            btn.setToolTip("No action to undo")
+
+
+def push_curve_state(self):
+    """
+    Saves a snapshot of the current curve state for single-step undo.
+    Allows the user to go back one step.
+    """
+    if not hasattr(self, 'dfEdit') or self.dfEdit is None:
+        return
+
+    snapshot = {
+        'df': self.dfEdit.copy(deep=True),
+        'device': self.combo_device.currentText() if hasattr(self, 'combo_device') else None,
+        'origin': getattr(self, 'curve_origin', 'create'),
+    }
+
+    # Store strictly the single previous state
+    self._curve_undo_stack = [snapshot]
+
+    update_undo_button_state(self)
+
+
+def undo_curve_action(self):
+    """
+    Restores the previous curve state from the undo snapshot.
+    """
+    if not hasattr(self, '_curve_undo_stack') or not self._curve_undo_stack:
+        return
+
+    snapshot = self._curve_undo_stack.pop()
+    restored_df = snapshot['df']
+    self.dfEdit = restored_df.copy(deep=True)
+    self.curve_origin = snapshot.get('origin', 'create')
+
+    device = snapshot.get('device') or (self.combo_device.currentText() if hasattr(self, 'combo_device') else "Lung Phantom")
+    if hasattr(self, 'combo_device') and device and self.combo_device.currentText() != device:
+        self.combo_device.blockSignals(True)
+        self.combo_device.setCurrentText(device)
+        self.combo_device.blockSignals(False)
+
+    if device == "Lung Phantom":
+        self.dfEdit_lung_phantom = self.dfEdit
+    elif device == "Motion Platform":
+        self.dfEdit_motion_platform = self.dfEdit
+    else:
+        self.dfEdit_other = self.dfEdit
+
+    # Reload table & plot
+    loadTable_create(self, self.dfEdit)
+    from .fcn_edit import getDataframeFromTable
+    getDataframeFromTable(self)
+    trigger_plot_update(self)
+
+    from PySide6.QtCore import QCoreApplication
+    QCoreApplication.processEvents()
+
+    update_undo_button_state(self)
+
+
 def create_curve(self):
     """
     Applies/Adds a curve segment to the selected axes over the defined [t_start, t_end] interval,
@@ -605,6 +675,8 @@ def create_curve(self):
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.warning(self, "No Axis Selected", "Please select at least one axis checkbox before adding a curve.")
         return
+
+    push_curve_state(self)
 
     func_type = self.combo_func_type.currentText()
     amplitude = self.input_amplitude.value()
@@ -1255,6 +1327,8 @@ def add_wait_radiation_action(self):
         QMessageBox.warning(self, "Wait Radiation Error", "Planning table is empty.")
         return
 
+    push_curve_state(self)
+
     # Find the closest time index in dfEdit
     idx = np.nanargmin(np.abs(times - target_time))
     
@@ -1305,6 +1379,8 @@ def add_wait_user_action(self):
         QMessageBox.warning(self, "Wait User Error", "Planning table is empty.")
         return
 
+    push_curve_state(self)
+
     # Find the closest time index in dfEdit
     idx = np.nanargmin(np.abs(times - target_time))
     
@@ -1342,6 +1418,8 @@ def clear_rad_pauses_action(self):
     if not hasattr(self, 'dfEdit') or self.dfEdit is None:
         return
 
+    push_curve_state(self)
+
     if 'Command' in self.dfEdit.columns:
         # Clear entries containing 'sensor_wait.g'
         for idx in range(len(self.dfEdit)):
@@ -1373,6 +1451,8 @@ def clear_usr_pauses_action(self):
     if not hasattr(self, 'dfEdit') or self.dfEdit is None:
         return
 
+    push_curve_state(self)
+
     if 'Command' in self.dfEdit.columns:
         # Clear entries containing 'M226'
         for idx in range(len(self.dfEdit)):
@@ -1402,6 +1482,8 @@ def clear_all_action(self):
     """
     if not hasattr(self, 'dfEdit') or self.dfEdit is None:
         return
+
+    push_curve_state(self)
 
     exclude_cols = {'timestamp', 'time'}
     for col in self.dfEdit.columns:
@@ -1988,6 +2070,8 @@ def import_gcode_action(self, file_path=None):
         exclude_cols = {'timestamp', 'time', 'Command'}
         axis_cols = sorted(col for col in df.columns if col not in exclude_cols)
         
+        push_curve_state(self)
+
         # Automatically detect device type
         if set(axis_cols) == {'X', 'Y', 'Z'}:
             device = "Lung Phantom"
@@ -2275,6 +2359,8 @@ class CopyAxisDialog(QDialog):
         if not hasattr(parent, 'dfEdit') or parent.dfEdit is None:
             return
 
+        push_curve_state(parent)
+
         # Perform copy
         for target_ax in target_axes:
             parent.dfEdit[target_ax] = parent.dfEdit[source_axis].copy()
@@ -2457,6 +2543,7 @@ class CropTrimDialog(QDialog):
             return
 
         df = parent.dfEdit
+        push_curve_state(parent)
 
         if self.mode == "crop":
             # Crop logic: keep t_start <= time <= t_end
@@ -2831,6 +2918,7 @@ class MathOperationsDialog(QDialog):
             scope_str = f"segment [{t_start} s, {t_end} s]"
 
         # Save copy for undo
+        push_curve_state(parent)
         parent.dfEdit_copy = df.copy()
 
         # Apply math operation
@@ -3189,6 +3277,7 @@ class SmoothAxisDialog(QDialog):
         rotational_axes = {"Roll", "Pitch", "Yaw"}
 
         # Backup for undo
+        push_curve_state(parent)
         parent.dfEdit_copy = df.copy()
 
         import scipy.signal

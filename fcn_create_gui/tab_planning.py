@@ -786,6 +786,29 @@ def build_planning_tab(self):
     # Alias for backward compatibility
     self.button_import_gcode = self.button_import_curve
 
+    self.button_undo_curve = QPushButton("Undo", self.groupBox_BrCv_createCurve)
+    self.button_undo_curve.setMinimumHeight(45)
+    self.button_undo_curve.setEnabled(False)
+    self.button_undo_curve.setToolTip("Revert last curve action")
+    self.button_undo_curve.setStyleSheet("""
+        QPushButton {
+            background-color: #f57c00;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            border-radius: 6px;
+        }
+        QPushButton:hover {
+            background-color: #e65100;
+        }
+        QPushButton:disabled {
+            background-color: #cfd8dc;
+            color: #90a4ae;
+        }
+    """)
+    from fcn_plan.fcn_create import undo_curve_action, update_undo_button_state
+    self.button_undo_curve.clicked.connect(lambda: undo_curve_action(self))
+
     self.button_clear_all = QPushButton("Clear All", self.groupBox_BrCv_createCurve)
     self.button_clear_all.setMinimumHeight(45)
     self.button_clear_all.setStyleSheet("""
@@ -803,8 +826,12 @@ def build_planning_tab(self):
 
     create_buttons_layout.addWidget(self.button_create_curve)
     create_buttons_layout.addWidget(self.button_import_curve)
+    create_buttons_layout.addWidget(self.button_undo_curve)
     create_buttons_layout.addWidget(self.button_clear_all)
     gb_layout.addLayout(create_buttons_layout)
+
+    # Initialize undo button state
+    update_undo_button_state(self)
 
     # 6. Wait Radiation Section
     wait_rad_layout = QHBoxLayout()

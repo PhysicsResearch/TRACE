@@ -201,6 +201,10 @@ def initialize_software_buttons(self):
         from fcn_plan.fcn_import import unified_import_action
         safe_connect(self.button_import_curve, lambda: unified_import_action(self))
 
+    if hasattr(self, 'button_undo_curve'):
+        from fcn_plan.fcn_create import undo_curve_action
+        safe_connect(self.button_undo_curve, lambda: undo_curve_action(self))
+
     if hasattr(self, 'btn_smooth_axes'):
         from fcn_plan.fcn_create import open_smooth_axes_dialog
         safe_connect(self.btn_smooth_axes, lambda: open_smooth_axes_dialog(self))

@@ -506,6 +506,9 @@ class ImportMotionDialog(QDialog):
         # 4. Synchronize with Planning Workspace
         p = self.parent_ui
         if p is not None:
+            from fcn_plan.fcn_create import push_curve_state
+            push_curve_state(p)
+
             if device == "Motion Platform":
                 from fcn_plan.fcn_create import compute_motion_platform_actuators
                 plan_df = compute_motion_platform_actuators(p, plan_df)
