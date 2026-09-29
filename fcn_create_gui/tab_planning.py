@@ -192,10 +192,13 @@ def build_planning_tab(self):
     gb_axis_tools_layout.setContentsMargins(15, 15, 15, 15)
     gb_axis_tools_layout.setSpacing(10)
 
-    lbl_tools_desc = QLabel("Copy motion curve data from one source axis to multiple destination axes simultaneously.", gb_axis_tools)
+    lbl_tools_desc = QLabel("Copy motion curve data between axes or apply digital smoothing filters to eliminate signal jitter.", gb_axis_tools)
     lbl_tools_desc.setWordWrap(True)
     lbl_tools_desc.setStyleSheet("font-size: 13px; color: #555555;")
     gb_axis_tools_layout.addWidget(lbl_tools_desc)
+
+    axis_btn_lay = QHBoxLayout()
+    axis_btn_lay.setSpacing(10)
 
     self.btn_copy_axis_to = QPushButton("Copy Axis To...", gb_axis_tools)
     self.btn_copy_axis_to.setMinimumHeight(45)
@@ -212,16 +215,16 @@ def build_planning_tab(self):
             background-color: #1565c0;
         }
     """)
-    gb_axis_tools_layout.addWidget(self.btn_copy_axis_to)
+    axis_btn_lay.addWidget(self.btn_copy_axis_to)
 
     from fcn_plan.fcn_create import open_copy_axis_dialog
     self.btn_copy_axis_to.clicked.connect(lambda: open_copy_axis_dialog(self))
 
-    self.btn_import_motion_tools = QPushButton("Import File (G-code / Motion)...", gb_axis_tools)
-    self.btn_import_motion_tools.setMinimumHeight(45)
-    self.btn_import_motion_tools.setStyleSheet("""
+    self.btn_smooth_axes = QPushButton("Smooth Axes...", gb_axis_tools)
+    self.btn_smooth_axes.setMinimumHeight(45)
+    self.btn_smooth_axes.setStyleSheet("""
         QPushButton {
-            background-color: #5e35b1;
+            background-color: #00897b;
             color: white;
             font-weight: bold;
             font-size: 15px;
@@ -229,10 +232,15 @@ def build_planning_tab(self):
             padding: 0px 15px;
         }
         QPushButton:hover {
-            background-color: #4527a0;
+            background-color: #00695c;
         }
     """)
-    gb_axis_tools_layout.addWidget(self.btn_import_motion_tools)
+    axis_btn_lay.addWidget(self.btn_smooth_axes)
+
+    from fcn_plan.fcn_create import open_smooth_axes_dialog
+    self.btn_smooth_axes.clicked.connect(lambda: open_smooth_axes_dialog(self))
+
+    gb_axis_tools_layout.addLayout(axis_btn_lay)
 
     gb_time_tools = QGroupBox("Time Interval Operations", tools_scroll_content)
     gb_time_tools_layout = QVBoxLayout(gb_time_tools)

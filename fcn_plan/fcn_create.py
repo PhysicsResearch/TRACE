@@ -4,7 +4,8 @@ import pandas as pd
 from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget, QDialog, QListWidget,
-    QScrollArea, QGroupBox, QLabel, QPushButton, QCheckBox, QRadioButton, QDoubleSpinBox, QMessageBox
+    QScrollArea, QGroupBox, QLabel, QPushButton, QCheckBox, QRadioButton, QDoubleSpinBox, QMessageBox,
+    QSpinBox, QSlider, QComboBox
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -2878,3 +2879,402 @@ class MathOperationsDialog(QDialog):
 def open_math_operations_dialog(self):
     dlg = MathOperationsDialog(self)
     dlg.exec_()
+
+
+class SmoothAxisDialog(QDialog):
+    """
+    Dialog allowing the user to select target axes and a smoothing level/method
+    to smooth digital motion curves and remove high-frequency noise.
+    """
+    def __init__(self, parent_ui):
+        parent_widget = parent_ui if isinstance(parent_ui, QWidget) else None
+        super().__init__(parent_widget)
+        self.parent_ui = parent_ui
+
+        self.setWindowTitle("Smooth Curve Axes")
+        self.setMinimumSize(540, 560)
+        self.resize(580, 600)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                background-color: #ffffff;
+                border: 1px solid #cfd8dc;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #263238;
+            }
+            QLabel {
+                font-size: 13px;
+                color: #37474f;
+            }
+            QSpinBox, QDoubleSpinBox, QComboBox {
+                background-color: #ffffff;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+                border: 2px solid #00897b;
+            }
+            QCheckBox {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        # Overview Description
+        desc_lbl = QLabel(
+            "Apply digital smoothing filters to eliminate signal jitter and noise on selected axes.<br>"
+            "Adjust the <b>Smooth Level</b> to control filter strength, and select which axes to filter.",
+            self
+        )
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet("color: #37474f; font-size: 13px; line-height: 1.4;")
+        layout.addWidget(desc_lbl)
+
+        # 1. Target Axes Selection GroupBox
+        gb_axes = QGroupBox("1. Target Axes Selection", self)
+        gb_axes_lay = QVBoxLayout(gb_axes)
+        gb_axes_lay.setContentsMargins(15, 15, 15, 15)
+        gb_axes_lay.setSpacing(8)
+
+        lbl_ax_info = QLabel("Select axes to apply smoothing to:", gb_axes)
+        lbl_ax_info.setStyleSheet("font-weight: bold;")
+        gb_axes_lay.addWidget(lbl_ax_info)
+
+        # Convenience buttons: Select All / Clear All
+        axes_btn_lay = QHBoxLayout()
+        axes_btn_lay.setSpacing(10)
+        self.btn_select_all = QPushButton("Select All", gb_axes)
+        self.btn_select_all.setStyleSheet("font-size: 12px; font-weight: bold; padding: 4px 10px;")
+        self.btn_select_all.clicked.connect(self.select_all_axes)
+
+        self.btn_clear_all = QPushButton("Clear All", gb_axes)
+        self.btn_clear_all.setStyleSheet("font-size: 12px; font-weight: bold; padding: 4px 10px;")
+        self.btn_clear_all.clicked.connect(self.clear_all_axes)
+
+        axes_btn_lay.addWidget(self.btn_select_all)
+        axes_btn_lay.addWidget(self.btn_clear_all)
+        axes_btn_lay.addStretch()
+        gb_axes_lay.addLayout(axes_btn_lay)
+
+        # Build list of available axes from current planning dataframe
+        exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
+        df = getattr(parent_ui, 'dfEdit', None)
+        device = parent_ui.combo_device.currentText() if hasattr(parent_ui, 'combo_device') else "Lung Phantom"
+
+        if df is not None:
+            available_axes = [col for col in df.columns if col not in exclude_cols]
+        elif device == "Motion Platform":
+            available_axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"]
+        else:
+            available_axes = ["X", "Y", "Z"]
+
+        self.axis_checkboxes = {}
+        cb_grid = QGridLayout()
+        cb_grid.setSpacing(10)
+
+        for i, ax_name in enumerate(available_axes):
+            cb = QCheckBox(ax_name, gb_axes)
+            cb.setStyleSheet("font-weight: bold; font-size: 14px;")
+            is_active = True
+            if df is not None and ax_name in df.columns:
+                try:
+                    s = df[ax_name].to_numpy(dtype=float)
+                    is_active = bool(np.ptp(s) > 1e-4 or np.any(np.abs(s) > 1e-4))
+                except Exception:
+                    is_active = True
+            cb.setChecked(is_active)
+            cb_grid.addWidget(cb, i // 4, i % 4)
+            self.axis_checkboxes[ax_name] = cb
+
+        gb_axes_lay.addLayout(cb_grid)
+        layout.addWidget(gb_axes)
+
+        # 2. Smoothing Level & Parameters GroupBox
+        gb_smooth = QGroupBox("2. Smoothing Level & Parameters", self)
+        gb_smooth_lay = QGridLayout(gb_smooth)
+        gb_smooth_lay.setContentsMargins(15, 15, 15, 15)
+        gb_smooth_lay.setSpacing(10)
+
+        # Method Selector
+        lbl_method = QLabel("Smoothing Method:", gb_smooth)
+        lbl_method.setStyleSheet("font-weight: bold;")
+        self.combo_method = QComboBox(gb_smooth)
+        self.combo_method.setMinimumHeight(38)
+        self.combo_method.addItems([
+            "Savitzky-Golay (Preserves Peak Amplitude)",
+            "Moving Average (Uniform Filter)",
+            "Gaussian Filter (Smooth Bell-Curve)",
+            "Median Filter (Spike & Glitch Removal)"
+        ])
+        gb_smooth_lay.addWidget(lbl_method, 0, 0)
+        gb_smooth_lay.addWidget(self.combo_method, 0, 1)
+
+        # Smooth Level: SpinBox + Slider
+        lbl_level = QLabel("Smooth Level:", gb_smooth)
+        lbl_level.setStyleSheet("font-weight: bold;")
+        gb_smooth_lay.addWidget(lbl_level, 1, 0)
+
+        level_container = QWidget(gb_smooth)
+        level_lay = QHBoxLayout(level_container)
+        level_lay.setContentsMargins(0, 0, 0, 0)
+        level_lay.setSpacing(10)
+
+        self.slider_level = QSlider(Qt.Horizontal, level_container)
+        self.slider_level.setRange(1, 50)
+        self.slider_level.setValue(5)
+        self.slider_level.setMinimumHeight(30)
+
+        self.spin_level = QSpinBox(level_container)
+        self.spin_level.setRange(1, 50)
+        self.spin_level.setValue(5)
+        self.spin_level.setMinimumHeight(38)
+        self.spin_level.setMinimumWidth(80)
+
+        self.slider_level.valueChanged.connect(self.spin_level.setValue)
+        self.spin_level.valueChanged.connect(self.slider_level.setValue)
+        self.spin_level.valueChanged.connect(self.update_info_label)
+        self.combo_method.currentIndexChanged.connect(self.update_info_label)
+
+        level_lay.addWidget(self.slider_level, 1)
+        level_lay.addWidget(self.spin_level)
+        gb_smooth_lay.addWidget(level_container, 1, 1)
+
+        # Dynamic info label
+        self.lbl_window_info = QLabel("", gb_smooth)
+        self.lbl_window_info.setStyleSheet("color: #00796b; font-weight: bold; font-size: 13px;")
+        gb_smooth_lay.addWidget(self.lbl_window_info, 2, 0, 1, 2)
+
+        # Boundary Option
+        self.cb_clip_zero = QCheckBox("Ensure non-negative coordinates (clip ≥ 0 mm for linear axes)", gb_smooth)
+        self.cb_clip_zero.setChecked(True)
+        self.cb_clip_zero.setToolTip("Ensures linear axes do not dip below 0 mm, staying within physical phantom boundaries.")
+        gb_smooth_lay.addWidget(self.cb_clip_zero, 3, 0, 1, 2)
+
+        layout.addWidget(gb_smooth)
+        layout.addStretch()
+
+        # Status Label
+        self.lbl_status = QLabel("", self)
+        self.lbl_status.setStyleSheet("font-size: 13px; font-weight: bold;")
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.lbl_status)
+
+        # Bottom Button Row
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_undo = QPushButton("Undo Last Smooth", self)
+        self.btn_undo.setMinimumHeight(40)
+        self.btn_undo.setEnabled(False)
+        self.btn_undo.setStyleSheet("""
+            QPushButton {
+                background-color: #ef5350;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
+                border-radius: 4px;
+                padding: 0 14px;
+            }
+            QPushButton:hover {
+                background-color: #e53935;
+            }
+            QPushButton:disabled {
+                background-color: #e0e0e0;
+                color: #9e9e9e;
+            }
+        """)
+        self.btn_undo.clicked.connect(self.execute_undo)
+        btn_layout.addWidget(self.btn_undo)
+
+        btn_layout.addStretch()
+
+        self.btn_close = QPushButton("Close", self)
+        self.btn_close.setMinimumHeight(40)
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #cfd8dc;
+                color: #263238;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #b0bec5;
+            }
+        """)
+        self.btn_close.clicked.connect(self.accept)
+        btn_layout.addWidget(self.btn_close)
+
+        self.btn_apply = QPushButton("Apply Smoothing", self)
+        self.btn_apply.setMinimumHeight(40)
+        self.btn_apply.setStyleSheet("""
+            QPushButton {
+                background-color: #00897b;
+                color: white;
+                font-weight: bold;
+                font-size: 15px;
+                border-radius: 4px;
+                padding: 0 22px;
+            }
+            QPushButton:hover {
+                background-color: #00695c;
+            }
+        """)
+        self.btn_apply.clicked.connect(self.execute_smoothing)
+        btn_layout.addWidget(self.btn_apply)
+
+        layout.addLayout(btn_layout)
+
+        self.update_info_label()
+
+    def update_info_label(self):
+        level = self.spin_level.value()
+        w = 2 * level + 1
+        parent = self.parent_ui
+        df = getattr(parent, 'dfEdit', None)
+
+        time_info = ""
+        if df is not None and 'time' in df.columns and len(df['time']) > 1:
+            try:
+                dt = float(df['time'].iloc[1] - df['time'].iloc[0])
+                if dt > 0:
+                    time_span = w * dt
+                    time_info = f" (~{time_span:.2f} s span @ {1.0/dt:.1f} Hz)"
+            except Exception:
+                pass
+
+        method_text = self.combo_method.currentText().split('(')[0].strip()
+        self.lbl_window_info.setText(f"Filter window: {w} points{time_info} via {method_text}")
+
+    def execute_smoothing(self):
+        parent = self.parent_ui
+        if parent is None or not hasattr(parent, 'dfEdit') or parent.dfEdit is None:
+            QMessageBox.warning(self, "No Motion Curve", "No active curve in Planning workspace to smooth.")
+            return
+
+        df = parent.dfEdit
+        if len(df) < 3:
+            QMessageBox.warning(self, "Curve Too Short", "Curve requires at least 3 points to apply smoothing.")
+            return
+
+        target_axes = [ax for ax, cb in self.axis_checkboxes.items() if cb.isChecked() and ax in df.columns]
+        if not target_axes:
+            QMessageBox.warning(self, "Selection Warning", "Please select at least one axis checkbox to smooth.")
+            return
+
+        level = self.spin_level.value()
+        method = self.combo_method.currentText()
+        clip_zero = self.cb_clip_zero.isChecked()
+        rotational_axes = {"Roll", "Pitch", "Yaw"}
+
+        # Backup for undo
+        parent.dfEdit_copy = df.copy()
+
+        import scipy.signal
+        import scipy.ndimage
+
+        n = len(df)
+        w = 2 * int(level) + 1
+        w = max(3, min(w, n))
+        if w % 2 == 0:
+            w -= 1
+        if w < 3:
+            w = 3
+
+        for ax in target_axes:
+            signal = df[ax].to_numpy(dtype=float)
+            is_rot = ax in rotational_axes
+
+            if "Savitzky-Golay" in method:
+                poly = min(3, w - 1)
+                if poly < 1:
+                    poly = 1
+                smoothed = scipy.signal.savgol_filter(signal, window_length=w, polyorder=poly, mode='interp')
+            elif "Gaussian" in method:
+                sigma = max(0.5, float(level) / 2.0)
+                smoothed = scipy.ndimage.gaussian_filter1d(signal, sigma=sigma, mode='nearest')
+            elif "Median" in method:
+                smoothed = scipy.ndimage.median_filter(signal, size=w, mode='nearest')
+            else:  # Moving Average
+                smoothed = scipy.ndimage.uniform_filter1d(signal, size=w, mode='nearest')
+
+            if clip_zero and not is_rot:
+                smoothed = np.clip(smoothed, a_min=0.0, a_max=None)
+
+            df[ax] = smoothed
+
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        if device == "Lung Phantom":
+            parent.dfEdit_lung_phantom = parent.dfEdit
+        elif device == "Motion Platform":
+            parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            parent.dfEdit_motion_platform = parent.dfEdit
+        else:
+            parent.dfEdit_other = parent.dfEdit
+
+        loadTable_create(parent, parent.dfEdit)
+        trigger_plot_update(parent)
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+        self.btn_undo.setEnabled(True)
+        self.lbl_status.setText(f"✓ Smoothed {', '.join(target_axes)} (Level {level}, Window {w} pts)")
+        self.lbl_status.setStyleSheet("color: #00796b; font-weight: bold; font-size: 13px;")
+
+    def execute_undo(self):
+        parent = self.parent_ui
+        if parent is None or not hasattr(parent, 'dfEdit_copy') or parent.dfEdit_copy is None:
+            return
+
+        parent.dfEdit = parent.dfEdit_copy.copy()
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        if device == "Lung Phantom":
+            parent.dfEdit_lung_phantom = parent.dfEdit
+        elif device == "Motion Platform":
+            parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            parent.dfEdit_motion_platform = parent.dfEdit
+        else:
+            parent.dfEdit_other = parent.dfEdit
+
+        loadTable_create(parent, parent.dfEdit)
+        trigger_plot_update(parent)
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+        self.btn_undo.setEnabled(False)
+        self.lbl_status.setText("✓ Smoothing undone. Curve restored.")
+        self.lbl_status.setStyleSheet("color: #c62828; font-weight: bold; font-size: 13px;")
+
+    def select_all_axes(self):
+        for cb in self.axis_checkboxes.values():
+            cb.setChecked(True)
+
+    def clear_all_axes(self):
+        for cb in self.axis_checkboxes.values():
+            cb.setChecked(False)
+
+
+def open_smooth_axes_dialog(self):
+    dlg = SmoothAxisDialog(self)
+    dlg.exec_()

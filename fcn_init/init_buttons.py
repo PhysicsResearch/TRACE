@@ -201,9 +201,9 @@ def initialize_software_buttons(self):
         from fcn_plan.fcn_import import unified_import_action
         safe_connect(self.button_import_curve, lambda: unified_import_action(self))
 
-    if hasattr(self, 'btn_import_motion_tools'):
-        from fcn_plan.fcn_import import unified_import_action
-        safe_connect(self.btn_import_motion_tools, lambda: unified_import_action(self))
+    if hasattr(self, 'btn_smooth_axes'):
+        from fcn_plan.fcn_create import open_smooth_axes_dialog
+        safe_connect(self.btn_smooth_axes, lambda: open_smooth_axes_dialog(self))
 
     if hasattr(self, 'import_button') and self.import_button != getattr(self, 'button_import_curve', None):
         from fcn_plan.fcn_import import unified_import_action
