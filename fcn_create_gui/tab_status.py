@@ -16,6 +16,133 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from fcn_create_gui.touch_keyboard import register_touch_line_edit
 
 
+def save_status_advanced_mode(self, enabled):
+    """Persists the status_advanced_mode setting to configuration.json."""
+    self.status_advanced_mode = bool(enabled)
+    try:
+        from fcn_init.app_config import get_config_path
+        import json
+        cfg_path = get_config_path('configuration.json', for_writing=False)
+        data = {}
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r') as f:
+                data = json.load(f)
+        data['status_advanced_mode'] = bool(enabled)
+        write_path = get_config_path('configuration.json', for_writing=True)
+        with open(write_path, 'w') as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error persisting status_advanced_mode: {e}")
+
+
+def update_status_axes_layout(self, is_advanced):
+    """
+    Arranges axes checkboxes on the right side of the status graph.
+    In Basic mode:
+      - Only Show reference, Show X, Show Y, Show Z, Show AP, Show LAT, Show SI, Show Pitch, Show Roll are shown.
+      - A, B, C, D, 'e, 'f, 'a, 'c, Yaw are hidden.
+    In Advanced mode:
+      - All axes are visible.
+    """
+    if not hasattr(self, 'grid_checks_layout') or self.grid_checks_layout is None:
+        return
+
+    # Clear all items from the grid without destroying widgets
+    while self.grid_checks_layout.count():
+        item = self.grid_checks_layout.takeAt(0)
+        w = item.widget()
+        if w:
+            self.grid_checks_layout.removeWidget(w)
+
+    # Always row 0: Show reference spanning 2 columns
+    if hasattr(self, 'check_show_reference') and self.check_show_reference is not None:
+        self.check_show_reference.setVisible(True)
+        self.grid_checks_layout.addWidget(self.check_show_reference, 0, 0, 1, 2)
+
+    if not is_advanced:
+        # Basic Mode: only show reference, Show X, Show Y, Show Z, Show AP, Show LAT, Show SI, Show Pitch, Show Roll
+        basic_names = [
+            'status_check_X', 'status_check_Y',
+            'status_check_Z', 'status_check_AP',
+            'status_check_LAT', 'status_check_SI',
+            'status_check_Pitch', 'status_check_Roll'
+        ]
+        for idx, attr in enumerate(basic_names):
+            cb = getattr(self, attr, None)
+            if cb is not None:
+                cb.setVisible(True)
+                row = (idx // 2) + 1
+                col = idx % 2
+                self.grid_checks_layout.addWidget(cb, row, col)
+
+        # Hide all advanced axes
+        advanced_names = [
+            'status_check_A', 'status_check_B',
+            'status_check_C', 'status_check_D',
+            'status_check_e', 'status_check_f',
+            'status_check_a', 'status_check_c',
+            'status_check_Yaw'
+        ]
+        for attr in advanced_names:
+            cb = getattr(self, attr, None)
+            if cb is not None:
+                cb.setVisible(False)
+    else:
+        # Advanced Mode: all 17 axes visible in 2 columns
+        all_names = [
+            'status_check_X', 'status_check_Y',
+            'status_check_Z', 'status_check_A',
+            'status_check_B', 'status_check_C',
+            'status_check_D', 'status_check_e',
+            'status_check_f', 'status_check_a',
+            'status_check_c', 'status_check_Roll',
+            'status_check_Pitch', 'status_check_Yaw',
+            'status_check_LAT', 'status_check_AP',
+            'status_check_SI'
+        ]
+        for idx, attr in enumerate(all_names):
+            cb = getattr(self, attr, None)
+            if cb is not None:
+                cb.setVisible(True)
+                row = (idx // 2) + 1
+                col = idx % 2
+                self.grid_checks_layout.addWidget(cb, row, col)
+
+
+def apply_status_advanced_mode(self, is_advanced):
+    """
+    Toggles visibility of Status tab elements based on Basic vs Advanced mode:
+    - In Basic mode:
+      * Speeds row (Req, Top, Probe) and Position row (all 14 axes) are hidden.
+      * Log output folder row and all elements (except Clear Plot Data) are hidden.
+      * Axes visualization checkboxes only show: Show reference, Show X, Show Y, Show Z, Show AP, Show LAT, Show SI, Show Pitch, Show Roll.
+        (A, B, C, D, 'e, 'a, 'c, 'f, Yaw are hidden).
+    - In Advanced mode:
+      * All above elements are visible.
+    """
+    # 0. Header speed controls and pause/release checkboxes
+    if hasattr(self, 'speed_controls_container') and self.speed_controls_container is not None:
+        self.speed_controls_container.setVisible(is_advanced)
+
+    # 1. Speeds and Positions rows
+    if hasattr(self, 'metrics_container') and self.metrics_container is not None:
+        self.metrics_container.setVisible(is_advanced)
+
+    # 2. Log Output Folder row elements (excluding Clear Plot Data)
+    if hasattr(self, 'log_folder_container') and self.log_folder_container is not None:
+        self.log_folder_container.setVisible(is_advanced)
+
+    # 3. Checkboxes layout and visibility
+    update_status_axes_layout(self, is_advanced)
+
+    # 4. Trigger plot update so hidden axes are not rendered
+    try:
+        from fcn_monitor.fcn_duet import render_status_plot
+        render_status_plot(self)
+    except Exception:
+        pass
+
+
 def build_status_tab(self):
     """Populate self.tab_status with Status tab widgets, Dashboard, Real-Time Plot, and Data Logger."""
     layout_main = QVBoxLayout(self.tab_status)
@@ -163,7 +290,12 @@ def build_status_tab(self):
     top_right_box = QHBoxLayout()
     top_right_box.setContentsMargins(0, 0, 0, 0)
     
-    sf_container = QWidget(self.card_status)
+    self.speed_controls_container = QWidget(self.card_status)
+    spd_layout = QHBoxLayout(self.speed_controls_container)
+    spd_layout.setContentsMargins(0, 0, 0, 0)
+    spd_layout.setSpacing(12)
+
+    sf_container = QWidget(self.speed_controls_container)
     sf_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
     sf_hlayout = QHBoxLayout(sf_container)
     sf_hlayout.setContentsMargins(0, 0, 0, 0)
@@ -173,14 +305,13 @@ def build_status_tab(self):
     sf_hlayout.addWidget(self.minSf)
     sf_hlayout.addWidget(self.plusSf)
 
-    top_right_box.addWidget(sf_container)
-    top_right_box.addSpacing(15)
+    spd_layout.addWidget(sf_container)
 
     # Add Auto-sync Speed (placed just before Pre-setup, disabled by default)
-    self.check_auto_sync = QCheckBox("Auto-sync Speed", self.card_status)
+    self.check_auto_sync = QCheckBox("Auto-sync Speed", self.speed_controls_container)
     self.check_auto_sync.setChecked(False)
     self.check_auto_sync.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #1565c0; }")
-    top_right_box.addWidget(self.check_auto_sync)
+    spd_layout.addWidget(self.check_auto_sync)
 
     def on_auto_sync_toggled(enabled):
         # Disable manual speed controls when auto-sync is enabled
@@ -192,29 +323,41 @@ def build_status_tab(self):
 
     self.check_auto_sync.toggled.connect(on_auto_sync_toggled)
 
-    top_right_box.addSpacing(12)
-
-
-
     # Add Auto release and Auto pause checkboxes
-    self.check_auto_release = QCheckBox("Auto release", self.card_status)
+    self.check_auto_release = QCheckBox("Auto release", self.speed_controls_container)
     self.check_auto_release.setChecked(False)
     self.check_auto_release.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
-    top_right_box.addWidget(self.check_auto_release)
+    spd_layout.addWidget(self.check_auto_release)
 
-    top_right_box.addSpacing(12)
-    self.check_auto_pause = QCheckBox("Auto pause", self.card_status)
+    self.check_auto_pause = QCheckBox("Auto pause", self.speed_controls_container)
     self.check_auto_pause.setChecked(False)
     self.check_auto_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
-    top_right_box.addWidget(self.check_auto_pause)
+    spd_layout.addWidget(self.check_auto_pause)
 
-    top_right_box.addSpacing(12)
-    self.check_include_pause = QCheckBox("Include pause", self.card_status)
+    self.check_include_pause = QCheckBox("Include pause", self.speed_controls_container)
     self.check_include_pause.setChecked(True)
     self.check_include_pause.setStyleSheet("QCheckBox { font-weight: bold; font-size: 14px; color: #37474f; }")
-    top_right_box.addWidget(self.check_include_pause)
+    spd_layout.addWidget(self.check_include_pause)
 
+    top_right_box.addWidget(self.speed_controls_container)
     top_right_box.addStretch()
+
+    # Advanced Mode Checkbox placed directly on the left of Emergency STOP
+    self.check_advanced_mode = QCheckBox("Advanced mode", self.card_status)
+    self.check_advanced_mode.setStyleSheet("""
+        QCheckBox {
+            font-weight: bold;
+            font-size: 14px;
+            color: #37474f;
+            margin-right: 6px;
+        }
+        QCheckBox::indicator {
+            width: 18px;
+            height: 18px;
+        }
+    """)
+    top_right_box.addWidget(self.check_advanced_mode)
+    top_right_box.addSpacing(12)
     top_right_box.addWidget(self.emergencyButton_2)
 
     hdr_layout.addLayout(top_left_box, stretch=1)
@@ -294,18 +437,20 @@ def build_status_tab(self):
 
     card_layout.addLayout(prog_duet_row)
 
-    # Section: Tool Position & Speeds & Other Axes
-    metrics_grid = QGridLayout()
+    # Section: Tool Position & Speeds & Other Axes (Wrapped in metrics_container for Basic/Advanced toggle)
+    self.metrics_container = QWidget(self.card_status)
+    metrics_grid = QGridLayout(self.metrics_container)
+    metrics_grid.setContentsMargins(0, 0, 0, 0)
     metrics_grid.setSpacing(10)
 
     # Speed Row on top (Row 0)
-    label_speeds = QLabel("Speeds (mm/s):", self.card_status)
+    label_speeds = QLabel("Speeds (mm/s):", self.metrics_container)
     label_speeds.setStyleSheet("font-weight: bold; font-size: 15px; color: #455a64;")
     metrics_grid.addWidget(label_speeds, 0, 0)
     
-    self.statusReqSpeed = QLabel("Req: 0.0", self.card_status)
-    self.statusTopSpeed = QLabel("Top: 0.0", self.card_status)
-    self.statusProbe = QLabel("Probe: 0", self.card_status)
+    self.statusReqSpeed = QLabel("Req: 0.0", self.metrics_container)
+    self.statusTopSpeed = QLabel("Top: 0.0", self.metrics_container)
+    self.statusProbe = QLabel("Probe: 0", self.metrics_container)
     for lbl in (self.statusReqSpeed, self.statusTopSpeed, self.statusProbe):
         lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #2e7d32;")
     metrics_grid.addWidget(self.statusReqSpeed, 0, 1)
@@ -313,19 +458,19 @@ def build_status_tab(self):
     metrics_grid.addWidget(self.statusProbe, 0, 3)
 
     # Position Row in just one row (Row 1), containing all 14 axes
-    self.statusPosX = QLabel("X 0.00", self.card_status)
-    self.statusPosY = QLabel("Y 0.00", self.card_status)
-    self.statusPosZ = QLabel("Z 0.00", self.card_status)
+    self.statusPosX = QLabel("X 0.00", self.metrics_container)
+    self.statusPosY = QLabel("Y 0.00", self.metrics_container)
+    self.statusPosZ = QLabel("Z 0.00", self.metrics_container)
     for lbl in (self.statusPosX, self.statusPosY, self.statusPosZ):
         lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #0d47a1;")
     metrics_grid.addWidget(self.statusPosX, 1, 0)
     metrics_grid.addWidget(self.statusPosY, 1, 1)
     metrics_grid.addWidget(self.statusPosZ, 1, 2)
 
-    self.statusPosA = QLabel("A 0.00", self.card_status)
-    self.statusPosB = QLabel("B 0.00", self.card_status)
-    self.statusPosC = QLabel("C 0.00", self.card_status)
-    self.statusPosD = QLabel("D 0.00", self.card_status)
+    self.statusPosA = QLabel("A 0.00", self.metrics_container)
+    self.statusPosB = QLabel("B 0.00", self.metrics_container)
+    self.statusPosC = QLabel("C 0.00", self.metrics_container)
+    self.statusPosD = QLabel("D 0.00", self.metrics_container)
     for lbl in (self.statusPosA, self.statusPosB, self.statusPosC, self.statusPosD):
         lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #8e24aa;")
     metrics_grid.addWidget(self.statusPosA, 1, 3)
@@ -333,10 +478,10 @@ def build_status_tab(self):
     metrics_grid.addWidget(self.statusPosC, 1, 5)
     metrics_grid.addWidget(self.statusPosD, 1, 6)
 
-    self.statusPos_e = QLabel("'e 0.00", self.card_status)
-    self.statusPos_f = QLabel("'f 0.00", self.card_status)
-    self.statusPos_a = QLabel("'a 0.00", self.card_status)
-    self.statusPos_c = QLabel("'c 0.00", self.card_status)
+    self.statusPos_e = QLabel("'e 0.00", self.metrics_container)
+    self.statusPos_f = QLabel("'f 0.00", self.metrics_container)
+    self.statusPos_a = QLabel("'a 0.00", self.metrics_container)
+    self.statusPos_c = QLabel("'c 0.00", self.metrics_container)
     for lbl in (self.statusPos_e, self.statusPos_f, self.statusPos_a, self.statusPos_c):
         lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #795548;")
     metrics_grid.addWidget(self.statusPos_e, 1, 7)
@@ -344,16 +489,16 @@ def build_status_tab(self):
     metrics_grid.addWidget(self.statusPos_a, 1, 9)
     metrics_grid.addWidget(self.statusPos_c, 1, 10)
 
-    self.statusPosRoll = QLabel("Roll 0.00", self.card_status)
-    self.statusPosPitch = QLabel("Pitch 0.00", self.card_status)
-    self.statusPosYaw = QLabel("Yaw 0.00", self.card_status)
+    self.statusPosRoll = QLabel("Roll 0.00", self.metrics_container)
+    self.statusPosPitch = QLabel("Pitch 0.00", self.metrics_container)
+    self.statusPosYaw = QLabel("Yaw 0.00", self.metrics_container)
     for lbl in (self.statusPosRoll, self.statusPosPitch, self.statusPosYaw):
         lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: #3f51b5;")
     metrics_grid.addWidget(self.statusPosRoll, 1, 11)
     metrics_grid.addWidget(self.statusPosPitch, 1, 12)
     metrics_grid.addWidget(self.statusPosYaw, 1, 13)
 
-    card_layout.addLayout(metrics_grid)
+    card_layout.addWidget(self.metrics_container)
     layout_main.addWidget(self.card_status)
 
     # --- 2. INTERACTIVE REAL-TIME POSITION PLOT GROUP (PROMINENT CENTER GRAPH) ---
@@ -381,13 +526,82 @@ def build_status_tab(self):
     label_folder.setStyleSheet("font-weight: bold; font-size: 14px; color: #455a64;")
 
     self.PhOperFolder = QLineEdit(desktop_default, plot_box)
-    self.PhOperFolder.setStyleSheet("font-size: 14px; padding: 4px;")
+    self.PhOperFolder.setMinimumWidth(260)
+    self.PhOperFolder.setMaximumWidth(450)
+    self.PhOperFolder.setFixedHeight(32)
+    self.PhOperFolder.setStyleSheet("""
+        QLineEdit {
+            background-color: #ffffff;
+            font-size: 13px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            padding: 2px 8px;
+            color: #263238;
+        }
+    """)
     register_touch_line_edit(self, self.PhOperFolder, label_name="Log Output Folder", keyboard_mode="full")
 
     self.setPhOperFolder = QPushButton("Set Folder", plot_box)
-    self.setPhOperFolder.setStyleSheet("background-color: blue; color: white; font-weight: bold; font-size: 14px; min-height: 36px;")
+    self.setPhOperFolder.setFixedHeight(32)
+    self.setPhOperFolder.setStyleSheet("""
+        QPushButton {
+            background-color: #1565c0;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 2px 14px;
+            border-radius: 4px;
+            border: none;
+        }
+        QPushButton:hover {
+            background-color: #0d47a1;
+        }
+        QPushButton:pressed {
+            background-color: #0a3875;
+        }
+    """)
 
-    self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.txt)", plot_box)
+    self.button_load_log = QPushButton("Load Log", plot_box)
+    self.button_load_log.setFixedHeight(32)
+    self.button_load_log.setStyleSheet("""
+        QPushButton {
+            background-color: #0288d1;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 2px 14px;
+            border-radius: 4px;
+            border: none;
+        }
+        QPushButton:hover {
+            background-color: #0277bd;
+        }
+        QPushButton:pressed {
+            background-color: #01579b;
+        }
+    """)
+
+    self.button_load_gcode_ref = QPushButton("Load G-code as Ref", plot_box)
+    self.button_load_gcode_ref.setFixedHeight(32)
+    self.button_load_gcode_ref.setStyleSheet("""
+        QPushButton {
+            background-color: #00897b;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 2px 14px;
+            border-radius: 4px;
+            border: none;
+        }
+        QPushButton:hover {
+            background-color: #00796b;
+        }
+        QPushButton:pressed {
+            background-color: #004d40;
+        }
+    """)
+
+    self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.csv)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
     self.check_record_log.toggled.connect(lambda checked: __import__('fcn_monitor.fcn_duet', fromlist=['close_data_log_file']).close_data_log_file(self) if not checked else None)
 
@@ -397,6 +611,7 @@ def build_status_tab(self):
 
     self.input_max_speed_adj = QLineEdit("20", plot_box)
     self.input_max_speed_adj.setFixedWidth(55)
+    self.input_max_speed_adj.setFixedHeight(32)
     self.input_max_speed_adj.setStyleSheet("""
         QLineEdit {
             background-color: #ffffff;
@@ -404,7 +619,7 @@ def build_status_tab(self):
             font-size: 14px;
             border: 1px solid #b0bec5;
             border-radius: 4px;
-            padding: 4px 6px;
+            padding: 2px 6px;
             color: #d81b60;
         }
     """)
@@ -419,6 +634,7 @@ def build_status_tab(self):
 
     self.input_ref_offset = QLineEdit("0", plot_box)
     self.input_ref_offset.setFixedWidth(65)
+    self.input_ref_offset.setFixedHeight(32)
     self.input_ref_offset.setStyleSheet("""
         QLineEdit {
             background-color: #ffffff;
@@ -426,7 +642,7 @@ def build_status_tab(self):
             font-size: 14px;
             border: 1px solid #b0bec5;
             border-radius: 4px;
-            padding: 4px 6px;
+            padding: 2px 6px;
             color: #2e7d32;
         }
     """)
@@ -445,6 +661,7 @@ def build_status_tab(self):
 
     self.input_time_interval = QLineEdit("60", plot_box)
     self.input_time_interval.setFixedWidth(65)
+    self.input_time_interval.setFixedHeight(32)
     self.input_time_interval.setStyleSheet("""
         QLineEdit {
             background-color: #ffffff;
@@ -452,7 +669,7 @@ def build_status_tab(self):
             font-size: 14px;
             border: 1px solid #b0bec5;
             border-radius: 4px;
-            padding: 4px 6px;
+            padding: 2px 6px;
             color: #1565c0;
         }
     """)
@@ -462,19 +679,45 @@ def build_status_tab(self):
     self.input_time_interval.textChanged.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
 
     self.button_clear_plot = QPushButton("Clear Plot Data", plot_box)
-    self.button_clear_plot.setMinimumHeight(36)
-    self.button_clear_plot.setStyleSheet("background-color: #757575; color: white; font-weight: bold; font-size: 14px; padding: 6px 15px; border-radius: 4px;")
+    self.button_clear_plot.setFixedHeight(32)
+    self.button_clear_plot.setStyleSheet("""
+        QPushButton {
+            background-color: #757575;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 2px 14px;
+            border-radius: 4px;
+            border: none;
+        }
+        QPushButton:hover {
+            background-color: #616161;
+        }
+        QPushButton:pressed {
+            background-color: #424242;
+        }
+    """)
 
-    log_layout.addWidget(label_folder)
-    log_layout.addWidget(self.PhOperFolder, stretch=1)
-    log_layout.addWidget(self.setPhOperFolder)
-    log_layout.addWidget(self.check_record_log)
-    log_layout.addWidget(lbl_max_speed_adj)
-    log_layout.addWidget(self.input_max_speed_adj)
-    log_layout.addWidget(lbl_ref_offset)
-    log_layout.addWidget(self.input_ref_offset)
-    log_layout.addWidget(lbl_time_interval)
-    log_layout.addWidget(self.input_time_interval)
+    self.log_folder_container = QWidget(plot_box)
+    log_folder_layout = QHBoxLayout(self.log_folder_container)
+    log_folder_layout.setContentsMargins(0, 0, 0, 0)
+    log_folder_layout.setSpacing(10)
+
+    log_folder_layout.addWidget(label_folder)
+    log_folder_layout.addWidget(self.PhOperFolder, stretch=1)
+    log_folder_layout.addWidget(self.setPhOperFolder)
+    log_folder_layout.addWidget(self.button_load_log)
+    log_folder_layout.addWidget(self.button_load_gcode_ref)
+    log_folder_layout.addWidget(self.check_record_log)
+    log_folder_layout.addWidget(lbl_max_speed_adj)
+    log_folder_layout.addWidget(self.input_max_speed_adj)
+    log_folder_layout.addWidget(lbl_ref_offset)
+    log_folder_layout.addWidget(self.input_ref_offset)
+    log_folder_layout.addWidget(lbl_time_interval)
+    log_folder_layout.addWidget(self.input_time_interval)
+
+    log_layout.addWidget(self.log_folder_container, stretch=1)
+    log_layout.addStretch()
     log_layout.addWidget(self.button_clear_plot)
 
     plot_vlayout.addLayout(log_layout)
@@ -508,10 +751,10 @@ def build_status_tab(self):
     self.status_checks_scroll.setStyleSheet("QScrollArea { background: transparent; }")
 
     self.status_checks_container = QWidget()
-    grid_checks_layout = QGridLayout(self.status_checks_container)
-    grid_checks_layout.setContentsMargins(0, 0, 5, 0)
-    grid_checks_layout.setHorizontalSpacing(10)
-    grid_checks_layout.setVerticalSpacing(4)
+    self.grid_checks_layout = QGridLayout(self.status_checks_container)
+    self.grid_checks_layout.setContentsMargins(0, 0, 5, 0)
+    self.grid_checks_layout.setHorizontalSpacing(10)
+    self.grid_checks_layout.setVerticalSpacing(4)
 
     # Show reference checkbox (row 0, spanning 2 columns)
     self.check_show_reference = QCheckBox("Show reference", self.status_checks_container)
@@ -530,7 +773,6 @@ def build_status_tab(self):
             render_status_plot(self)
 
     self.check_show_reference.toggled.connect(on_show_reference_toggled)
-    grid_checks_layout.addWidget(self.check_show_reference, 0, 0, 1, 2)
 
     checkbox_specs = [
         # (attribute, label, color)
@@ -553,17 +795,13 @@ def build_status_tab(self):
         ('status_check_SI', "Show SI", '#01579b')
     ]
 
-    for idx, (attr, label, color) in enumerate(checkbox_specs):
+    for attr, label, color in checkbox_specs:
         cb = QCheckBox(label, self.status_checks_container)
         if label in ["Show X", "Show Y", "Show Z"]:
             cb.setChecked(True)
         cb.setStyleSheet(f"QCheckBox {{ font-weight: bold; font-size: 13px; color: {color}; }}")
         cb.clicked.connect(lambda: __import__('fcn_monitor.fcn_duet', fromlist=['render_status_plot']).render_status_plot(self))
         setattr(self, attr, cb)
-
-        row = (idx // 2) + 1
-        col = idx % 2
-        grid_checks_layout.addWidget(cb, row, col)
 
     self.status_checks_scroll.setWidget(self.status_checks_container)
     plot_content_layout.addWidget(self.status_checks_scroll)
@@ -592,3 +830,15 @@ def build_status_tab(self):
     self.status_fast_timer.setInterval(15)
     self.status_fast_timer.timeout.connect(lambda: update_status_fast(self))
     self.status_fast_timer.start()
+
+    # Initialize Advanced vs Basic mode from persisted configuration
+    initial_adv = getattr(self, 'status_advanced_mode', False)
+    self.check_advanced_mode.blockSignals(True)
+    self.check_advanced_mode.setChecked(initial_adv)
+    self.check_advanced_mode.blockSignals(False)
+    apply_status_advanced_mode(self, initial_adv)
+
+    self.check_advanced_mode.toggled.connect(lambda checked: (
+        apply_status_advanced_mode(self, checked),
+        save_status_advanced_mode(self, checked)
+    ))

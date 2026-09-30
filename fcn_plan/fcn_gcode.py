@@ -28,7 +28,10 @@ def generate_gcode_string(
     off_ap=0.0,
     off_lat=0.0,
     off_si=0.0,
-    axis_y_lo="'c"
+    axis_y_lo="'c",
+    speed=None,
+    acc=None,
+    jerk=None
 ):
     """
     Independent pure function to generate G-code lines from original time and axes data.
@@ -74,7 +77,18 @@ def generate_gcode_string(
         if np.any(np.abs(X_new) > lim_x) or np.any(np.abs(Y_new) > lim_y) or np.any(np.abs(Z_new) > lim_z):
             exceeds_limits = True
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
+        jerk_val = int(round(float(jerk))) if jerk is not None else 300
+        acc_val = int(round(float(acc))) if acc is not None else 1000
+        speed_val = int(round(float(speed) * 60.0)) if speed is not None else 3000
+
+        gcode_lines = [
+            f"; TIME: {total_time_seconds}",
+            "G90",
+            f"M566 X{jerk_val} Y{jerk_val} Z{jerk_val}",
+            f"M201 X{acc_val} Y{acc_val} Z{acc_val}",
+            f"M203 X{speed_val} Y{speed_val} Z{speed_val}",
+            "; --- Execution time: 0s ---"
+        ]
         last_x, last_y, last_z = X_new[0], Y_new[0], Z_new[0]
         dwell_accum = 0.0
         last_pos_written_idx = 0
@@ -252,8 +266,18 @@ def generate_gcode_string(
 
         LAT_eff = np.clip(off_lat + LAT_new + off_ap * np.sin(roll_rad), 0.0, lim_lat)
         SI_eff = np.clip(off_si + SI_new + off_ap * np.sin(pitch_rad), 0.0, lim_si)
+        jerk_val = int(round(float(jerk))) if jerk is not None else 300
+        acc_val = int(round(float(acc))) if acc is not None else 500
+        speed_val = int(round(float(speed) * 60.0)) if speed is not None else 1200
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
+        gcode_lines = [
+            f"; TIME: {total_time_seconds}",
+            "G90",
+            f"M566 A{jerk_val} B{jerk_val} C{jerk_val} D{jerk_val} 'c{jerk_val} 'a{jerk_val}  'f{jerk_val} 'e{jerk_val}",
+            f"M201 A{acc_val} B{acc_val} C{acc_val} D{acc_val} 'c{acc_val} 'a{acc_val}  'f{acc_val} 'e{acc_val}",
+            f"M203 A{speed_val} B{speed_val} C{speed_val} D{speed_val} 'c{speed_val} 'a{speed_val}  'f{speed_val} 'e{speed_val}",
+            "; --- Execution time: 0s ---"
+        ]
         last_A, last_B, last_C, last_D = A_new[0], B_new[0], C_new[0], D_new[0]
         last_LAT, last_SI = LAT_eff[0], SI_eff[0]
         dwell_accum = 0.0
@@ -377,7 +401,19 @@ def generate_gcode_string(
                 if np.any(np.abs(new_data[col]) > lim):
                     exceeds_limits = True
 
-        gcode_lines = [f"; TIME: {total_time_seconds}", "G90", "; --- Execution time: 0s ---"]
+        jerk_val = int(round(float(jerk))) if jerk is not None else 300
+        acc_val = int(round(float(acc))) if acc is not None else 500
+        speed_val = int(round(float(speed) * 60.0)) if speed is not None else 1200
+        axes = sorted(new_data.keys())
+
+        gcode_lines = [
+            f"; TIME: {total_time_seconds}",
+            "G90",
+            "M566 " + " ".join(f"{col}{jerk_val}" for col in axes),
+            "M201 " + " ".join(f"{col}{acc_val}" for col in axes),
+            "M203 " + " ".join(f"{col}{speed_val}" for col in axes),
+            "; --- Execution time: 0s ---"
+        ]
         last_vals = {col: new_data[col][0] for col in new_data}
         dwell_accum = 0.0
         last_pos_written_idx = 0

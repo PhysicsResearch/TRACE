@@ -16,7 +16,16 @@ def initialize_software_buttons(self):
         self._connected_buttons = set()
 
     def safe_connect(btn, slot):
-        if btn is not None and btn not in self._connected_buttons:
+        if btn is not None:
+            if btn in self._connected_buttons:
+                return
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                try:
+                    btn.clicked.disconnect()
+                except Exception:
+                    pass
             btn.clicked.connect(slot)
             self._connected_buttons.add(btn)
 
@@ -40,7 +49,14 @@ def initialize_software_buttons(self):
 
     if hasattr(self, 'setPhOperFolder'):
         safe_connect(self.setPhOperFolder, lambda: setPhOperFolder(self))
-        self.setPhOperFolder.setStyleSheet("background-color: blue; color: white;")
+
+    if hasattr(self, 'button_load_log'):
+        from fcn_monitor.fcn_duet import load_log_file_into_status
+        safe_connect(self.button_load_log, lambda: load_log_file_into_status(self))
+
+    if hasattr(self, 'button_load_gcode_ref'):
+        from fcn_monitor.fcn_duet import load_gcode_as_reference_into_status
+        safe_connect(self.button_load_gcode_ref, lambda: load_gcode_as_reference_into_status(self))
 
     if hasattr(self, 'button_clear_plot'):
         safe_connect(self.button_clear_plot, lambda: clear_status_plot_data(self))
@@ -205,9 +221,6 @@ def initialize_software_buttons(self):
         from fcn_plan.fcn_create import undo_curve_action
         safe_connect(self.button_undo_curve, lambda: undo_curve_action(self))
 
-    if hasattr(self, 'btn_smooth_axes'):
-        from fcn_plan.fcn_create import open_smooth_axes_dialog
-        safe_connect(self.btn_smooth_axes, lambda: open_smooth_axes_dialog(self))
 
     if hasattr(self, 'import_button') and self.import_button != getattr(self, 'button_import_curve', None):
         from fcn_plan.fcn_import import unified_import_action

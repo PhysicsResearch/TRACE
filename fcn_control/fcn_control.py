@@ -1491,6 +1491,7 @@ def save_configuration(self):
     lat_dim = self.input_plat_lat.text().strip() if hasattr(self, 'input_plat_lat') and self.input_plat_lat.text().strip() else '100.0'
     si_dim = self.input_plat_si.text().strip() if hasattr(self, 'input_plat_si') and self.input_plat_si.text().strip() else '100.0'
     touch_mode = self.check_touchscreen.isChecked() if hasattr(self, 'check_touchscreen') and self.check_touchscreen is not None else False
+    adv_mode = self.check_advanced_mode.isChecked() if hasattr(self, 'check_advanced_mode') and self.check_advanced_mode is not None else getattr(self, 'status_advanced_mode', False)
     ip_history = getattr(self, 'duet_ip_history', [ip])
     
     data = {
@@ -1499,7 +1500,8 @@ def save_configuration(self):
         'move_folder': folder,
         'platform_lat_dim': lat_dim,
         'platform_si_dim': si_dim,
-        'touchscreen_mode': touch_mode
+        'touchscreen_mode': touch_mode,
+        'status_advanced_mode': adv_mode
     }
     try:
         with open(get_config_path('configuration.json', for_writing=True), 'w') as f:
@@ -1655,10 +1657,16 @@ def setPhOperFolder(self):
     """
     Function to set output folder for logs and files.
     """
-    folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-    if folder:
-        if hasattr(self, 'PhOperFolder') and self.PhOperFolder:
-            self.PhOperFolder.setText(folder)
+    if getattr(self, '_set_folder_dialog_open', False) is True:
+        return
+    self._set_folder_dialog_open = True
+    try:
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+        if folder:
+            if hasattr(self, 'PhOperFolder') and self.PhOperFolder:
+                self.PhOperFolder.setText(folder)
+    finally:
+        self._set_folder_dialog_open = False
 
 
 def go_to_desired_positions(self):

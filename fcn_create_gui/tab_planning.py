@@ -117,10 +117,10 @@ def build_planning_tab(self):
     main_splitter.addWidget(self.create_plot_view)
 
     # 2. Bottom panel: horizontal splitter (separates settings and table)
-    bottom_splitter = QSplitter(Qt.Horizontal, self.tab_planning)
-    bottom_splitter.setHandleWidth(8)
-    bottom_splitter.setChildrenCollapsible(False)
-    main_splitter.addWidget(bottom_splitter)
+    self.bottom_splitter = QSplitter(Qt.Horizontal, self.tab_planning)
+    self.bottom_splitter.setHandleWidth(8)
+    self.bottom_splitter.setChildrenCollapsible(False)
+    main_splitter.addWidget(self.bottom_splitter)
 
     # Apply distinct styling for splitter handles
     splitter_style = """
@@ -144,12 +144,12 @@ def build_planning_tab(self):
         }
     """
     main_splitter.setStyleSheet(splitter_style)
-    bottom_splitter.setStyleSheet(splitter_style)
+    self.bottom_splitter.setStyleSheet(splitter_style)
 
     # Options Tab Widget (Bottom Left panel)
     self.create_settings_tab_widget = QTabWidget(self.tab_planning)
     self.create_settings_tab_widget.setStyleSheet("QTabBar::tab { font-weight: bold; font-size: 13px; padding: 6px 12px; }")
-    bottom_splitter.addWidget(self.create_settings_tab_widget)
+    self.bottom_splitter.addWidget(self.create_settings_tab_widget)
 
     # Curve Tab Setup (wrapped in QScrollArea for vertical flexibility)
     curve_tab_widget = QWidget(self.create_settings_tab_widget)
@@ -352,6 +352,71 @@ def build_planning_tab(self):
     self.combo_settings_device = QComboBox(settings_scroll_content)
     self.combo_settings_device.setMinimumHeight(40)
     self.combo_settings_device.addItems(["Lung Phantom", "Motion Platform"])
+    self.combo_settings_device.setStyleSheet("""
+        QComboBox {
+            font-weight: bold;
+            font-size: 14px;
+            padding: 2px 28px 2px 10px;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #212121;
+        }
+        QComboBox:hover {
+            border: 1px solid #1976d2;
+            background-color: #f5f5f5;
+            color: #212121;
+        }
+        QComboBox:focus {
+            border: 2px solid #1976d2;
+            color: #212121;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 26px;
+            border-left: 1px solid #cfd8dc;
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+            background-color: #eceff1;
+        }
+        QComboBox::drop-down:hover {
+            background-color: #cfd8dc;
+        }
+        QComboBox::down-arrow {
+            image: none;
+            border-top: 5px solid #37474f;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            width: 0;
+            height: 0;
+        }
+        QComboBox QAbstractItemView {
+            font-weight: bold;
+            font-size: 14px;
+            background-color: #ffffff;
+            color: #212121;
+            selection-background-color: #1976d2;
+            selection-color: #ffffff;
+            border: 1px solid #b0bec5;
+            border-radius: 4px;
+            outline: none;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 32px;
+            padding-left: 10px;
+            color: #212121;
+            background-color: #ffffff;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: #e3f2fd;
+            color: #1565c0;
+        }
+        QComboBox QAbstractItemView::item:selected {
+            background-color: #1976d2;
+            color: #ffffff;
+        }
+    """)
     settings_tab_layout.addWidget(lbl_set_dev)
     settings_tab_layout.addWidget(self.combo_settings_device)
 
@@ -365,10 +430,10 @@ def build_planning_tab(self):
     lung_layout.setSpacing(10)
     lung_layout.setContentsMargins(0, 5, 0, 5)
 
-    def add_setting_spinbox(layout, label_text, default_val, row, col):
-        lbl = QLabel(label_text, lung_page)
+    def add_setting_spinbox(layout, parent_widget, label_text, default_val, row, col):
+        lbl = QLabel(label_text, parent_widget)
         lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
-        sp = QDoubleSpinBox(lung_page)
+        sp = QDoubleSpinBox(parent_widget)
         sp.setRange(0.1, 1000.0)
         sp.setValue(default_val)
         sp.setDecimals(1)
@@ -381,10 +446,110 @@ def build_planning_tab(self):
         layout.addLayout(sub_v, row, col)
         return sp
 
-    self.settings_max_lim_x = add_setting_spinbox(lung_layout, "Max Lim. X (mm):", 40.0, 0, 0)
-    self.settings_max_lim_y = add_setting_spinbox(lung_layout, "Max Lim. Y (mm):", 40.0, 0, 1)
-    self.settings_max_lim_z = add_setting_spinbox(lung_layout, "Max Lim. Z (mm):", 40.0, 1, 0)
-    self.settings_max_speed = add_setting_spinbox(lung_layout, "Max. Speed (mm/s):", 50.0, 1, 1)
+    def add_setting_combo(layout, parent_widget, label_text, options, default_val, row, col):
+        lbl = QLabel(label_text, parent_widget)
+        lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        combo = QComboBox(parent_widget)
+        combo.addItems([str(opt) for opt in options])
+        combo.setCurrentText(str(default_val))
+        combo.setMinimumHeight(38)
+        combo.setStyleSheet("""
+            QComboBox {
+                font-weight: bold;
+                font-size: 13px;
+                padding: 2px 28px 2px 8px;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                background-color: #ffffff;
+                color: #212121;
+            }
+            QComboBox:hover {
+                border: 1px solid #1976d2;
+                background-color: #f5f5f5;
+                color: #212121;
+            }
+            QComboBox:focus {
+                border: 2px solid #1976d2;
+                color: #212121;
+            }
+            QComboBox:on {
+                border: 1px solid #1976d2;
+                background-color: #ffffff;
+                color: #212121;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border-left: 1px solid #cfd8dc;
+                border-top-right-radius: 4px;
+                border-bottom-right-radius: 4px;
+                background-color: #eceff1;
+            }
+            QComboBox::drop-down:hover {
+                background-color: #cfd8dc;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-top: 5px solid #37474f;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                width: 0;
+                height: 0;
+            }
+            QComboBox QAbstractItemView {
+                font-weight: bold;
+                font-size: 13px;
+                background-color: #ffffff;
+                color: #212121;
+                selection-background-color: #1976d2;
+                selection-color: #ffffff;
+                border: 1px solid #b0bec5;
+                border-radius: 4px;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 28px;
+                padding-left: 8px;
+                color: #212121;
+                background-color: #ffffff;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #e3f2fd;
+                color: #1565c0;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #1976d2;
+                color: #ffffff;
+            }
+        """)
+        combo.value = lambda: float(combo.currentText()) if combo.currentText() else 0.0
+        def _set_combo_val(v):
+            try:
+                s = str(int(round(float(v))))
+            except (ValueError, TypeError):
+                s = str(v)
+            idx = combo.findText(s)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        combo.setValue = _set_combo_val
+
+        sub_v = QVBoxLayout()
+        sub_v.setSpacing(2)
+        sub_v.addWidget(lbl)
+        sub_v.addWidget(combo)
+        layout.addLayout(sub_v, row, col)
+        return combo
+
+    self.settings_max_lim_x = add_setting_spinbox(lung_layout, lung_page, "Max Lim. X (mm):", 40.0, 0, 0)
+    self.settings_max_lim_y = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Y (mm):", 40.0, 0, 1)
+    self.settings_max_lim_z = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Z (mm):", 40.0, 1, 0)
+    self.combo_phantom_max_speed = add_setting_combo(lung_layout, lung_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "50", 1, 1)
+    self.combo_phantom_acc = add_setting_combo(lung_layout, lung_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "1000", 2, 0)
+    self.combo_phantom_jerk = add_setting_combo(lung_layout, lung_page, "Jerk (mm/s³):", ["300", "600", "900", "1200"], "600", 2, 1)
+    self.settings_max_speed = self.combo_phantom_max_speed
+    self.settings_acc_phantom = self.combo_phantom_acc
+    self.settings_jerk_phantom = self.combo_phantom_jerk
     self.settings_stack.addWidget(lung_page)
 
     # Page 1: Motion Platform settings
@@ -393,29 +558,18 @@ def build_planning_tab(self):
     platform_layout.setSpacing(10)
     platform_layout.setContentsMargins(0, 5, 0, 5)
 
-    def add_platform_spinbox(layout, label_text, default_val, row, col):
-        lbl = QLabel(label_text, platform_page)
-        lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
-        sp = QDoubleSpinBox(platform_page)
-        sp.setRange(0.1, 1000.0)
-        sp.setValue(default_val)
-        sp.setDecimals(1)
-        sp.setMinimumHeight(38)
-        
-        sub_v = QVBoxLayout()
-        sub_v.setSpacing(2)
-        sub_v.addWidget(lbl)
-        sub_v.addWidget(sp)
-        layout.addLayout(sub_v, row, col)
-        return sp
-
-    self.settings_max_lim_lat = add_platform_spinbox(platform_layout, "Max Lim. LAT (mm):", 40.0, 0, 0)
-    self.settings_max_lim_si = add_platform_spinbox(platform_layout, "Max Lim. SI (mm):", 40.0, 0, 1)
-    self.settings_max_lim_ap = add_platform_spinbox(platform_layout, "Max Lim. AP (mm):", 40.0, 1, 0)
-    self.settings_max_lim_roll = add_platform_spinbox(platform_layout, "Max Lim. Roll (deg):", 40.0, 1, 1)
-    self.settings_max_lim_pitch = add_platform_spinbox(platform_layout, "Max Lim. Pitch (deg):", 40.0, 2, 0)
-    self.settings_max_lim_yaw = add_platform_spinbox(platform_layout, "Max Lim. Yaw (deg):", 40.0, 2, 1)
-    self.settings_max_speed_plat = add_platform_spinbox(platform_layout, "Max Speed (mm/s):", 20.0, 3, 0)
+    self.settings_max_lim_lat = add_setting_spinbox(platform_layout, platform_page, "Max Lim. LAT (mm):", 40.0, 0, 0)
+    self.settings_max_lim_si = add_setting_spinbox(platform_layout, platform_page, "Max Lim. SI (mm):", 40.0, 0, 1)
+    self.settings_max_lim_ap = add_setting_spinbox(platform_layout, platform_page, "Max Lim. AP (mm):", 40.0, 1, 0)
+    self.settings_max_lim_roll = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Roll (deg):", 40.0, 1, 1)
+    self.settings_max_lim_pitch = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Pitch (deg):", 40.0, 2, 0)
+    self.settings_max_lim_yaw = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Yaw (deg):", 40.0, 2, 1)
+    self.combo_platform_max_speed = add_setting_combo(platform_layout, platform_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "20", 3, 0)
+    self.combo_platform_acc = add_setting_combo(platform_layout, platform_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "1000", 3, 1)
+    self.combo_platform_jerk = add_setting_combo(platform_layout, platform_page, "Jerk (mm/s³):", ["300", "600", "900", "1200"], "600", 4, 0)
+    self.settings_max_speed_plat = self.combo_platform_max_speed
+    self.settings_acc_plat = self.combo_platform_acc
+    self.settings_jerk_plat = self.combo_platform_jerk
     self.settings_stack.addWidget(platform_page)
 
     # Page 2: Other device settings (simple info label)
@@ -770,7 +924,7 @@ def build_planning_tab(self):
 
     self.button_import_curve = QPushButton("Import File", self.groupBox_BrCv_createCurve)
     self.button_import_curve.setMinimumHeight(45)
-    self.button_import_curve.setToolTip("Import G-code (.gcode, .nc) or Motion / Respiratory files (.vxp, .csv, .txt)")
+    self.button_import_curve.setToolTip("Import G-code (.gcode, .nc), TRACE Log files (log_*.txt), or Motion / Respiratory files (.vxp, .csv, .txt)")
     self.button_import_curve.setStyleSheet("""
         QPushButton {
             background-color: #5e35b1;
@@ -940,11 +1094,12 @@ def build_planning_tab(self):
     self.create_table_view = QTableWidget(self.tab_planning)
     from fcn_plan.fcn_create import on_table_item_changed
     self.create_table_view.itemChanged.connect(lambda item: on_table_item_changed(self, item))
-    bottom_splitter.addWidget(self.create_table_view)
+    self.bottom_splitter.addWidget(self.create_table_view)
 
     # Set splitter initial sizes (e.g. 50% top, 50% bottom; 30% settings, 70% table)
     main_splitter.setSizes([400, 400])
-    bottom_splitter.setSizes([280, 620])
+    self.bottom_splitter.setSizes([280, 620])
+    self._last_bottom_splitter_sizes = [280, 620]
 
     # Initial trigger to populate axis and default curve data
     update_axis_checkboxes()
@@ -959,7 +1114,6 @@ def setup_settings_persistence(self):
     from fcn_init.app_config import get_config_path
 
     spinbox_map = {
-        'max_speed': getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None),
         'max_lim_lat': getattr(self, 'settings_max_lim_lat', None),
         'max_lim_si': getattr(self, 'settings_max_lim_si', None),
         'max_lim_ap': getattr(self, 'settings_max_lim_ap', None),
@@ -971,6 +1125,15 @@ def setup_settings_persistence(self):
         'max_lim_z': getattr(self, 'settings_max_lim_z', None),
     }
 
+    combobox_map = {
+        'phantom_max_speed': getattr(self, 'combo_phantom_max_speed', None),
+        'phantom_acc': getattr(self, 'combo_phantom_acc', None),
+        'phantom_jerk': getattr(self, 'combo_phantom_jerk', None),
+        'platform_max_speed': getattr(self, 'combo_platform_max_speed', None),
+        'platform_acc': getattr(self, 'combo_platform_acc', None),
+        'platform_jerk': getattr(self, 'combo_platform_jerk', None),
+    }
+
     # Load existing config data
     config_data = {}
     try:
@@ -980,7 +1143,7 @@ def setup_settings_persistence(self):
     except Exception:
         config_data = {}
 
-    # Set initial values from config if present
+    # Set initial spinbox values from config if present
     for key, sb in spinbox_map.items():
         if sb is not None and key in config_data:
             try:
@@ -990,6 +1153,22 @@ def setup_settings_persistence(self):
                 sb.blockSignals(False)
             except (ValueError, TypeError):
                 pass
+
+    # Set initial combobox values from config if present (with fallback for legacy 'max_speed')
+    for key, cb in combobox_map.items():
+        if cb is not None:
+            if key in config_data:
+                cb.blockSignals(True)
+                cb.setValue(config_data[key])
+                cb.blockSignals(False)
+            elif key == 'phantom_max_speed' and 'max_speed' in config_data:
+                cb.blockSignals(True)
+                cb.setValue(config_data['max_speed'])
+                cb.blockSignals(False)
+            elif key == 'platform_max_speed' and 'max_speed' in config_data:
+                cb.blockSignals(True)
+                cb.setValue(config_data['max_speed'])
+                cb.blockSignals(False)
 
     # Function to save updated settings back to configuration.json
     def save_current_settings():
@@ -1006,13 +1185,30 @@ def setup_settings_persistence(self):
                 if sb is not None:
                     existing_data[key] = sb.value()
 
+            for key, cb in combobox_map.items():
+                if cb is not None:
+                    existing_data[key] = cb.currentText()
+
+            # Maintain legacy 'max_speed' key for backward compatibility
+            plat_spd = getattr(self, 'combo_platform_max_speed', None)
+            if plat_spd is not None:
+                try:
+                    existing_data['max_speed'] = float(plat_spd.currentText())
+                except (ValueError, TypeError):
+                    pass
+
             write_file = get_config_path('configuration.json', for_writing=True)
             with open(write_file, 'w') as f:
                 json.dump(existing_data, f, indent=4)
         except Exception as e:
             print(f"Error saving planning settings to configuration.json: {e}")
 
-    # Connect valueChanged listeners
+    # Connect valueChanged listeners for spinboxes
     for sb in spinbox_map.values():
         if sb is not None:
             sb.valueChanged.connect(lambda v: save_current_settings())
+
+    # Connect currentTextChanged listeners for comboboxes
+    for cb in combobox_map.values():
+        if cb is not None:
+            cb.currentTextChanged.connect(lambda v: save_current_settings())

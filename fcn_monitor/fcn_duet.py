@@ -5,7 +5,7 @@ import math
 import numpy as np
 import requests
 from datetime import datetime
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QFileDialog
 from fcn_init.app_config import get_config_path
 
 
@@ -135,11 +135,16 @@ def render_status_plot(self):
 
     needs_legend_update = False
     live_max_x = t_data[-1] if (t_data is not None and len(t_data) > 0) else 0.0
+    if live_max_x == 0.0 and show_ref and ref_data is not None:
+        ref_t = ref_data.get('t', [])
+        if len(ref_t) > 0:
+            live_max_x = float(ref_t[-1])
     min_y, max_y = 1e9, -1e9
 
     for cb_name, key, label, color in traces:
         cb = getattr(self, cb_name, None)
-        if cb is not None and cb.isChecked():
+        cb_visible = (not cb.isHidden()) if (cb is not None and hasattr(cb, 'isHidden')) else True
+        if cb is not None and cb.isChecked() and cb_visible:
             data_list = plot_data.get(key, []) if (plot_data is not None and isinstance(plot_data, dict)) else []
             if len(data_list) > 0 and len(data_list) == len(t_data):
                 # Calculate Y limits for checked lines
@@ -243,7 +248,7 @@ def render_status_plot(self):
                         linewidth=1.5, alpha=0.85
                     )
                     self._ref_pause_lines.append(vline)
-    # Render transparent red background shading for active radiation intervals (probe != 0)
+    # Render transparent red background shading for active radiation intervals (probe > 0)
     if not hasattr(self, '_probe_span_patches'):
         self._probe_span_patches = []
 
@@ -259,17 +264,27 @@ def render_status_plot(self):
         in_rad = False
         rad_start = 0.0
         for i in range(len(t_data)):
-            val = probe_data[i]
-            if val != 0 and not in_rad:
+            try:
+                val = float(probe_data[i])
+            except (ValueError, TypeError):
+                val = 0.0
+
+            if val > 0 and not in_rad:
                 in_rad = True
                 rad_start = t_data[i]
-            elif val == 0 and in_rad:
+            elif val <= 0 and in_rad:
                 in_rad = False
                 rad_end = t_data[i]
+                if rad_end <= rad_start:
+                    dt = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
+                    rad_end = rad_start + dt
                 span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
                 self._probe_span_patches.append(span)
         if in_rad:
             rad_end = t_data[-1]
+            if rad_end <= rad_start:
+                dt = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
+                rad_end = rad_start + dt
             span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
             self._probe_span_patches.append(span)
 
@@ -311,11 +326,12 @@ def render_status_plot(self):
     visible_handles = []
     visible_labels = []
     for cb_name, key, label, color in traces:
-        if key in self.status_plot_lines:
-            line = self.status_plot_lines[key]
-            if line.get_visible():
-                visible_handles.append(line)
-                visible_labels.append(label)
+        if key in self.status_plot_lines and self.status_plot_lines[key].get_visible():
+            visible_handles.append(self.status_plot_lines[key])
+            visible_labels.append(label)
+        elif show_ref and key in self.status_ref_lines and self.status_ref_lines[key].get_visible():
+            visible_handles.append(self.status_ref_lines[key])
+            visible_labels.append(f"{label} (Ref)")
 
     if visible_handles:
         self.ax_status.legend(visible_handles, visible_labels, loc='upper right', fontsize=10, ncol=2)
@@ -358,6 +374,229 @@ def clear_status_plot_data(self):
         self.ax_status.grid(True, linestyle=":", alpha=0.6)
         if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
             self.statusCanvas.draw_idle()
+
+
+def load_log_file_into_status(self, file_path=None):
+    """
+    Opens and parses a recorded TRACE log file (.csv or .txt), loads the data into
+    status_plot_data, automatically checks the checkboxes for all axes contained
+    in the log file, unchecks axes not in the log file, and renders the plot with
+    red transparent shading for regions where probe > 0.
+    """
+    if getattr(self, '_log_dialog_open', False) is True:
+        return
+    self._log_dialog_open = True
+    try:
+        _load_log_file_into_status_impl(self, file_path)
+    finally:
+        self._log_dialog_open = False
+
+
+def _load_log_file_into_status_impl(self, file_path=None):
+    if file_path is None or not file_path:
+        default_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+        if hasattr(self, 'PhOperFolder') and self.PhOperFolder and self.PhOperFolder.text().strip():
+            candidate = self.PhOperFolder.text().strip()
+            if os.path.isdir(candidate):
+                default_dir = candidate
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Log File",
+            default_dir,
+            "Log Files (*.csv *.txt);;CSV Files (*.csv);;Text Files (*.txt);;All Files (*.*)"
+        )
+        if not file_path:
+            return
+
+    if not os.path.exists(file_path):
+        QMessageBox.warning(self, "File Not Found", f"Selected file does not exist:\n{file_path}")
+        return
+
+    import pandas as pd
+    import numpy as np
+    import math
+    from fcn_plan.fcn_import import match_log_axis_name
+
+    encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+    df = None
+    for enc in encodings:
+        try:
+            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc)
+            break
+        except Exception:
+            continue
+
+    if df is None or df.empty:
+        QMessageBox.warning(self, "Empty File", f"Could not read data from log file:\n{os.path.basename(file_path)}")
+        return
+
+    df = df.dropna(how='all')
+    if len(df) < 1:
+        QMessageBox.warning(self, "Invalid Log", f"The log file contains no data points:\n{os.path.basename(file_path)}")
+        return
+
+    time_col = None
+    probe_col = None
+    matched_axes = {}  # {target_axis: orig_column_name}
+
+    for col in df.columns:
+        c = str(col).strip()
+        cl = c.lower()
+        if 'probe' in cl or 'sensor' in cl:
+            if probe_col is None:
+                probe_col = col
+            continue
+
+        target = match_log_axis_name(col)
+        if target == 'time':
+            if time_col is None:
+                time_col = col
+        elif target is not None:
+            matched_axes[target] = col
+
+    if not matched_axes:
+        QMessageBox.warning(
+            self,
+            "No Motion Axes Found",
+            f"No recognizable motion axes (e.g. Pos_X_mm, Pos_LAT_mm) found in log file:\n{os.path.basename(file_path)}"
+        )
+        return
+
+    # Extract time series
+    if time_col is not None:
+        t_raw = pd.to_numeric(df[time_col], errors='coerce').values
+    else:
+        # Fallback index if no time column found
+        t_raw = np.arange(len(df)) * 0.05
+
+    valid_mask = ~np.isnan(t_raw)
+    if not np.all(valid_mask):
+        df = df.iloc[valid_mask].copy()
+        t_raw = t_raw[valid_mask]
+
+    if len(t_raw) < 1:
+        QMessageBox.warning(self, "Invalid Time", "Log file contains no valid timestamps.")
+        return
+
+    # If timestamps start far from 0 (e.g. epoch timestamps > 3600), align to 0
+    if len(t_raw) > 0 and t_raw[0] > 3600.0:
+        t_vals = list(t_raw - t_raw[0])
+    else:
+        t_vals = list(t_raw)
+    n_pts = len(t_vals)
+
+    # Close active file recording if running
+    if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
+        self.check_record_log.setChecked(False)
+    if getattr(self, 'active_log_file', None) is not None:
+        close_data_log_file(self)
+
+    # Initialize empty status_plot_data
+    all_keys = [
+        'X', 'Y', 'Z', 'A', 'B', 'C', 'D',
+        "'e", "'f", "'a", "'c",
+        'Roll', 'Pitch', 'Yaw',
+        'LAT', 'AP', 'SI'
+    ]
+    new_plot_data = {'t': t_vals}
+    for k in all_keys:
+        if k in matched_axes:
+            vals = pd.to_numeric(df[matched_axes[k]], errors='coerce').fillna(0.0).values
+            new_plot_data[k] = list(vals)
+        else:
+            new_plot_data[k] = []
+
+    # Probe series
+    if probe_col is not None:
+        probe_vals = pd.to_numeric(df[probe_col], errors='coerce').fillna(0.0).values
+        new_plot_data['probe'] = list(probe_vals)
+    else:
+        new_plot_data['probe'] = [0.0] * n_pts
+
+    self.status_plot_data = new_plot_data
+
+    # Automatically set visible the axes included in the log file
+    traces = [
+        ('status_check_X', 'X'),
+        ('status_check_Y', 'Y'),
+        ('status_check_Z', 'Z'),
+        ('status_check_A', 'A'),
+        ('status_check_B', 'B'),
+        ('status_check_C', 'C'),
+        ('status_check_D', 'D'),
+        ('status_check_e', "'e"),
+        ('status_check_f', "'f"),
+        ('status_check_a', "'a"),
+        ('status_check_c', "'c"),
+        ('status_check_Roll', 'Roll'),
+        ('status_check_Pitch', 'Pitch'),
+        ('status_check_Yaw', 'Yaw'),
+        ('status_check_LAT', 'LAT'),
+        ('status_check_AP', 'AP'),
+        ('status_check_SI', 'SI')
+    ]
+
+    for cb_name, key in traces:
+        cb = getattr(self, cb_name, None)
+        if cb is not None:
+            cb.blockSignals(True)
+            cb.setChecked(key in matched_axes)
+            cb.blockSignals(False)
+
+    if hasattr(self, 'check_show_reference') and self.check_show_reference:
+        self.check_show_reference.blockSignals(True)
+        self.check_show_reference.setChecked(False)
+        self.check_show_reference.blockSignals(False)
+
+    # Adjust Time interval control to show full duration
+    max_t = t_vals[-1] if len(t_vals) > 0 else 60.0
+    win_size = max(math.ceil(max_t), 10)
+    if hasattr(self, 'input_time_interval') and self.input_time_interval is not None:
+        self.input_time_interval.blockSignals(True)
+        self.input_time_interval.setText(str(win_size))
+        self.input_time_interval.blockSignals(False)
+
+    # Clear old line handles
+    if hasattr(self, 'status_plot_lines'):
+        for line in self.status_plot_lines.values():
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.status_plot_lines.clear()
+
+    if hasattr(self, 'status_ref_lines'):
+        for line in self.status_ref_lines.values():
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.status_ref_lines.clear()
+
+    render_status_plot(self)
+
+    # Ensure full viewing bounds on axes
+    if hasattr(self, 'ax_status') and self.ax_status is not None:
+        self.ax_status.set_xlim(0.0, max(max_t, 1.0))
+        all_visible_vals = []
+        for k in matched_axes.keys():
+            all_visible_vals.extend(new_plot_data[k])
+        if all_visible_vals:
+            y_min = min(all_visible_vals)
+            y_max = max(all_visible_vals)
+            pad = (y_max - y_min) * 0.1 if y_max != y_min else 1.0
+            self.ax_status.set_ylim(y_min - pad, y_max + pad)
+        if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
+            self.statusCanvas.draw_idle()
+
+    axes_str = ", ".join(sorted(matched_axes.keys()))
+    has_pos_probe = any(p > 0 for p in new_plot_data['probe'])
+    probe_info = "with active probe shading" if has_pos_probe else "no active probe"
+    msg = f"Loaded {os.path.basename(file_path)}: {n_pts} pts, {max_t:.1f}s, axes [{axes_str}], {probe_info}"
+    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+        self.statusDuetMessage.setText(msg)
+    print(msg)
 
 
 def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None):
@@ -507,6 +746,171 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
             ref_dict[f"'{clean_c}"] = df[col].values
 
     return ref_dict
+
+
+def load_gcode_as_reference_into_status(self, file_path=None):
+    """
+    Allows the user to pick a G-code file from the computer and load it as a reference
+    in the status page, enabling 'Show reference' and rendering the trajectory.
+    """
+    if getattr(self, '_gcode_ref_dialog_open', False) is True:
+        return
+    self._gcode_ref_dialog_open = True
+    try:
+        _load_gcode_as_reference_into_status_impl(self, file_path)
+    finally:
+        self._gcode_ref_dialog_open = False
+
+
+def _load_gcode_as_reference_into_status_impl(self, file_path=None):
+    if file_path is None or not file_path:
+        default_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+        if hasattr(self, 'PhOperFolder') and self.PhOperFolder and self.PhOperFolder.text().strip():
+            candidate = self.PhOperFolder.text().strip()
+            if os.path.isdir(candidate):
+                default_dir = candidate
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load G-code as Reference",
+            default_dir,
+            "G-code Files (*.gcode *.g *.nc *.txt);;All Files (*.*)"
+        )
+        if not file_path:
+            return
+
+    if not os.path.exists(file_path):
+        QMessageBox.warning(self, "File Not Found", f"Selected file does not exist:\n{file_path}")
+        return
+
+    fname = os.path.basename(file_path)
+
+    from PySide6.QtWidgets import QProgressDialog, QWidget, QApplication
+    from PySide6.QtCore import Qt, QCoreApplication
+    progress = None
+    if QApplication.instance() is not None:
+        parent_widget = self if isinstance(self, QWidget) else None
+        progress = QProgressDialog(f"Loading reference plot data from '{fname}'...", "Cancel", 0, 100, parent_widget)
+        progress.setWindowTitle("Loading Reference G-code")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumWidth(520)
+        progress.setMinimumHeight(160)
+        progress.setStyleSheet("""
+            QProgressDialog { font-size: 16px; font-weight: bold; }
+            QLabel { font-size: 16px; min-height: 35px; }
+            QProgressBar { text-align: center; font-size: 16px; font-weight: bold; height: 30px; border-radius: 4px; }
+            QPushButton { font-size: 16px; font-weight: bold; min-width: 100px; min-height: 38px; border-radius: 4px; }
+        """)
+        progress.setValue(10)
+        progress.show()
+        QCoreApplication.processEvents()
+
+    try:
+        ref_dict = load_and_parse_gcode_reference(self, file_path, progress_dialog=progress)
+    except Exception as e:
+        if progress:
+            progress.close()
+        QMessageBox.warning(self, "Parse Error", f"Error parsing G-code reference file:\n{e}")
+        return
+    finally:
+        if progress:
+            progress.setValue(100)
+            progress.close()
+
+    if ref_dict is None or 't' not in ref_dict or len(ref_dict['t']) < 2:
+        QMessageBox.warning(self, "Invalid Reference", f"Could not extract motion trajectories from G-code file:\n{fname}")
+        return
+
+    self.status_reference_data = ref_dict
+    self._loaded_ref_filename = fname
+
+    # Enable 'Show reference' checkbox
+    if hasattr(self, 'check_show_reference') and self.check_show_reference is not None:
+        self.check_show_reference.blockSignals(True)
+        self.check_show_reference.setChecked(True)
+        self.check_show_reference.blockSignals(False)
+
+    traces = [
+        ('status_check_X', 'X'),
+        ('status_check_Y', 'Y'),
+        ('status_check_Z', 'Z'),
+        ('status_check_A', 'A'),
+        ('status_check_B', 'B'),
+        ('status_check_C', 'C'),
+        ('status_check_D', 'D'),
+        ('status_check_e', "'e"),
+        ('status_check_f', "'f"),
+        ('status_check_a', "'a"),
+        ('status_check_c', "'c"),
+        ('status_check_Roll', 'Roll'),
+        ('status_check_Pitch', 'Pitch'),
+        ('status_check_Yaw', 'Yaw'),
+        ('status_check_LAT', 'LAT'),
+        ('status_check_AP', 'AP'),
+        ('status_check_SI', 'SI')
+    ]
+
+    # Detect which axes have motion or variation in reference
+    ref_axes_active = []
+    for cb_name, key in traces:
+        if key in ref_dict:
+            try:
+                vals = np.asarray(ref_dict[key], dtype=float)
+                if len(vals) > 0 and (np.ptp(vals) > 1e-4 or np.any(np.abs(vals) > 1e-4)):
+                    ref_axes_active.append(key)
+            except Exception:
+                pass
+
+    if ref_axes_active:
+        for cb_name, key in traces:
+            cb = getattr(self, cb_name, None)
+            if cb is not None:
+                cb.blockSignals(True)
+                cb.setChecked(key in ref_axes_active)
+                cb.blockSignals(False)
+
+    ref_t = ref_dict.get('t', [])
+    max_ref_t = float(ref_t[-1]) if len(ref_t) > 0 else 60.0
+    plot_data = getattr(self, 'status_plot_data', None)
+    t_live = plot_data.get('t', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
+
+    import math
+    win_size = max(math.ceil(max_ref_t), 10)
+    if len(t_live) == 0:
+        if hasattr(self, 'input_time_interval') and self.input_time_interval is not None:
+            self.input_time_interval.blockSignals(True)
+            self.input_time_interval.setText(str(win_size))
+            self.input_time_interval.blockSignals(False)
+
+    # Clear stale reference lines
+    if hasattr(self, 'status_ref_lines'):
+        for line in self.status_ref_lines.values():
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.status_ref_lines.clear()
+
+    render_status_plot(self)
+
+    if len(t_live) == 0 and hasattr(self, 'ax_status') and self.ax_status is not None:
+        self.ax_status.set_xlim(0.0, max(max_ref_t, 1.0))
+        all_ref_vals = []
+        for k in ref_axes_active:
+            all_ref_vals.extend(ref_dict[k])
+        if all_ref_vals:
+            y_min = min(all_ref_vals)
+            y_max = max(all_ref_vals)
+            pad = (y_max - y_min) * 0.1 if y_max != y_min else 1.0
+            self.ax_status.set_ylim(y_min - pad, y_max + pad)
+        if hasattr(self, 'statusCanvas') and self.statusCanvas is not None:
+            self.statusCanvas.draw_idle()
+
+    axes_str = ", ".join(sorted(ref_axes_active)) if ref_axes_active else "active"
+    msg = f"Loaded reference G-code {fname}: {len(ref_t)} pts, {max_ref_t:.1f}s, axes [{axes_str}]"
+    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+        self.statusDuetMessage.setText(msg)
+    print(msg)
 
 
 def auto_load_current_gcode_reference(self, filename=None, force=False):
@@ -667,9 +1071,9 @@ def start_selected_gcode_execution(self):
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
-def log_data_point(self, t, x, y, z, probe=0):
+def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
     """
-    Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.txt
+    Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.csv
     inside the selected output folder (default Desktop).
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
@@ -682,14 +1086,23 @@ def log_data_point(self, t, x, y, z, probe=0):
                 folder = os.path.join(os.path.expanduser("~"), "Desktop")
 
         now_str = datetime.now().strftime("%H_%M_%S")
-        filename = f"log_{now_str}_.txt"
+        filename = f"log_{now_str}_.csv"
         filepath = os.path.join(folder, filename)
+
+        is_platform = False
+        if hasattr(self, 'combo_device') and self.combo_device:
+            is_platform = (self.combo_device.currentText() == "Motion Platform")
 
         try:
             f = open(filepath, "a", encoding="utf-8")
-            f.write("Time_s,Pos_X_mm,Pos_Y_mm,Pos_Z_mm,Probe\n")
+            if is_platform and extra_axes:
+                headers = ["Time_s", "Pos_LAT_mm", "Pos_SI_mm", "Pos_AP_mm", "Pos_Roll_deg", "Pos_Pitch_deg", "Pos_Yaw_deg", "Probe"]
+            else:
+                headers = ["Time_s", "Pos_X_mm", "Pos_Y_mm", "Pos_Z_mm", "Probe"]
+            f.write(",".join(headers) + "\n")
             self.active_log_file = f
             self.active_log_filepath = filepath
+            self.active_log_is_platform = (is_platform and extra_axes is not None)
             print(f"Started recording data log to file: {filepath}")
         except Exception as e:
             print(f"Failed to create data log file {filepath}: {e}")
@@ -697,7 +1110,16 @@ def log_data_point(self, t, x, y, z, probe=0):
 
     try:
         p_val = probe if probe is not None else 0
-        self.active_log_file.write(f"{t:.2f},{x:.3f},{y:.3f},{z:.3f},{p_val}\n")
+        if getattr(self, 'active_log_is_platform', False) and extra_axes:
+            lat = extra_axes.get('LAT', 0.0)
+            si = extra_axes.get('SI', 0.0)
+            ap = extra_axes.get('AP', 0.0)
+            roll = extra_axes.get('Roll', 0.0)
+            pitch = extra_axes.get('Pitch', 0.0)
+            yaw = extra_axes.get('Yaw', 0.0)
+            self.active_log_file.write(f"{t:.4f},{lat:.3f},{si:.3f},{ap:.3f},{roll:.3f},{pitch:.3f},{yaw:.3f},{p_val}\n")
+        else:
+            self.active_log_file.write(f"{t:.4f},{x:.3f},{y:.3f},{z:.3f},{p_val}\n")
         self.active_log_file.flush()
     except Exception as e:
         print(f"Error writing to data log file: {e}")
@@ -1389,7 +1811,11 @@ def update_status_fast(self):
 
             # File logging (only during active motion / plot update)
             if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
-                log_data_point(self, elapsed_t, x_val, y_val, z_val, curr_p)
+                log_data_point(self, elapsed_t, x_val, y_val, z_val, curr_p,
+                               extra_axes={
+                                   'Roll': current_roll, 'Pitch': current_pitch, 'Yaw': current_yaw,
+                                   'LAT': current_lat, 'AP': current_ap, 'SI': current_si
+                               })
 
         # Close active log file if recording was unchecked
         if hasattr(self, 'check_record_log') and self.check_record_log and not self.check_record_log.isChecked():

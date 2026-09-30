@@ -37,6 +37,7 @@ def initialize_software_variables(self):
             if float(self.plat_si_dim) <= 0.0: self.plat_si_dim = '100.0'
         except ValueError: self.plat_si_dim = '100.0'
         self.touchscreen_mode = data.get('touchscreen_mode', False)
+        self.status_advanced_mode = data.get('status_advanced_mode', False)
     except Exception:
         self.duet_ip = '192.168.8.3'
         self.duet_ip_history = ['192.168.8.3', '192.168.8.2', '172.18.38.125']
@@ -44,6 +45,7 @@ def initialize_software_variables(self):
         self.plat_lat_dim = '100.0'
         self.plat_si_dim = '100.0'
         self.touchscreen_mode = False
+        self.status_advanced_mode = False
 
     if hasattr(self, 'DuetIPAddress') and self.DuetIPAddress is not None:
         if hasattr(self.DuetIPAddress, 'clear') and hasattr(self, 'duet_ip_history'):

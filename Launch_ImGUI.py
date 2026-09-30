@@ -262,6 +262,15 @@ class MyApp(QMainWindow):
             from fcn_control.fcn_filesystem import delete_selected_item
             delete_selected_item(self)
 
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, 'check_advanced_mode') and self.check_advanced_mode is not None:
+                from fcn_create_gui.tab_status import save_status_advanced_mode
+                save_status_advanced_mode(self, self.check_advanced_mode.isChecked())
+        except Exception:
+            pass
+        super().closeEvent(event)
+
 
 if __name__ == "__main__":
     import sys, os

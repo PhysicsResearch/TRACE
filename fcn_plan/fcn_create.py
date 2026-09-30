@@ -156,15 +156,64 @@ def compute_motion_platform_actuators(self, df):
     return df
 
 
+def compute_kinematics(dataframe, pos_cols):
+    """
+    Computes velocity (mm/s or deg/s) and acceleration (mm/s² or deg/s²)
+    for each position column using np.gradient on the full-resolution time array.
+    Returns:
+        vel_dict: {col: vel_array}
+        acc_dict: {col: acc_array}
+    """
+    import numpy as np
+    import pandas as pd
+
+    t = dataframe['time'].values if 'time' in dataframe.columns else np.arange(len(dataframe)) * 0.01
+    vel_dict = {}
+    acc_dict = {}
+
+    if len(t) < 2:
+        for col in pos_cols:
+            vel_dict[col] = np.zeros(len(t))
+            acc_dict[col] = np.zeros(len(t))
+        return vel_dict, acc_dict
+
+    t_clean = np.array(t, dtype=float)
+    if np.any(np.diff(t_clean) <= 0):
+        t_clean = np.maximum.accumulate(t_clean)
+        for i in range(1, len(t_clean)):
+            if t_clean[i] <= t_clean[i - 1]:
+                t_clean[i] = t_clean[i - 1] + 1e-4
+
+    for col in pos_cols:
+        vel_col_name = f"Vel. {col}"
+        acc_col_name = f"Acc. {col}"
+        if vel_col_name in dataframe.columns and acc_col_name in dataframe.columns:
+            # Use precalculated kinematics (e.g. from imported log file or smoothing)
+            vel_dict[col] = pd.to_numeric(dataframe[vel_col_name], errors='coerce').fillna(0.0).values
+            acc_dict[col] = pd.to_numeric(dataframe[acc_col_name], errors='coerce').fillna(0.0).values
+        elif col in dataframe.columns:
+            pos = pd.to_numeric(dataframe[col], errors='coerce').fillna(0.0).values
+            v = np.gradient(pos, t_clean)
+            a = np.gradient(v, t_clean)
+            vel_dict[col] = v
+            acc_dict[col] = a
+        else:
+            vel_dict[col] = np.zeros(len(t))
+            acc_dict[col] = np.zeros(len(t))
+
+    return vel_dict, acc_dict
+
+
 def trigger_plot_update(self):
-    device = self.combo_device.currentText()
+    combo = getattr(self, 'combo_device', None)
+    device = combo.currentText() if combo is not None else "Lung Phantom"
     if device == "Lung Phantom":
         all_axes = ["X", "Y", "Z"]
     elif device == "Motion Platform":
         all_axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw", "A", "B", "C", "D", "'a", "'c", "'e", "'f"]
     else:
         exclude_cols = {'timestamp', 'time', 'Command'}
-        all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols]
+        all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
 
     checked_axes = []
     for col in all_axes:
@@ -172,20 +221,24 @@ def trigger_plot_update(self):
         if cb is not None and cb.isChecked():
             checked_axes.append(col)
 
-    # Check if we should plot high resolution or downsampled data
-    df_to_plot = self.dfEdit
+    df_full = self.dfEdit
     if device == "Motion Platform":
-        df_to_plot = compute_motion_platform_actuators(self, df_to_plot)
+        df_full = compute_motion_platform_actuators(self, df_full)
 
-    high_res_cb = getattr(self, 'check_plot_high_res', None)
-    if high_res_cb is not None and not high_res_cb.isChecked():
-        if len(df_to_plot) > 1:
-            dt = df_to_plot['time'].iat[1] - df_to_plot['time'].iat[0]
-            if dt > 0:
-                step = max(1, int(round(0.1 / dt)))
-                df_to_plot = df_to_plot.iloc[::step]
+    # Compute high-resolution kinematics on full data first for exact numerical accuracy
+    vel_full, acc_full = compute_kinematics(df_full, checked_axes)
 
-    update_plot(self, df_to_plot, checked_axes)
+    # Prepare data for plotting
+    df_to_plot = df_full
+    step = 1
+    if len(df_to_plot) > 20000:
+        step = max(1, len(df_to_plot) // 10000)
+        df_to_plot = df_to_plot.iloc[::step]
+
+    vel_plot = {col: vel_full[col][::step] if step > 1 else vel_full[col] for col in checked_axes}
+    acc_plot = {col: acc_full[col][::step] if step > 1 else acc_full[col] for col in checked_axes}
+
+    update_plot(self, df_to_plot, checked_axes, vel_plot=vel_plot, acc_plot=acc_plot)
 
 
 def select_all_axes(self):
@@ -204,10 +257,88 @@ def clear_all_axes(self):
     trigger_plot_update(self)
 
 
+def sync_table_column_visibility(self):
+    """Shows or hides table columns matching the state of Position, Velocity, and Acceleration checkboxes."""
+    table = getattr(self, 'create_table_view', None)
+    if table is None or table.columnCount() == 0:
+        return
+
+    show_pos = getattr(self, 'check_show_pos', None)
+    show_vel = getattr(self, 'check_show_vel', None)
+    show_acc = getattr(self, 'check_show_acc', None)
+
+    is_pos = show_pos.isChecked() if show_pos is not None else True
+    is_vel = show_vel.isChecked() if show_vel is not None else False
+    is_acc = show_acc.isChecked() if show_acc is not None else False
+
+    for col_idx in range(table.columnCount()):
+        header_item = table.horizontalHeaderItem(col_idx)
+        if not header_item:
+            continue
+        hdr = header_item.text()
+        if hdr.startswith('Time') or hdr == 'Command':
+            table.setColumnHidden(col_idx, False)
+        elif hdr.startswith('Vel.'):
+            table.setColumnHidden(col_idx, not is_vel)
+        elif hdr.startswith('Acc.'):
+            table.setColumnHidden(col_idx, not is_acc)
+        else:
+            table.setColumnHidden(col_idx, not is_pos)
+
+
+def on_kinematic_checkbox_changed(self):
+    """Handler for Position, Velocity, Acceleration checkbox state changes."""
+    sync_table_column_visibility(self)
+    trigger_plot_update(self)
+
+
+def toggle_planning_table_visibility(self, visible):
+    """
+    Shows or hides the bottom-right planning table (create_table_view).
+    When hidden (unselected), the bottom-left settings tabs widget extends all the way to the right.
+    """
+    self.planning_show_table = bool(visible)
+    table = getattr(self, 'create_table_view', None)
+    splitter = getattr(self, 'bottom_splitter', None)
+
+    if splitter is None and table is not None and hasattr(table, 'parent'):
+        from PySide6.QtWidgets import QSplitter
+        p = table.parent()
+        if isinstance(p, QSplitter):
+            splitter = p
+            self.bottom_splitter = splitter
+
+    if not visible:
+        if splitter is not None:
+            sizes = splitter.sizes()
+            if len(sizes) == 2 and sizes[1] > 0:
+                self._last_bottom_splitter_sizes = sizes
+            splitter.setSizes([1000, 0])
+        if table is not None:
+            table.setVisible(False)
+    else:
+        if table is not None:
+            table.setVisible(True)
+        if splitter is not None:
+            saved_sizes = getattr(self, '_last_bottom_splitter_sizes', [280, 620])
+            splitter.setSizes(saved_sizes)
+
+
 def rebuild_axis_checkboxes(self, axes):
-    from PySide6.QtWidgets import QCheckBox, QPushButton
+    from PySide6.QtWidgets import QCheckBox, QPushButton, QLabel
     if hasattr(self, 'create_plot_checkboxes_layout') and self.create_plot_checkboxes_layout is not None:
         layout_cb = self.create_plot_checkboxes_layout
+
+        # Preserve previous kinematic checkbox selections
+        prev_pos = getattr(self, 'check_show_pos', None)
+        prev_vel = getattr(self, 'check_show_vel', None)
+        prev_acc = getattr(self, 'check_show_acc', None)
+        prev_table = getattr(self, 'check_show_table', None)
+        pos_val = prev_pos.isChecked() if prev_pos is not None else True
+        vel_val = prev_vel.isChecked() if prev_vel is not None else False
+        acc_val = prev_acc.isChecked() if prev_acc is not None else False
+        table_val = prev_table.isChecked() if prev_table is not None else getattr(self, 'planning_show_table', False)
+
         while layout_cb.count():
             child = layout_cb.takeAt(0)
             if child.widget():
@@ -221,6 +352,33 @@ def rebuild_axis_checkboxes(self, axes):
             cb.stateChanged.connect(lambda state, c=col: trigger_plot_update(self))
             layout_cb.addWidget(cb)
             self.create_axis_checkboxes[col] = cb
+
+        # Visual divider between axes and kinematic types
+        lbl_div = QLabel(" | ", self.create_plot_checkboxes_widget)
+        lbl_div.setStyleSheet("color: #90a4ae; font-size: 16px; font-weight: bold; margin-left: 6px; margin-right: 6px;")
+        layout_cb.addWidget(lbl_div)
+
+        # Kinematic type checkboxes: Position (continuous), Velocity (dashed), Acceleration (point)
+        self.check_show_pos = QCheckBox("Position (—)", self.create_plot_checkboxes_widget)
+        self.check_show_pos.setChecked(pos_val)
+        self.check_show_pos.setStyleSheet("font-weight: bold; font-size: 14px; color: #1565c0; margin-right: 6px;")
+        self.check_show_pos.setToolTip("Show Position as continuous solid line (—)")
+        self.check_show_pos.stateChanged.connect(lambda state: on_kinematic_checkbox_changed(self))
+        layout_cb.addWidget(self.check_show_pos)
+
+        self.check_show_vel = QCheckBox("Velocity (--)", self.create_plot_checkboxes_widget)
+        self.check_show_vel.setChecked(vel_val)
+        self.check_show_vel.setStyleSheet("font-weight: bold; font-size: 14px; color: #0277bd; margin-right: 6px;")
+        self.check_show_vel.setToolTip("Show Velocity as dashed line (--)")
+        self.check_show_vel.stateChanged.connect(lambda state: on_kinematic_checkbox_changed(self))
+        layout_cb.addWidget(self.check_show_vel)
+
+        self.check_show_acc = QCheckBox("Acceleration (···)", self.create_plot_checkboxes_widget)
+        self.check_show_acc.setChecked(acc_val)
+        self.check_show_acc.setStyleSheet("font-weight: bold; font-size: 14px; color: #c2185b; margin-right: 12px;")
+        self.check_show_acc.setToolTip("Show Acceleration as point/dotted line (···)")
+        self.check_show_acc.stateChanged.connect(lambda state: on_kinematic_checkbox_changed(self))
+        layout_cb.addWidget(self.check_show_acc)
         
         layout_cb.addStretch()
 
@@ -265,12 +423,13 @@ def rebuild_axis_checkboxes(self, axes):
         self.btn_clear_all_axes.clicked.connect(lambda: clear_all_axes(self))
         layout_cb.addWidget(self.btn_clear_all_axes)
 
-        # Add Plot High Resolution checkbox on the left of Export GCODE button
-        self.check_plot_high_res = QCheckBox("Plot High Resolution", self.create_plot_checkboxes_widget)
-        self.check_plot_high_res.setChecked(False)  # Unchecked by default for fast plotting
-        self.check_plot_high_res.setStyleSheet("font-weight: bold; font-size: 14px; color: #0d47a1; margin-right: 15px;")
-        self.check_plot_high_res.stateChanged.connect(lambda state: trigger_plot_update(self))
-        layout_cb.addWidget(self.check_plot_high_res)
+        # Add Show Table checkbox on the left of Export GCODE button
+        self.check_show_table = QCheckBox("Show Table", self.create_plot_checkboxes_widget)
+        self.check_show_table.setChecked(table_val)
+        self.check_show_table.setStyleSheet("font-weight: bold; font-size: 14px; color: #0d47a1; margin-right: 15px;")
+        self.check_show_table.toggled.connect(lambda checked: toggle_planning_table_visibility(self, checked))
+        layout_cb.addWidget(self.check_show_table)
+        toggle_planning_table_visibility(self, table_val)
 
         # Add Export GCODE button at the right
         self.btn_export_gcode = QPushButton("Export GCODE", self.create_plot_checkboxes_widget)
@@ -377,7 +536,7 @@ def initialize_default_curve_data(self):
     else:
         self.dfEdit = self.dfEdit_other
         exclude_cols = {'timestamp', 'time', 'Command'}
-        axes = [col for col in self.dfEdit.columns if col not in exclude_cols]
+        axes = [col for col in self.dfEdit.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
 
     self.curve_origin = 'create'
 
@@ -392,6 +551,9 @@ def initialize_default_curve_data(self):
 
 
 def loadTable_create(self, dataframe, progress=None, start_val=0):
+    if not hasattr(self, 'create_table_view') or self.create_table_view is None:
+        return
+
     from PySide6.QtCore import Qt, QCoreApplication
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QHeaderView, QTableWidgetItem
@@ -416,6 +578,20 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
     
     # Reset index to guarantee clean lookup mapping
     dataframe = dataframe.reset_index(drop=True)
+
+    # Determine position columns for current device
+    device = getattr(self, 'combo_device', None)
+    device_name = device.currentText() if device else "Lung Phantom"
+    if device_name == "Lung Phantom":
+        pos_cols = [c for c in ['X', 'Y', 'Z'] if c in dataframe.columns]
+    elif device_name == "Motion Platform":
+        pos_cols = [c for c in ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw'] if c in dataframe.columns]
+    else:
+        exclude_cols = {'timestamp', 'time', 'Command'}
+        pos_cols = [c for c in dataframe.columns if c not in exclude_cols and not c.startswith(('Vel.', 'Acc.'))]
+
+    # Compute high-resolution kinematics on full data
+    vel_dict, acc_dict = compute_kinematics(dataframe, pos_cols)
     
     # Compute downsampling step to target ~0.1s resolution in visual interface
     step = 1
@@ -433,8 +609,17 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
     else:
         display_indices = sorted(list(set(display_indices)))
 
-    # Filter out timestamp
-    display_columns = [col for col in dataframe.columns if col != 'timestamp']
+    # Assemble display columns in requested order:
+    # time, then pos_cols, then vel_cols, then acc_cols, extra actuator cols, Command
+    vel_cols = [f"Vel. {c}" for c in pos_cols]
+    acc_cols = [f"Acc. {c}" for c in pos_cols]
+    handled = set(['timestamp', 'time', 'Command'] + pos_cols)
+    extra_cols = [c for c in dataframe.columns if c not in handled and not c.startswith(('Vel.', 'Acc.'))]
+
+    display_columns = ['time'] + pos_cols + vel_cols + acc_cols + extra_cols
+    if 'Command' in dataframe.columns:
+        display_columns.append('Command')
+
     table.setRowCount(len(display_indices))
     table.setColumnCount(len(display_columns))
 
@@ -450,6 +635,26 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
         'Roll': 'Roll (deg)',
         'Pitch': 'Pitch (deg)',
         'Yaw': 'Yaw (deg)',
+        'Vel. X': 'Vel. X (mm/s)',
+        'Vel. Y': 'Vel. Y (mm/s)',
+        'Vel. Z': 'Vel. Z (mm/s)',
+        'Vel. LAT': 'Vel. LAT (mm/s)',
+        'Vel. SI': 'Vel. SI (mm/s)',
+        'Vel. AP': 'Vel. AP (mm/s)',
+        'Vel. Roll': 'Vel. Roll (deg/s)',
+        'Vel. Pitch': 'Vel. Pitch (deg/s)',
+        'Vel. Yaw': 'Vel. Yaw (deg/s)',
+        'Vel. Amplitude': 'Vel. Amplitude (mm/s)',
+        'Acc. X': 'Acc. X (mm/s²)',
+        'Acc. Y': 'Acc. Y (mm/s²)',
+        'Acc. Z': 'Acc. Z (mm/s²)',
+        'Acc. LAT': 'Acc. LAT (mm/s²)',
+        'Acc. SI': 'Acc. SI (mm/s²)',
+        'Acc. AP': 'Acc. AP (mm/s²)',
+        'Acc. Roll': 'Acc. Roll (deg/s²)',
+        'Acc. Pitch': 'Acc. Pitch (deg/s²)',
+        'Acc. Yaw': 'Acc. Yaw (deg/s²)',
+        'Acc. Amplitude': 'Acc. Amplitude (mm/s²)',
         'Command': 'Command'
     }
     
@@ -477,22 +682,31 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
                     is_user_wait = True
 
         for col, col_name in enumerate(display_columns):
-            val = dataframe.iat[bg_row, dataframe.columns.get_loc(col_name)]
+            is_derived = False
+            if col_name.startswith('Vel. '):
+                base_axis = col_name[5:]
+                val = vel_dict.get(base_axis, np.zeros(len(dataframe)))[bg_row]
+                is_derived = True
+            elif col_name.startswith('Acc. '):
+                base_axis = col_name[5:]
+                val = acc_dict.get(base_axis, np.zeros(len(dataframe)))[bg_row]
+                is_derived = True
+            else:
+                val = dataframe.iat[bg_row, dataframe.columns.get_loc(col_name)]
+
             try:
                 float_val = float(val)
-                if col_name == 'timestamp':
-                    display_text = str(int(round(float_val)))
-                else:
-                    display_text = f"{float_val:.2f}"
+                display_text = f"{float_val:.2f}"
                 item = QTableWidgetItem(display_text)
                 item.setData(Qt.UserRole, float_val)
             except (ValueError, TypeError):
                 item = QTableWidgetItem(str(val))
                 item.setData(Qt.UserRole, val)
                 
-            # Store original background index to sync edits
             item.setData(Qt.UserRole + 1, bg_row)
-            
+            if is_derived:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+
             if is_pause:
                 item.setBackground(QColor("#ffcdd2"))
             elif is_user_wait:
@@ -500,13 +714,14 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
                 
             table.setItem(row_idx, col, item)
             
-    # Set column resize modes: numeric columns are interactive (120px), last column stretches
     header = table.horizontalHeader()
     for col in range(table.columnCount() - 1):
         header.setSectionResizeMode(col, QHeaderView.Interactive)
         table.setColumnWidth(col, 120)
     if table.columnCount() > 0:
         header.setSectionResizeMode(table.columnCount() - 1, QHeaderView.Stretch)
+
+    sync_table_column_visibility(self)
 
     table.blockSignals(False)
     table.setUpdatesEnabled(True)
@@ -531,6 +746,10 @@ def on_table_item_changed(self, item):
     if not header_item:
         return
     header_text = header_item.text()
+
+    # Derived velocity and acceleration columns are not directly editable
+    if header_text.startswith(('Vel.', 'Acc.')):
+        return
     
     reverse_mapping = {
         'Time (s)': 'time',
@@ -694,9 +913,28 @@ def create_curve(self):
     else:
         t_end = self.input_end_time.value()
 
-    # Retrieve max speed setting (mm/s or deg/s)
-    sb_speed = getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None)
-    max_speed = sb_speed.value() if sb_speed else 20.0
+    # Retrieve max speed setting (mm/s or deg/s) based on active device
+    active_device = self.combo_device.currentText() if hasattr(self, 'combo_device') and self.combo_device else ""
+    if active_device == "Lung Phantom":
+        sb_speed = getattr(self, 'combo_phantom_max_speed', None) or getattr(self, 'settings_max_speed', None)
+    elif active_device == "Motion Platform":
+        sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'settings_max_speed_plat', None)
+    else:
+        sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'settings_max_speed_plat', None) or getattr(self, 'settings_max_speed', None)
+
+    if sb_speed is not None:
+        if hasattr(sb_speed, 'value') and callable(sb_speed.value):
+            max_speed = float(sb_speed.value())
+        elif hasattr(sb_speed, 'currentText'):
+            try:
+                max_speed = float(sb_speed.currentText())
+            except (ValueError, TypeError):
+                max_speed = 20.0
+        else:
+            max_speed = 20.0
+    else:
+        max_speed = 20.0
+
     if max_speed <= 0.0:
         max_speed = 20.0
 
@@ -780,7 +1018,7 @@ def create_curve(self):
                 'time': new_t
             })
             exclude_cols = {'timestamp', 'time', 'Command'}
-            all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols]
+            all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
             for col in all_axes:
                 new_rows[col] = 0.0
             new_rows['Command'] = ""
@@ -842,6 +1080,10 @@ def create_curve(self):
                 if selected_axis in self.dfEdit.columns:
                     self.dfEdit.at[idx, selected_axis] = val
 
+    cols_to_drop = [c for c in self.dfEdit.columns if c.startswith(('Vel.', 'Acc.'))]
+    if cols_to_drop:
+        self.dfEdit.drop(columns=cols_to_drop, inplace=True)
+
     # Save the reference back to the appropriate persistent dataframe
     if device == "Lung Phantom":
         self.dfEdit_lung_phantom = self.dfEdit
@@ -866,8 +1108,10 @@ def remove_row(self):
     pass
 
 
-def update_plot(self, dataframe, axes_list):
+def update_plot(self, dataframe, axes_list, vel_plot=None, acc_plot=None):
     """This function plots the created curves from the dataframe."""
+    if not hasattr(self, 'create_plot_canvas_container') or self.create_plot_canvas_container is None:
+        return
     container = self.create_plot_canvas_container
     if container.layout() is None:
         layout = QVBoxLayout(container)
@@ -909,11 +1153,68 @@ def update_plot(self, dataframe, axes_list):
     ax.spines['left'].set_color('#333333')
     ax.spines['right'].set_color('#333333')
 
-    # Plot the data
+    show_pos = getattr(self, 'check_show_pos', None)
+    show_vel = getattr(self, 'check_show_vel', None)
+    show_acc = getattr(self, 'check_show_acc', None)
+    is_pos = show_pos.isChecked() if show_pos is not None else True
+    is_vel = show_vel.isChecked() if show_vel is not None else False
+    is_acc = show_acc.isChecked() if show_acc is not None else False
+
+    if vel_plot is None or acc_plot is None:
+        vel_plot, acc_plot = compute_kinematics(dataframe, axes_list)
+
+    AXIS_COLORS = {
+        'X': '#1976d2',      # Blue
+        'Y': '#f57c00',      # Orange
+        'Z': '#388e3c',      # Green
+        'LAT': '#1976d2',    # Blue
+        'SI': '#f57c00',     # Orange
+        'AP': '#388e3c',     # Green
+        'Roll': '#7b1fa2',   # Purple
+        'Pitch': '#d32f2f',  # Red
+        'Yaw': '#0097a7',    # Teal
+        'A': '#5c6bc0',
+        'B': '#26a69a',
+        'C': '#ffa726',
+        'D': '#ab47bc',
+        "'a": "#8d6e63",
+        "'c": "#78909c",
+        "'e": "#5c6bc0",
+        "'f": "#26a69a",
+        'amplitude': '#1976d2'
+    }
+
     t_data = dataframe["time"]
+    num_kin_active = sum([is_pos, is_vel, is_acc])
+    use_tags = num_kin_active > 1 or is_vel or is_acc
+
     for col in axes_list:
         if col in dataframe.columns:
-            ax.plot(t_data, dataframe[col], label=col, linewidth=1.5)
+            c = AXIS_COLORS.get(col, None)
+
+            # 1. Position: continuous solid line ('-')
+            if is_pos:
+                lbl = f"{col} (Pos)" if use_tags else col
+                kwargs = {'label': lbl, 'linestyle': '-', 'linewidth': 1.6}
+                if c:
+                    kwargs['color'] = c
+                ax.plot(t_data, dataframe[col], **kwargs)
+
+            # 2. Velocity: dashed line ('--')
+            if is_vel and col in vel_plot:
+                lbl = f"{col} (Vel)" if use_tags else col
+                kwargs = {'label': lbl, 'linestyle': '--', 'linewidth': 1.6}
+                if c:
+                    kwargs['color'] = c
+                ax.plot(t_data, vel_plot[col], **kwargs)
+
+            # 3. Acceleration: point / dotted line (':')
+            if is_acc and col in acc_plot:
+                lbl = f"{col} (Acc)" if use_tags else col
+                kwargs = {'label': lbl, 'linestyle': ':', 'linewidth': 1.8}
+                if c:
+                    kwargs['color'] = c
+                ax.plot(t_data, acc_plot[col], **kwargs)
 
     # Draw vertical lines for pause/wait commands
     if 'Command' in dataframe.columns:
@@ -931,7 +1232,16 @@ def update_plot(self, dataframe, axes_list):
     if len(t_data) > 0 and t_data.min() < t_data.max():
         ax.set_xlim(t_data.min(), t_data.max())
     ax.set_xlabel('Time (s)', fontsize=font_sz, fontweight='bold')
-    ax.set_ylabel('Amplitude (mm / deg)', fontsize=font_sz, fontweight='bold')
+
+    y_labels = []
+    if is_pos:
+        y_labels.append("Pos (mm / deg)")
+    if is_vel:
+        y_labels.append("Vel (mm/s, deg/s)")
+    if is_acc:
+        y_labels.append("Acc (mm/s², deg/s²)")
+    y_label_str = " | ".join(y_labels) if y_labels else "Amplitude (mm / deg)"
+    ax.set_ylabel(y_label_str, fontsize=font_sz, fontweight='bold')
     ax.grid(True, linestyle=":", alpha=0.5, color="#888888")
 
     self.plot_fig.tight_layout()
@@ -992,8 +1302,19 @@ def generate_planned_gcode(self):
         lim_z = max_lim_z.value() if max_lim_z else 40.0
         max_limits = (lim_x, lim_y, lim_z)
 
+        # Retrieve speed, acc, jerk settings for Lung Phantom
+        sb_speed = getattr(self, 'combo_phantom_max_speed', None) or getattr(self, 'settings_max_speed', None)
+        speed_val = sb_speed.value() if (sb_speed and hasattr(sb_speed, 'value')) else (float(sb_speed.currentText()) if (sb_speed and hasattr(sb_speed, 'currentText')) else 50.0)
+
+        sb_acc = getattr(self, 'combo_phantom_acc', None) or getattr(self, 'settings_acc_phantom', None)
+        acc_val = sb_acc.value() if (sb_acc and hasattr(sb_acc, 'value')) else (float(sb_acc.currentText()) if (sb_acc and hasattr(sb_acc, 'currentText')) else 1000.0)
+
+        sb_jerk = getattr(self, 'combo_phantom_jerk', None) or getattr(self, 'settings_jerk_phantom', None)
+        jerk_val = sb_jerk.value() if (sb_jerk and hasattr(sb_jerk, 'value')) else (float(sb_jerk.currentText()) if (sb_jerk and hasattr(sb_jerk, 'currentText')) else 300.0)
+
         gcode_content, exceeds_limits = generate_gcode_string(
-            device, t_orig, columns_data, max_limits
+            device, t_orig, columns_data, max_limits,
+            speed=speed_val, acc=acc_val, jerk=jerk_val
         )
 
     elif device == "Motion Platform":
@@ -1018,6 +1339,16 @@ def generate_planned_gcode(self):
         lim_pitch = max_lim_pitch.value() if max_lim_pitch else 40.0
         lim_yaw = max_lim_yaw.value() if max_lim_yaw else 40.0
         max_limits = (lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw)
+
+        # Retrieve speed, acc, jerk settings for Motion Platform
+        sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'settings_max_speed_plat', None)
+        speed_val = sb_speed.value() if (sb_speed and hasattr(sb_speed, 'value')) else (float(sb_speed.currentText()) if (sb_speed and hasattr(sb_speed, 'currentText')) else 20.0)
+
+        sb_acc = getattr(self, 'combo_platform_acc', None) or getattr(self, 'settings_acc_plat', None)
+        acc_val = sb_acc.value() if (sb_acc and hasattr(sb_acc, 'value')) else (float(sb_acc.currentText()) if (sb_acc and hasattr(sb_acc, 'currentText')) else 500.0)
+
+        sb_jerk = getattr(self, 'combo_platform_jerk', None) or getattr(self, 'settings_jerk_plat', None)
+        jerk_val = sb_jerk.value() if (sb_jerk and hasattr(sb_jerk, 'value')) else (float(sb_jerk.currentText()) if (sb_jerk and hasattr(sb_jerk, 'currentText')) else 300.0)
 
         # Retrieve and strictly validate dimensions and offsets (raise error if missing or invalid)
         if not hasattr(self, 'input_plat_lat') or not self.input_plat_lat or not self.input_plat_lat.text().strip():
@@ -1080,12 +1411,13 @@ def generate_planned_gcode(self):
 
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
-            lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo
+            lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo,
+            speed=speed_val, acc=acc_val, jerk=jerk_val
         )
 
     else: # Other
         exclude_cols = {'timestamp', 'time', 'Command'}
-        axes_list = [col for col in self.dfEdit.columns if col not in exclude_cols]
+        axes_list = [col for col in self.dfEdit.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
         for col in axes_list:
             columns_data[col] = self.dfEdit[col].values
 
@@ -1093,8 +1425,18 @@ def generate_planned_gcode(self):
         lim = max_lim_lat.value() if max_lim_lat else 40.0
         max_limits = [lim]
 
+        sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'combo_phantom_max_speed', None)
+        speed_val = sb_speed.value() if (sb_speed and hasattr(sb_speed, 'value')) else (float(sb_speed.currentText()) if (sb_speed and hasattr(sb_speed, 'currentText')) else 20.0)
+
+        sb_acc = getattr(self, 'combo_platform_acc', None) or getattr(self, 'combo_phantom_acc', None)
+        acc_val = sb_acc.value() if (sb_acc and hasattr(sb_acc, 'value')) else (float(sb_acc.currentText()) if (sb_acc and hasattr(sb_acc, 'currentText')) else 500.0)
+
+        sb_jerk = getattr(self, 'combo_platform_jerk', None) or getattr(self, 'combo_phantom_jerk', None)
+        jerk_val = sb_jerk.value() if (sb_jerk and hasattr(sb_jerk, 'value')) else (float(sb_jerk.currentText()) if (sb_jerk and hasattr(sb_jerk, 'currentText')) else 300.0)
+
         gcode_content, exceeds_limits = generate_gcode_string(
-            device, t_orig, columns_data, max_limits
+            device, t_orig, columns_data, max_limits,
+            speed=speed_val, acc=acc_val, jerk=jerk_val
         )
 
     if exceeds_limits:
@@ -2236,7 +2578,7 @@ class CopyAxisDialog(QDialog):
         exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
         df = getattr(parent_ui, 'dfEdit', None)
         if df is not None:
-            self.available_axes = [col for col in df.columns if col not in exclude_cols]
+            self.available_axes = [col for col in df.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
         else:
             self.available_axes = ["X", "Y", "Z"]
 
@@ -2782,7 +3124,7 @@ class MathOperationsDialog(QDialog):
         exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
         df = getattr(parent_ui, 'dfEdit', None)
         if df is not None:
-            available_axes = [col for col in df.columns if col not in exclude_cols]
+            available_axes = [col for col in df.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
         else:
             available_axes = ["X", "Y", "Z"]
 
@@ -3029,9 +3371,10 @@ class SmoothAxisDialog(QDialog):
         layout.setSpacing(12)
 
         # Overview Description
+        # Overview Description
         desc_lbl = QLabel(
-            "Apply digital smoothing filters to eliminate signal jitter and noise on selected axes.<br>"
-            "Adjust the <b>Smooth Level</b> to control filter strength, and select which axes to filter.",
+            "Apply digital smoothing filters to eliminate signal jitter and noise on selected position axes.<br>"
+            "Adjust the <b>Smooth Level</b> to control filter strength. Velocity and acceleration are automatically recalculated from smoothed positions.",
             self
         )
         desc_lbl.setWordWrap(True)
@@ -3039,12 +3382,12 @@ class SmoothAxisDialog(QDialog):
         layout.addWidget(desc_lbl)
 
         # 1. Target Axes Selection GroupBox
-        gb_axes = QGroupBox("1. Target Axes Selection", self)
+        gb_axes = QGroupBox("1. Target Position Axes Selection", self)
         gb_axes_lay = QVBoxLayout(gb_axes)
         gb_axes_lay.setContentsMargins(15, 15, 15, 15)
         gb_axes_lay.setSpacing(8)
 
-        lbl_ax_info = QLabel("Select axes to apply smoothing to:", gb_axes)
+        lbl_ax_info = QLabel("Select position axes to smooth (velocity & acceleration are recalculated):", gb_axes)
         lbl_ax_info.setStyleSheet("font-weight: bold;")
         gb_axes_lay.addWidget(lbl_ax_info)
 
@@ -3064,15 +3407,18 @@ class SmoothAxisDialog(QDialog):
         axes_btn_lay.addStretch()
         gb_axes_lay.addLayout(axes_btn_lay)
 
-        # Build list of available axes from current planning dataframe
+        # Build list of available position axes from current planning dataframe
         exclude_cols = {'timestamp', 'time', 'Command', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f", 'a', 'c', 'e', 'f'}
         df = getattr(parent_ui, 'dfEdit', None)
-        device = parent_ui.combo_device.currentText() if hasattr(parent_ui, 'combo_device') else "Lung Phantom"
+        combo = getattr(parent_ui, 'combo_device', None)
+        device = combo.currentText() if combo is not None else "Lung Phantom"
 
-        if df is not None:
-            available_axes = [col for col in df.columns if col not in exclude_cols]
+        if device == "Lung Phantom":
+            available_axes = [col for col in ['X', 'Y', 'Z'] if df is None or col in df.columns]
         elif device == "Motion Platform":
-            available_axes = ["LAT", "SI", "AP", "Roll", "Pitch", "Yaw"]
+            available_axes = [col for col in ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw'] if df is None or col in df.columns]
+        elif df is not None:
+            available_axes = [col for col in df.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
         else:
             available_axes = ["X", "Y", "Z"]
 
@@ -3081,7 +3427,7 @@ class SmoothAxisDialog(QDialog):
         cb_grid.setSpacing(10)
 
         for i, ax_name in enumerate(available_axes):
-            cb = QCheckBox(ax_name, gb_axes)
+            cb = QCheckBox(f"{ax_name} (Pos)", gb_axes)
             cb.setStyleSheet("font-weight: bold; font-size: 14px;")
             is_active = True
             if df is not None and ax_name in df.columns:
@@ -3291,6 +3637,14 @@ class SmoothAxisDialog(QDialog):
         if w < 3:
             w = 3
 
+        t_arr = df['time'].values if 'time' in df.columns else np.arange(len(df)) * 0.01
+        t_clean = np.array(t_arr, dtype=float)
+        if np.any(np.diff(t_clean) <= 0):
+            t_clean = np.maximum.accumulate(t_clean)
+            for i in range(1, len(t_clean)):
+                if t_clean[i] <= t_clean[i - 1]:
+                    t_clean[i] = t_clean[i - 1] + 1e-4
+
         for ax in target_axes:
             signal = df[ax].to_numpy(dtype=float)
             is_rot = ax in rotational_axes
@@ -3311,13 +3665,35 @@ class SmoothAxisDialog(QDialog):
             if clip_zero and not is_rot:
                 smoothed = np.clip(smoothed, a_min=0.0, a_max=None)
 
+            # 1. Apply smooth to position
             df[ax] = smoothed
+
+            # 2. Recalculate velocity and acceleration from the smoothed position and time
+            if len(t_clean) >= 2:
+                v_smooth = np.gradient(smoothed, t_clean)
+                if len(t_clean) >= 3:
+                    a_smooth = np.gradient(v_smooth, t_clean)
+                else:
+                    a_smooth = np.zeros_like(v_smooth)
+            else:
+                v_smooth = np.zeros_like(smoothed)
+                a_smooth = np.zeros_like(smoothed)
+
+            df[f"Vel. {ax}"] = np.nan_to_num(v_smooth, nan=0.0)
+            df[f"Acc. {ax}"] = np.nan_to_num(a_smooth, nan=0.0)
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
         elif device == "Motion Platform":
             parent.dfEdit = compute_motion_platform_actuators(parent, parent.dfEdit)
+            for m_ax in ['Pitch', 'Roll', 'AP', 'A', 'B', 'C', 'D']:
+                if m_ax in parent.dfEdit.columns and (f"Vel. {m_ax}" in parent.dfEdit.columns or m_ax in target_axes):
+                    pos_m = parent.dfEdit[m_ax].to_numpy(dtype=float)
+                    v_m = np.gradient(pos_m, t_clean)
+                    a_m = np.gradient(v_m, t_clean)
+                    parent.dfEdit[f"Vel. {m_ax}"] = np.nan_to_num(v_m, nan=0.0)
+                    parent.dfEdit[f"Acc. {m_ax}"] = np.nan_to_num(a_m, nan=0.0)
             parent.dfEdit_motion_platform = parent.dfEdit
         else:
             parent.dfEdit_other = parent.dfEdit
@@ -3365,5 +3741,11 @@ class SmoothAxisDialog(QDialog):
 
 
 def open_smooth_axes_dialog(self):
-    dlg = SmoothAxisDialog(self)
-    dlg.exec_()
+    if getattr(self, '_smooth_dialog_open', False):
+        return
+    self._smooth_dialog_open = True
+    try:
+        dlg = SmoothAxisDialog(self)
+        dlg.exec_()
+    finally:
+        self._smooth_dialog_open = False
