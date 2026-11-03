@@ -422,7 +422,7 @@ def _load_log_file_into_status_impl(self, file_path=None):
     df = None
     for enc in encodings:
         try:
-            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc)
+            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
         except Exception:
             continue
@@ -1048,9 +1048,14 @@ def start_selected_gcode_execution(self):
     self.status_t0 = None
     self.status_plot_data = None
     self.status_stopped = False
-    self.waiting_for_motion_start = True
     self._start_pos_snapshot = snapshot if snapshot else None
     self._last_auto_sf = 100.0
+
+    # Mark G-code execution as active for continuous logging and clean completion detection
+    self.gcode_executing = True
+    self.gcode_seen_running = False
+    self.gcode_started_time = time.perf_counter()
+    self.log_t0 = time.perf_counter()
     
     # Load reference data specifically for this G-code file IF 'Show reference' is checked and not already loaded
     show_ref_check = getattr(self, 'check_show_reference', None)
@@ -1067,6 +1072,25 @@ def start_selected_gcode_execution(self):
         duet_request(url, params={'gcode': f'M32 0:/gcodes/{fname}'}, timeout=4)
         if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
             self.statusDuetMessage.setText(f"Started execution of 0:/gcodes/{fname}")
+
+        # Start recording straight away upon starting the G-code
+        if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
+            x0 = snapshot.get('X', 0.0) if snapshot else 0.0
+            y0 = snapshot.get('Y', 0.0) if snapshot else 0.0
+            z0 = snapshot.get('Z', 0.0) if snapshot else 0.0
+            extra0 = None
+            if snapshot:
+                sn_e, sn_f = snapshot.get("'e", 15.0), snapshot.get("'f", 15.0)
+                sn_a, sn_b = snapshot.get('A', 15.0), snapshot.get('B', 15.0)
+                sn_c, sn_d = snapshot.get('C', 15.0), snapshot.get('D', 15.0)
+                sn_lo_a, sn_lo_c = snapshot.get("'a", 15.0), snapshot.get("'c", 15.0)
+                extra0 = {
+                    'Roll': 0.0, 'Pitch': 0.0, 'Yaw': snapshot.get('W', 0.0),
+                    'LAT': (sn_e + sn_f) / 2.0,
+                    'AP': (sn_a + sn_b + sn_c + sn_d) / 4.0,
+                    'SI': (sn_lo_a + sn_lo_c) / 2.0
+                }
+            log_data_point(self, 0.0, x0, y0, z0, probe=getattr(self, '_last_probe_val', 0), extra_axes=extra0)
     except Exception as e:
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
@@ -1075,6 +1099,7 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
     """
     Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.csv
     inside the selected output folder (default Desktop).
+    Includes computer time on the first line of the log.
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
         folder = self.PhOperFolder.text().strip() if hasattr(self, 'PhOperFolder') and self.PhOperFolder and self.PhOperFolder.text() else os.path.join(os.path.expanduser("~"), "Desktop")
@@ -1085,38 +1110,52 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
             except Exception:
                 folder = os.path.join(os.path.expanduser("~"), "Desktop")
 
-        now_str = datetime.now().strftime("%H_%M_%S")
-        filename = f"log_{now_str}_.csv"
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%H_%M_%S")
+        base_name = f"log_{now_str}_"
+        filename = f"{base_name}.csv"
         filepath = os.path.join(folder, filename)
+        idx = 1
+        while os.path.exists(filepath):
+            filename = f"{base_name}_{idx}.csv"
+            filepath = os.path.join(folder, filename)
+            idx += 1
 
         is_platform = False
         if hasattr(self, 'combo_device') and self.combo_device:
             is_platform = (self.combo_device.currentText() == "Motion Platform")
+        elif extra_axes is not None:
+            is_platform = True
 
         try:
-            f = open(filepath, "a", encoding="utf-8")
-            if is_platform and extra_axes:
+            f = open(filepath, "w", encoding="utf-8")
+            # 1. Computer time in the first line of the log
+            f.write(f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            # 2. Column headers in the second line
+            if is_platform:
                 headers = ["Time_s", "Pos_LAT_mm", "Pos_SI_mm", "Pos_AP_mm", "Pos_Roll_deg", "Pos_Pitch_deg", "Pos_Yaw_deg", "Probe"]
             else:
                 headers = ["Time_s", "Pos_X_mm", "Pos_Y_mm", "Pos_Z_mm", "Probe"]
             f.write(",".join(headers) + "\n")
+            f.flush()
             self.active_log_file = f
             self.active_log_filepath = filepath
-            self.active_log_is_platform = (is_platform and extra_axes is not None)
-            print(f"Started recording data log to file: {filepath}")
+            self.active_log_is_platform = is_platform
+            print(f"Started recording data log to file: {filepath} at computer time {now_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             print(f"Failed to create data log file {filepath}: {e}")
             return
 
     try:
         p_val = probe if probe is not None else 0
-        if getattr(self, 'active_log_is_platform', False) and extra_axes:
-            lat = extra_axes.get('LAT', 0.0)
-            si = extra_axes.get('SI', 0.0)
-            ap = extra_axes.get('AP', 0.0)
-            roll = extra_axes.get('Roll', 0.0)
-            pitch = extra_axes.get('Pitch', 0.0)
-            yaw = extra_axes.get('Yaw', 0.0)
+        if getattr(self, 'active_log_is_platform', False):
+            extra = extra_axes if extra_axes is not None else {}
+            lat = extra.get('LAT', 0.0)
+            si = extra.get('SI', 0.0)
+            ap = extra.get('AP', 0.0)
+            roll = extra.get('Roll', 0.0)
+            pitch = extra.get('Pitch', 0.0)
+            yaw = extra.get('Yaw', 0.0)
             self.active_log_file.write(f"{t:.4f},{lat:.3f},{si:.3f},{ap:.3f},{roll:.3f},{pitch:.3f},{yaw:.3f},{p_val}\n")
         else:
             self.active_log_file.write(f"{t:.4f},{x:.3f},{y:.3f},{z:.3f},{p_val}\n")
@@ -1131,12 +1170,14 @@ def close_data_log_file(self):
     """
     if hasattr(self, 'active_log_file') and self.active_log_file is not None:
         try:
+            self.active_log_file.flush()
             self.active_log_file.close()
             print(f"Closed data log file: {getattr(self, 'active_log_filepath', '')}")
         except Exception:
             pass
         self.active_log_file = None
         self.active_log_filepath = None
+        self.log_t0 = None
 
 
 def update_status_tab_dashboard(self):
@@ -1322,9 +1363,18 @@ def update_status_tab_dashboard(self):
                 render_status_plot(self)
             except Exception as pe:
                 print(f"Error rendering status plot: {pe}")
+        if status_code in ["P", "R", "B", "M", "S", "D"]:
+            self.gcode_seen_running = True
+
         if status_code == "I":
-            if getattr(self, 'active_log_file', None) is not None:
-                close_data_log_file(self)
+            if getattr(self, 'gcode_seen_running', False):
+                self.gcode_executing = False
+                self.gcode_seen_running = False
+                if getattr(self, 'active_log_file', None) is not None:
+                    close_data_log_file(self)
+            elif not getattr(self, 'gcode_executing', False):
+                if getattr(self, 'active_log_file', None) is not None:
+                    close_data_log_file(self)
 
     except Exception as e:
         print(f"Error updating status tab dashboard: {e}")
@@ -1656,6 +1706,24 @@ def update_status_fast(self):
         if hasattr(self, 'statusPosYaw') and self.statusPosYaw:
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
+        t_now = time.perf_counter()
+        curr_p = getattr(self, '_last_probe_val', 0)
+
+        # Continuous file logging: records straight away when G-code starts, and keeps recording continuously without pause
+        if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
+            if getattr(self, 'gcode_executing', False) or getattr(self, 'active_log_file', None) is not None:
+                if getattr(self, 'log_t0', None) is None:
+                    self.log_t0 = t_now
+                t_log = max(0.0, t_now - self.log_t0)
+                log_data_point(self, t_log, x_val, y_val, z_val, curr_p,
+                               extra_axes={
+                                   'Roll': current_roll, 'Pitch': current_pitch, 'Yaw': current_yaw,
+                                   'LAT': current_lat, 'AP': current_ap, 'SI': current_si
+                               })
+        else:
+            if getattr(self, 'active_log_file', None) is not None:
+                close_data_log_file(self)
+
         elapsed_t = 0.0
         # Determine whether to update plot data based on status code and 'Include pause' checkbox
         status_code = getattr(self, 'duet_status_code', 'I')
@@ -1715,61 +1783,6 @@ def update_status_fast(self):
                 self._total_pause_duration = 0.0
                 self._pause_start_perf = None
 
-            # Detect physical motion start to align live t=0.0s with reference curve t=0.0s
-            if getattr(self, 'waiting_for_motion_start', False):
-                if not hasattr(self, '_start_pos_snapshot') or self._start_pos_snapshot is None:
-                    self._start_pos_snapshot = {k: v for k, v in axis_positions.items()}
-                    return
-
-                # Check if any motor axis has moved by >= 0.002mm from starting snapshot
-                has_moved = False
-                for k in ['A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", 'X', 'Y', 'Z']:
-                    if k in axis_positions and k in self._start_pos_snapshot:
-                        if abs(axis_positions[k] - self._start_pos_snapshot[k]) >= 0.002:
-                            has_moved = True
-                            break
-
-                if not has_moved:
-                    return  # Wait until Duet physically starts moving motors
-                else:
-                    self.waiting_for_motion_start = False
-                    self.status_t0 = t_now
-                    self._total_pause_duration = 0.0
-                    self._pause_start_perf = None
-
-                    # Seed initial t=0.000s baseline origin point from snapshot
-                    sn = self._start_pos_snapshot
-                    sn_a, sn_b = sn.get('A', 15.0), sn.get('B', 15.0)
-                    sn_c, sn_d = sn.get('C', 15.0), sn.get('D', 15.0)
-                    sn_ap = (sn_a + sn_b + sn_c + sn_d) / 4.0
-                    sn_e, sn_f = sn.get("'e", 15.0), sn.get("'f", 15.0)
-                    sn_lat = (sn_e + sn_f) / 2.0
-                    sn_lo_a, sn_lo_c = sn.get("'a", 15.0), sn.get("'c", 15.0)
-                    sn_si = (sn_lo_a + sn_lo_c) / 2.0
-
-                    self.status_plot_data['t'].append(0.0)
-                    self.status_plot_data['X'].append(sn.get('X', 0.0))
-                    self.status_plot_data['Y'].append(sn.get('Y', 0.0))
-                    self.status_plot_data['Z'].append(sn.get('Z', 0.0))
-                    self.status_plot_data['A'].append(sn_a)
-                    self.status_plot_data['B'].append(sn_b)
-                    self.status_plot_data['C'].append(sn_c)
-                    self.status_plot_data['D'].append(sn_d)
-                    self.status_plot_data["'e"].append(sn_e)
-                    self.status_plot_data["'f"].append(sn_f)
-                    self.status_plot_data["'a"].append(sn_lo_a)
-                    self.status_plot_data["'c"].append(sn_lo_c)
-                    self.status_plot_data['Roll'].append(0.0)
-                    self.status_plot_data['Pitch'].append(0.0)
-                    self.status_plot_data['Yaw'].append(0.0)
-                    self.status_plot_data['LAT'].append(sn_lat)
-                    self.status_plot_data['AP'].append(sn_ap)
-                    self.status_plot_data['SI'].append(sn_si)
-                    curr_p = getattr(self, '_last_probe_val', 0)
-                    if 'probe' not in self.status_plot_data:
-                        self.status_plot_data['probe'] = []
-                    self.status_plot_data['probe'].append(curr_p)
-
             if not hasattr(self, 'status_t0') or self.status_t0 is None:
                 self.status_t0 = t_now
                 self._total_pause_duration = 0.0
@@ -1808,19 +1821,6 @@ def update_status_fast(self):
             if len(self.status_plot_data['t']) > 100000:
                 for k in self.status_plot_data.keys():
                     self.status_plot_data[k].pop(0)
-
-            # File logging (only during active motion / plot update)
-            if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
-                log_data_point(self, elapsed_t, x_val, y_val, z_val, curr_p,
-                               extra_axes={
-                                   'Roll': current_roll, 'Pitch': current_pitch, 'Yaw': current_yaw,
-                                   'LAT': current_lat, 'AP': current_ap, 'SI': current_si
-                               })
-
-        # Close active log file if recording was unchecked
-        if hasattr(self, 'check_record_log') and self.check_record_log and not self.check_record_log.isChecked():
-            if getattr(self, 'active_log_file', None) is not None:
-                close_data_log_file(self)
 
     except Exception as e:
         print(f"Error in fast status loop: {e}")
@@ -1976,6 +1976,8 @@ def cancel_GCODE_job(self):
 
     result = msg.exec()
     if result == QMessageBox.StandardButton.Ok:
+        self.gcode_executing = False
+        self.gcode_seen_running = False
         if getattr(self, 'active_log_file', None) is not None:
             close_data_log_file(self)
         self.status_t0 = None

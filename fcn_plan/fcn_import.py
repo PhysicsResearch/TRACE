@@ -701,7 +701,7 @@ def parse_trace_log_file(file_path):
     df = None
     for enc in encodings:
         try:
-            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc)
+            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
         except Exception:
             continue
