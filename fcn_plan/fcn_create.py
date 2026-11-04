@@ -156,6 +156,139 @@ def compute_motion_platform_actuators(self, df):
     return df
 
 
+def _widget_float(self, names, default):
+    """Reads a float from the first existing widget (spin box, value() combo or line edit)."""
+    for name in names:
+        w = getattr(self, name, None)
+        if w is None:
+            continue
+        try:
+            if hasattr(w, 'value') and callable(w.value):
+                return float(w.value())
+            if hasattr(w, 'currentText'):
+                return float(w.currentText())
+            if hasattr(w, 'text'):
+                txt = w.text().strip()
+                if txt:
+                    return float(txt)
+        except (ValueError, TypeError):
+            continue
+    return default
+
+
+def _gather_plan_params(self, device):
+    """
+    Non-strict collection of the parameters used to turn the plan into G-code axes
+    (limits, platform geometry/offsets, max speed, min step, min speed, step overhead).
+    """
+    from .fcn_gcode import DEFAULT_MIN_STEP, DEFAULT_MIN_SPEED
+    if device == "Lung Phantom":
+        limits = (
+            _widget_float(self, ['settings_max_lim_x'], 40.0),
+            _widget_float(self, ['settings_max_lim_y'], 40.0),
+            _widget_float(self, ['settings_max_lim_z'], 40.0),
+        )
+        max_speed = _widget_float(self, ['combo_phantom_max_speed', 'settings_max_speed'], 50.0)
+        min_step = _widget_float(self, ['settings_min_step_phantom'], DEFAULT_MIN_STEP)
+        overhead = _widget_float(self, ['settings_step_overhead_phantom'], 0.0)
+        min_speed = _widget_float(self, ['settings_min_speed_phantom'], DEFAULT_MIN_SPEED)
+        kin = {}
+    elif device == "Motion Platform":
+        limits = tuple(
+            _widget_float(self, [f'settings_max_lim_{ax}'], 40.0)
+            for ax in ('lat', 'si', 'ap', 'roll', 'pitch', 'yaw')
+        )
+        max_speed = _widget_float(self, ['combo_platform_max_speed', 'settings_max_speed_plat'], 20.0)
+        min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
+        overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
+        min_speed = _widget_float(self, ['settings_min_speed_plat'], DEFAULT_MIN_SPEED)
+        lat_dim = _widget_float(self, ['input_plat_lat'], 100.0)
+        si_dim = _widget_float(self, ['input_plat_si'], 100.0)
+        kin = {
+            'lat_dim': lat_dim if lat_dim > 0.0 else 100.0,
+            'si_dim': si_dim if si_dim > 0.0 else 100.0,
+            'off_ap': _widget_float(self, ['input_offset_ap', 'input_offset_ap_plan'], 0.0),
+            'off_lat': _widget_float(self, ['input_offset_lat', 'input_offset_lat_plan'], 0.0),
+            'off_si': _widget_float(self, ['input_offset_si', 'input_offset_si_plan'], 0.0),
+            'axis_y_lo': "'c",
+        }
+    else:
+        limits = [_widget_float(self, ['settings_max_lim_lat'], 40.0)]
+        max_speed = _widget_float(self, ['combo_platform_max_speed', 'combo_phantom_max_speed'], 20.0)
+        min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
+        overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
+        min_speed = _widget_float(self, ['settings_min_speed_plat'], DEFAULT_MIN_SPEED)
+        kin = {}
+    if max_speed <= 0.0:
+        max_speed = 20.0
+    return {
+        'limits': limits,
+        'max_speed': max_speed,
+        'min_step': max(0.0, min_step),
+        'overhead_ms': max(0.0, overhead),
+        'min_speed': max(0.01, min_speed),
+        'kin': kin,
+    }
+
+
+def bake_plan_steps(self, df, device=None):
+    """
+    Bakes the stepped motion into a planning DataFrame: positions only change once the
+    accumulated displacement reaches "Min. step"; motion slower than "Min. speed" (the Duet
+    minimum movement speed written to the G-code header) becomes "hold, then quick step". Returns the (possibly new) DataFrame; stale
+    stored Vel./Acc. columns are dropped when positions change.
+    """
+    from .fcn_gcode import bake_stepped_plan, plan_columns_for
+    if df is None or len(df) < 3 or 'time' not in df.columns:
+        return df
+    if device is None:
+        combo = getattr(self, 'combo_device', None)
+        device = combo.currentText() if combo is not None else "Lung Phantom"
+
+    if device == "Other":
+        exclude_cols = {'timestamp', 'time', 'Command'}
+        plan_cols = [c for c in df.columns if c not in exclude_cols and not str(c).startswith(('Vel.', 'Acc.'))]
+    else:
+        plan_cols = plan_columns_for(device, {})
+        if any(c not in df.columns for c in plan_cols):
+            return df
+    if not plan_cols:
+        return df
+
+    columns_data = {}
+    try:
+        for c in plan_cols:
+            columns_data[c] = pd.to_numeric(df[c], errors='coerce').fillna(0.0).values.astype(float)
+    except Exception:
+        return df
+    if 'Command' in df.columns:
+        columns_data['Command'] = df['Command'].values
+
+    prm = _gather_plan_params(self, device)
+    try:
+        baked = bake_stepped_plan(
+            device, df['time'].values.astype(float), columns_data, prm['limits'],
+            min_step=prm['min_step'], max_speed=prm['max_speed'], min_speed=prm['min_speed'], **prm['kin']
+        )
+    except Exception as e:
+        print(f"Stepped-motion bake skipped: {e}")
+        return df
+    if not baked:
+        return df
+
+    changed = any(np.max(np.abs(baked[c] - columns_data[c])) > 1e-9 for c in baked) if len(df) else False
+    if not changed:
+        return df
+
+    df = df.copy()
+    for c, arr in baked.items():
+        df[c] = arr
+    stale = [c for c in df.columns if str(c).startswith(('Vel.', 'Acc.'))]
+    if stale:
+        df = df.drop(columns=stale)
+    return df
+
+
 def compute_kinematics(dataframe, pos_cols):
     """
     Computes velocity (mm/s or deg/s) and acceleration (mm/s² or deg/s²)
@@ -778,15 +911,31 @@ def on_table_item_changed(self, item):
                     new_val = 0.0
     except ValueError:
         new_val = val_text
-        
+
+    # Table edits are destructive once baked: keep an undo snapshot
+    push_curve_state(self)
+
     self.dfEdit.at[bg_row, col_name] = new_val
-    
+
     if col_name == 'time' and isinstance(new_val, (int, float)):
         self.dfEdit.at[bg_row, 'timestamp'] = new_val * 1000.0
-        
-    self.dfEdit_copy = self.dfEdit.copy()
-    
+
     device = self.combo_device.currentText()
+
+    # Bake the stepped motion; refresh table/plot afterwards (not while this item's signal runs)
+    if col_name != 'Command':
+        baked_df = bake_plan_steps(self, self.dfEdit, device)
+        if baked_df is not self.dfEdit:
+            self.dfEdit = baked_df
+            from PySide6.QtCore import QTimer
+
+            def _refresh_after_bake():
+                loadTable_create(self, self.dfEdit)
+                trigger_plot_update(self)
+
+            QTimer.singleShot(0, _refresh_after_bake)
+
+    self.dfEdit_copy = self.dfEdit.copy()
     if device == "Lung Phantom":
         self.dfEdit_lung_phantom = self.dfEdit
     elif device == "Motion Platform":
@@ -1019,8 +1168,12 @@ def create_curve(self):
             })
             exclude_cols = {'timestamp', 'time', 'Command'}
             all_axes = [col for col in self.dfEdit.columns if col not in exclude_cols and not col.startswith(('Vel.', 'Acc.'))]
+            # Hold every axis at its last value in the extended window (not 0), so axes that
+            # are not part of this curve keep their position instead of jumping back to zero
+            last_row = self.dfEdit.loc[self.dfEdit['time'].idxmax()]
             for col in all_axes:
-                new_rows[col] = 0.0
+                last_val = pd.to_numeric(pd.Series([last_row[col]]), errors='coerce').iloc[0]
+                new_rows[col] = 0.0 if pd.isna(last_val) else float(last_val)
             new_rows['Command'] = ""
             
             self.dfEdit = pd.concat([self.dfEdit, new_rows], ignore_index=True)
@@ -1083,6 +1236,9 @@ def create_curve(self):
     cols_to_drop = [c for c in self.dfEdit.columns if c.startswith(('Vel.', 'Acc.'))]
     if cols_to_drop:
         self.dfEdit.drop(columns=cols_to_drop, inplace=True)
+
+    # Bake the stepped motion (min step / Duet minimum speed) so the plot shows what will run
+    self.dfEdit = bake_plan_steps(self, self.dfEdit, device)
 
     # Save the reference back to the appropriate persistent dataframe
     if device == "Lung Phantom":
@@ -1264,7 +1420,9 @@ from .fcn_gcode import generate_gcode_string
 
 def generate_planned_gcode(self):
     """
-    Interpolates active dataframe curve data at 0.001s intervals and generates G-code.
+    Translates the active (baked) planning curve into G-code at the data's own time step.
+    Motion slower than "Min. speed" is already stepped in the plan (bake), so the G-code
+    reproduces exactly what the planning plot shows.
     Returns (gcode_content, default_filename) or (None, None) if validation fails.
     """
     from PySide6.QtWidgets import QMessageBox
@@ -1279,6 +1437,24 @@ def generate_planned_gcode(self):
     if device not in ["Lung Phantom", "Motion Platform", "Other"]:
         QMessageBox.warning(self, "Warning", f"Unsupported device type: {device}")
         return None, None
+
+    # Safety net: make sure the stored plan is baked (no-op on baked plans). If anything
+    # changes, store it and refresh table/plot so the plot always equals the G-code.
+    baked_df = bake_plan_steps(self, self.dfEdit, device)
+    if baked_df is not self.dfEdit:
+        if device == "Motion Platform":
+            baked_df = compute_motion_platform_actuators(self, baked_df)
+            self.dfEdit_motion_platform = baked_df
+        elif device == "Lung Phantom":
+            self.dfEdit_lung_phantom = baked_df
+        else:
+            self.dfEdit_other = baked_df
+        self.dfEdit = baked_df
+        loadTable_create(self, self.dfEdit)
+        trigger_plot_update(self)
+
+    plan_prm = _gather_plan_params(self, device)
+    gcode_info = {}
 
     t_orig = self.dfEdit['time'].values
     columns_data = {}
@@ -1314,7 +1490,8 @@ def generate_planned_gcode(self):
 
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
-            speed=speed_val, acc=acc_val, jerk=jerk_val
+            speed=speed_val, acc=acc_val, jerk=jerk_val,
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
         )
 
     elif device == "Motion Platform":
@@ -1412,7 +1589,8 @@ def generate_planned_gcode(self):
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
             lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo,
-            speed=speed_val, acc=acc_val, jerk=jerk_val
+            speed=speed_val, acc=acc_val, jerk=jerk_val,
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
         )
 
     else: # Other
@@ -1436,8 +1614,23 @@ def generate_planned_gcode(self):
 
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
-            speed=speed_val, acc=acc_val, jerk=jerk_val
+            speed=speed_val, acc=acc_val, jerk=jerk_val,
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
         )
+
+    # Moves the Duet cannot run at the planned speed (Max Speed / axis limits) make it lag
+    residual_ms = gcode_info.get('residual_ms', 0.0)
+    if abs(residual_ms) > 10.0:
+        res = QMessageBox.question(
+            self,
+            "Timing Warning",
+            f"Some moves need more than the Max Speed setting ({plan_prm['max_speed']:g} mm/s).\n"
+            f"The G-code is expected to run {abs(residual_ms) / 1000.0:.2f} s "
+            f"{'longer' if residual_ms < 0 else 'shorter'} than planned.\n\nDo you still want to proceed?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if res == QMessageBox.No:
+            return None, None
 
     if exceeds_limits:
         res = QMessageBox.question(
@@ -1994,15 +2187,11 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
         progress.show()
         QCoreApplication.processEvents()
 
-    pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
-    data_rows = []
-    current_commands = []
+    # Shared reader: RRF time model (feed on linear vs rotary axes, min-speed clamp,
+    # M203 caps) plus G4 dwells and the file's step overhead; pauses become rows at their time
+    from .fcn_gcode import GcodeTimelineParser
+    parser = GcodeTimelineParser()
     cancelled = False
-
-    current_time = 0.0
-    current_dwell = 0.0
-    current_feedrate = 1000.0
-    last_vals = {}
 
     for line_idx, line in enumerate(lines):
         if line_idx % 500 == 0:
@@ -2014,74 +2203,9 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
             if progress.wasCanceled():
                 cancelled = True
                 break
+        parser.feed_line(line)
 
-        line_clean = line.split(';', 1)[0].strip()
-        if not line_clean:
-            continue
-        
-        first_word = line_clean.split()[0].upper()
-        is_movement = False
-        if first_word.startswith(('G0', 'G1', 'G00', 'G01')):
-            rem = first_word[2:] if first_word.startswith(('G0', 'G1')) else first_word[3:]
-            if not rem or not rem[0].isdigit():
-                is_movement = True
-
-        if is_movement:
-            row_data = {}
-            matches = pattern.findall(line_clean)
-            for axis, val in matches:
-                axis = axis.upper() if not axis.startswith("'") else axis
-                if axis == 'F':
-                    current_feedrate = float(val)
-                elif axis != 'G':
-                    row_data[axis] = float(val)
-            
-            # Calculate distance from last position to compute dt
-            dist_sq = 0.0
-            has_movement = False
-            for axis, val in row_data.items():
-                prev_val = last_vals.get(axis, None)
-                if prev_val is not None:
-                    diff = val - prev_val
-                    dist_sq += diff * diff
-                    has_movement = True
-            
-            dist = np.sqrt(dist_sq) if has_movement else 0.0
-            dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
-            
-            current_time += dt
-            
-            for axis, val in row_data.items():
-                last_vals[axis] = val
-                
-            for axis, val in last_vals.items():
-                if axis not in row_data:
-                    row_data[axis] = val
-            
-            row_data['time'] = current_time
-            row_data['timestamp'] = current_time * 1000.0
-            
-            if current_commands:
-                row_data['Command'] = " ; ".join(current_commands)
-                current_commands = []
-            else:
-                row_data['Command'] = ""
-            
-            data_rows.append(row_data)
-        elif line_clean.upper().startswith('G4'):
-            p_match = re.search(r'[pP](\d+)', line_clean)
-            if p_match:
-                ms = float(p_match.group(1))
-                dwell_sec = ms / 1000.0
-                current_time += dwell_sec
-                if last_vals:
-                    dwell_row = {axis: val for axis, val in last_vals.items()}
-                    dwell_row['time'] = current_time
-                    dwell_row['timestamp'] = current_time * 1000.0
-                    dwell_row['Command'] = ""
-                    data_rows.append(dwell_row)
-        elif line_clean.upper().startswith('M'):
-            current_commands.append(line_clean)
+    data_rows = parser.rows
 
     if cancelled:
         QMessageBox.information(self, "Import Cancelled", "G-code import was cancelled by the user.")
@@ -2129,16 +2253,21 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
 
     if set(axis_cols) == {'X', 'Y', 'Z'}:
         device = "Lung Phantom"
+        df = bake_plan_steps(self, df, device)
         self.dfEdit_lung_phantom = df
         self.dfEdit = self.dfEdit_lung_phantom
     elif 'A' in axis_cols and 'B' in axis_cols and 'C' in axis_cols and 'D' in axis_cols:
         device = "Motion Platform"
         df = _reverse_motion_platform_kinematics(self, df)
+        baked_df = bake_plan_steps(self, df, device)
+        if baked_df is not df:
+            df = compute_motion_platform_actuators(self, baked_df)
         self.dfEdit_motion_platform = df
         self.dfEdit = self.dfEdit_motion_platform
         axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
     else:
         device = "Other"
+        df = bake_plan_steps(self, df, device)
         self.dfEdit_other = df
         self.dfEdit = self.dfEdit_other
 
@@ -2265,17 +2394,11 @@ def import_gcode_action(self, file_path=None):
         """)
         progress.setValue(0)
 
-        # Pattern to match axis value: axis_name followed by float
-        pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
-        
-        data_rows = []
-        current_commands = []
+        # Shared reader: RRF time model (feed on linear vs rotary axes, min-speed clamp,
+        # M203 caps) plus G4 dwells and the file's step overhead; pauses become rows at their time
+        from .fcn_gcode import GcodeTimelineParser
+        parser = GcodeTimelineParser()
         cancelled = False
-        
-        current_time = 0.0
-        current_dwell = 0.0
-        current_feedrate = 1000.0
-        last_vals = {}
 
         with open(file_path, 'r') as f:
             for line_idx, line in enumerate(f):
@@ -2286,78 +2409,9 @@ def import_gcode_action(self, file_path=None):
                     if progress.wasCanceled():
                         cancelled = True
                         break
+                parser.feed_line(line)
 
-                line_clean = line.split(';', 1)[0].strip()
-                if not line_clean:
-                    continue
-
-                first_word = line_clean.split()[0].upper()
-                is_movement = False
-                if first_word.startswith(('G0', 'G1', 'G00', 'G01')):
-                    rem = first_word[2:] if first_word.startswith(('G0', 'G1')) else first_word[3:]
-                    if not rem or not rem[0].isdigit():
-                        is_movement = True
-
-                if is_movement:
-                    # Parse axes
-                    row_data = {}
-                    matches = pattern.findall(line_clean)
-                    for axis, val in matches:
-                        axis = axis.upper() if not axis.startswith("'") else axis
-                        if axis == 'F':
-                            current_feedrate = float(val)
-                        elif axis != 'G':  # Ignore G command type
-                            row_data[axis] = float(val)
-                    
-                    # Calculate distance from last position to compute dt
-                    dist_sq = 0.0
-                    has_movement = False
-                    for axis, val in row_data.items():
-                        prev_val = last_vals.get(axis, None)
-                        if prev_val is not None:
-                            diff = val - prev_val
-                            dist_sq += diff * diff
-                            has_movement = True
-                    
-                    dist = np.sqrt(dist_sq) if has_movement else 0.0
-                    dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
-                    
-                    # Update current time
-                    current_time += dt
-                    
-                    for axis, val in row_data.items():
-                        last_vals[axis] = val
-                        
-                    for axis, val in last_vals.items():
-                        if axis not in row_data:
-                            row_data[axis] = val
-                    
-                    row_data['time'] = current_time
-                    row_data['timestamp'] = current_time * 1000.0
-                    
-                    # Attach any accumulated commands to this row
-                    if current_commands:
-                        row_data['Command'] = " ; ".join(current_commands)
-                        current_commands = []
-                    else:
-                        row_data['Command'] = ""
-                    
-                    data_rows.append(row_data)
-                elif line_clean.upper().startswith('G4'):
-                    p_match = re.search(r'[pP](\d+)', line_clean)
-                    if p_match:
-                        ms = float(p_match.group(1))
-                        dwell_sec = ms / 1000.0
-                        current_time += dwell_sec
-                        if last_vals:
-                            dwell_row = {axis: val for axis, val in last_vals.items()}
-                            dwell_row['time'] = current_time
-                            dwell_row['timestamp'] = current_time * 1000.0
-                            dwell_row['Command'] = ""
-                            data_rows.append(dwell_row)
-                elif line_clean.upper().startswith('M'):
-                    # Store command to attach to the next movement row
-                    current_commands.append(line_clean)
+        data_rows = parser.rows
 
         if cancelled:
             QMessageBox.information(self, "Import Cancelled", "G-code import was cancelled by the user.")
@@ -2417,16 +2471,21 @@ def import_gcode_action(self, file_path=None):
         # Automatically detect device type
         if set(axis_cols) == {'X', 'Y', 'Z'}:
             device = "Lung Phantom"
+            df = bake_plan_steps(self, df, device)
             self.dfEdit_lung_phantom = df
             self.dfEdit = self.dfEdit_lung_phantom
         elif 'A' in axis_cols and 'B' in axis_cols and 'C' in axis_cols and 'D' in axis_cols:
             device = "Motion Platform"
             df = _reverse_motion_platform_kinematics(self, df)
+            baked_df = bake_plan_steps(self, df, device)
+            if baked_df is not df:
+                df = compute_motion_platform_actuators(self, baked_df)
             self.dfEdit_motion_platform = df
             self.dfEdit = self.dfEdit_motion_platform
             axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
         else:
             device = "Other"
+            df = bake_plan_steps(self, df, device)
             self.dfEdit_other = df
             self.dfEdit = self.dfEdit_other
             
@@ -2708,6 +2767,7 @@ class CopyAxisDialog(QDialog):
             parent.dfEdit[target_ax] = parent.dfEdit[source_axis].copy()
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
         elif device == "Motion Platform":
@@ -2934,6 +2994,7 @@ class CropTrimDialog(QDialog):
             parent.dfEdit = df_trimmed
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
         elif device == "Motion Platform":
@@ -3289,6 +3350,7 @@ class MathOperationsDialog(QDialog):
                 df.loc[t_mask, ax] = df.loc[t_mask, ax].clip(lower=0.0)
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
         elif device == "Motion Platform":
@@ -3683,6 +3745,8 @@ class SmoothAxisDialog(QDialog):
             df[f"Acc. {ax}"] = np.nan_to_num(a_smooth, nan=0.0)
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        # Bake the stepped motion (drops the stored Vel./Acc. columns if positions change)
+        parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
         elif device == "Motion Platform":
@@ -3748,4 +3812,4 @@ def open_smooth_axes_dialog(self):
         dlg = SmoothAxisDialog(self)
         dlg.exec_()
     finally:
-        self._smooth_dialog_open = False
+        self._smooth_dialog_open = False

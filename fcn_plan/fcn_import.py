@@ -507,8 +507,11 @@ class ImportMotionDialog(QDialog):
         # 4. Synchronize with Planning Workspace
         p = self.parent_ui
         if p is not None:
-            from fcn_plan.fcn_create import push_curve_state
+            from fcn_plan.fcn_create import push_curve_state, bake_plan_steps
             push_curve_state(p)
+
+            # Bake the stepped motion (min step / Duet minimum speed) so the plot shows what will run
+            plan_df = bake_plan_steps(p, plan_df, device)
 
             if device == "Motion Platform":
                 from fcn_plan.fcn_create import compute_motion_platform_actuators
@@ -873,10 +876,11 @@ def import_trace_log_action(self, file_path=None):
     try:
         plan_df, device, matched_axes, probe_detected, orig_count, t_max = parse_trace_log_file(file_path)
 
-        from fcn_plan.fcn_create import push_curve_state
+        from fcn_plan.fcn_create import push_curve_state, bake_plan_steps, compute_motion_platform_actuators
         push_curve_state(self)
 
         if device == "Lung Phantom":
+            plan_df = bake_plan_steps(self, plan_df, device)
             self.dfEdit_lung_phantom = plan_df
             self.dfEdit = self.dfEdit_lung_phantom
             axis_cols = ['X', 'Y', 'Z']
@@ -885,12 +889,16 @@ def import_trace_log_action(self, file_path=None):
                 from fcn_plan.fcn_create import _reverse_motion_platform_kinematics
                 plan_df = _reverse_motion_platform_kinematics(self, plan_df)
             else:
-                from fcn_plan.fcn_create import compute_motion_platform_actuators
                 plan_df = compute_motion_platform_actuators(self, plan_df)
+            # Bake the stepped motion; refresh actuator columns if positions changed
+            baked_df = bake_plan_steps(self, plan_df, device)
+            if baked_df is not plan_df:
+                plan_df = compute_motion_platform_actuators(self, baked_df)
             self.dfEdit_motion_platform = plan_df
             self.dfEdit = self.dfEdit_motion_platform
             axis_cols = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
         else:
+            plan_df = bake_plan_steps(self, plan_df, device)
             self.dfEdit_other = plan_df
             self.dfEdit = self.dfEdit_other
             axis_cols = sorted(matched_axes)

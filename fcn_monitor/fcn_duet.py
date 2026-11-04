@@ -624,13 +624,11 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
     if not lines:
         return None
 
-    pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
-    data_rows = []
-    current_time = 0.0
-    current_feedrate = 1000.0
-    last_vals = {}
+    # Shared reader (fcn_plan.fcn_gcode): RRF time model for G1 (feed on linear vs rotary
+    # axes, min-speed clamp, M203 caps) and G4 dwells plus the file's step overhead
+    from fcn_plan.fcn_gcode import GcodeTimelineParser
+    parser = GcodeTimelineParser(bare_lowercase_as_quoted=True)
     num_lines = len(lines)
-    pause_times = []  # Track planned pause/wait command timestamps
 
     for idx, line in enumerate(lines):
         if progress_dialog is not None and num_lines > 0 and idx % 200 == 0:
@@ -640,71 +638,10 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
             QCoreApplication.processEvents()
             if progress_dialog.wasCanceled():
                 return None
+        parser.feed_line(line)
 
-        line_clean = line.split(';')[0].strip()
-        if not line_clean:
-            continue
-        if line_clean.startswith('G1'):
-            row_data = {}
-            matches = pattern.findall(line_clean)
-            for axis, val in matches:
-                if axis == 'F':
-                    current_feedrate = float(val)
-                elif axis != 'G':
-                    # Parse lower-case motor axes ('f, 'e, 'a, 'c, 'b or f, e, a, c, b)
-                    if axis.startswith("'") or (len(axis) == 1 and axis.islower() and axis in ['e', 'f', 'a', 'c', 'b']):
-                        clean_ax = axis.strip("'").lower()
-                        row_data[f"'{clean_ax}"] = float(val)
-                        row_data[clean_ax] = float(val)
-                    else:
-                        norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
-                        row_data[norm_axis] = float(val)
-            
-            # Primary motion axes for distance computation matching TRACE G-code generator
-            primary_axes = [ax for ax in ['A', 'B', 'C', 'D', 'X', 'Y', 'Z', "'e", "'f", "'a", "'c"] if ax in row_data]
-            if not primary_axes:
-                primary_axes = [ax for ax in row_data.keys() if ax != 'F']
-
-            dist_sq = 0.0
-            has_movement = False
-            for axis in primary_axes:
-                prev_val = last_vals.get(axis, None)
-                if prev_val is not None:
-                    diff = row_data[axis] - prev_val
-                    dist_sq += diff * diff
-                    has_movement = True
-
-            dist = np.sqrt(dist_sq) if has_movement else 0.0
-            dt = (dist * 60.0) / current_feedrate if (current_feedrate > 0.0 and dist > 0.0) else 0.0
-            current_time += dt
-
-            for axis, val in row_data.items():
-                last_vals[axis] = val
-            for axis, val in last_vals.items():
-                if axis not in row_data:
-                    row_data[axis] = val
-
-            row_data['time'] = current_time
-            row_data['timestamp'] = current_time * 1000.0
-            row_data['Command'] = ""
-            data_rows.append(row_data)
-        elif line_clean.startswith('G4'):
-            p_match = re.search(r'[pP](\d+)', line_clean)
-            if p_match:
-                ms = float(p_match.group(1))
-                current_time += (ms / 1000.0)
-                if last_vals:
-                    dwell_row = {axis: val for axis, val in last_vals.items()}
-                    dwell_row['time'] = current_time
-                    dwell_row['timestamp'] = current_time * 1000.0
-                    dwell_row['Command'] = ""
-                    data_rows.append(dwell_row)
-        elif 'M226' in line_clean or 'M0' == line_clean.split()[0] or 'M1' == line_clean.split()[0]:
-            # Pause / Wait User command
-            pause_times.append(('M226', current_time))
-        elif 'sensor_wait' in line_clean.lower():
-            # Wait Radiation macro call
-            pause_times.append(('sensor_wait', current_time))
+    data_rows = parser.rows
+    pause_times = parser.pause_times  # Planned pause/wait command timestamps
 
     if not data_rows:
         return None

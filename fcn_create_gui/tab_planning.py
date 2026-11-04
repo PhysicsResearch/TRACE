@@ -430,14 +430,20 @@ def build_planning_tab(self):
     lung_layout.setSpacing(10)
     lung_layout.setContentsMargins(0, 5, 0, 5)
 
-    def add_setting_spinbox(layout, parent_widget, label_text, default_val, row, col):
+    def add_setting_spinbox(layout, parent_widget, label_text, default_val, row, col,
+                            vmin=0.1, vmax=1000.0, decimals=1, step=None, tooltip=None):
         lbl = QLabel(label_text, parent_widget)
         lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
         sp = QDoubleSpinBox(parent_widget)
-        sp.setRange(0.1, 1000.0)
+        sp.setDecimals(decimals)
+        sp.setRange(vmin, vmax)
+        if step is not None:
+            sp.setSingleStep(step)
         sp.setValue(default_val)
-        sp.setDecimals(1)
         sp.setMinimumHeight(38)
+        if tooltip:
+            lbl.setToolTip(tooltip)
+            sp.setToolTip(tooltip)
         
         sub_v = QVBoxLayout()
         sub_v.setSpacing(2)
@@ -550,6 +556,26 @@ def build_planning_tab(self):
     self.settings_max_speed = self.combo_phantom_max_speed
     self.settings_acc_phantom = self.combo_phantom_acc
     self.settings_jerk_phantom = self.combo_phantom_jerk
+
+    tip_min_step = ("Motion slower than 'Min. speed' is executed as hold + quick step: the position only "
+                    "changes once the accumulated displacement reaches this value.\n"
+                    "Applied (baked) to the curve when it is created or edited; existing curves keep their steps.")
+    tip_min_speed = ("Duet minimum movement speed, written to the G-code header as M203 I (mm/min).\n"
+                     "Motion at or above it runs as continuous moves at the planned speed; slower motion is stepped.\n"
+                     "On the Motion Platform, roll/pitch with Offset AP ≠ 0 moves LAT/SI slightly (sway), "
+                     "so slow tilts are stepped too.")
+    tip_overhead = ("Restart delay after each G4 dwell on the Duet. Every dwell is shortened by this value so "
+                    "stepped motion finishes on time. Calibrate: (measured − planned duration) / number of G4 lines.")
+    from fcn_plan.fcn_gcode import DEFAULT_MIN_STEP, DEFAULT_MIN_SPEED
+    self.settings_min_step_phantom = add_setting_spinbox(
+        lung_layout, lung_page, "Min. step (mm):", DEFAULT_MIN_STEP, 3, 0,
+        vmin=0.01, vmax=1.0, decimals=3, step=0.01, tooltip=tip_min_step)
+    self.settings_min_speed_phantom = add_setting_spinbox(
+        lung_layout, lung_page, "Min. speed (mm/s):", DEFAULT_MIN_SPEED, 3, 1,
+        vmin=0.01, vmax=0.5, decimals=2, step=0.01, tooltip=tip_min_speed)
+    self.settings_step_overhead_phantom = add_setting_spinbox(
+        lung_layout, lung_page, "Step overhead (ms):", 0.0, 4, 0,
+        vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
     self.settings_stack.addWidget(lung_page)
 
     # Page 1: Motion Platform settings
@@ -570,6 +596,15 @@ def build_planning_tab(self):
     self.settings_max_speed_plat = self.combo_platform_max_speed
     self.settings_acc_plat = self.combo_platform_acc
     self.settings_jerk_plat = self.combo_platform_jerk
+    self.settings_min_step_plat = add_setting_spinbox(
+        platform_layout, platform_page, "Min. step (mm):", DEFAULT_MIN_STEP, 4, 1,
+        vmin=0.01, vmax=1.0, decimals=3, step=0.01, tooltip=tip_min_step)
+    self.settings_min_speed_plat = add_setting_spinbox(
+        platform_layout, platform_page, "Min. speed (mm/s):", DEFAULT_MIN_SPEED, 5, 0,
+        vmin=0.01, vmax=0.5, decimals=2, step=0.01, tooltip=tip_min_speed)
+    self.settings_step_overhead_plat = add_setting_spinbox(
+        platform_layout, platform_page, "Step overhead (ms):", 0.0, 5, 1,
+        vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
     self.settings_stack.addWidget(platform_page)
 
     # Page 2: Other device settings (simple info label)
@@ -1123,6 +1158,12 @@ def setup_settings_persistence(self):
         'max_lim_x': getattr(self, 'settings_max_lim_x', None),
         'max_lim_y': getattr(self, 'settings_max_lim_y', None),
         'max_lim_z': getattr(self, 'settings_max_lim_z', None),
+        'phantom_min_step': getattr(self, 'settings_min_step_phantom', None),
+        'phantom_min_speed': getattr(self, 'settings_min_speed_phantom', None),
+        'phantom_step_overhead_ms': getattr(self, 'settings_step_overhead_phantom', None),
+        'platform_min_step': getattr(self, 'settings_min_step_plat', None),
+        'platform_min_speed': getattr(self, 'settings_min_speed_plat', None),
+        'platform_step_overhead_ms': getattr(self, 'settings_step_overhead_plat', None),
     }
 
     combobox_map = {
