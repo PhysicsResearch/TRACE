@@ -821,14 +821,16 @@ def build_status_tab(self):
     self.status_polling_timer = QTimer(self.tab_status)
     self.status_polling_timer.setInterval(1000)
     
-    from fcn_monitor.fcn_duet import update_status_tab_dashboard, update_status_fast
+    from fcn_monitor.fcn_duet import update_status_tab_dashboard, PositionPoller, handle_position_sample
     self.status_polling_timer.timeout.connect(lambda: update_status_tab_dashboard(self))
     self.status_polling_timer.start()
 
-    # Setup fast status polling timer (polls userPositions every 15 milliseconds)
-    self.status_fast_timer = QTimer(self.tab_status)
-    self.status_fast_timer.setInterval(15)
-    self.status_fast_timer.timeout.connect(lambda: update_status_fast(self))
+    # Live position poll (actual + requested positions, probe) on a background thread.
+    # Samples are handled on the GUI thread in order with their own timestamps, so the
+    # 1 s dashboard / plot redraw no longer leaves holes in the log.
+    # Keeps the 'status_fast_timer' name: isActive()/stop()/start() as before.
+    self.status_fast_timer = PositionPoller(self, lambda s: handle_position_sample(self, s),
+                                            min_period=0.02, parent=self.tab_status)
     self.status_fast_timer.start()
 
     # Initialize Advanced vs Basic mode from persisted configuration

@@ -264,6 +264,12 @@ class MyApp(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            poller = getattr(self, 'status_fast_timer', None)
+            if poller is not None and hasattr(poller, 'shutdown'):
+                poller.shutdown()
+        except Exception:
+            pass
+        try:
             if hasattr(self, 'check_advanced_mode') and self.check_advanced_mode is not None:
                 from fcn_create_gui.tab_status import save_status_advanced_mode
                 save_status_advanced_mode(self, self.check_advanced_mode.isChecked())

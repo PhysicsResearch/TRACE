@@ -285,7 +285,19 @@ def bake_plan_steps(self, df, device=None):
         df[c] = arr
     stale = [c for c in df.columns if str(c).startswith(('Vel.', 'Acc.'))]
     if stale:
+        # Stored kinematics no longer match the baked positions: recompute them from the positions
+        axes = []
+        for c in stale:
+            ax = str(c).split('. ', 1)[1] if '. ' in str(c) else None
+            if ax and ax not in axes:
+                axes.append(ax)
         df = df.drop(columns=stale)
+        axes = [a for a in axes if a in df.columns]
+        if axes:
+            vel, acc = compute_kinematics(df, axes)
+            for a in axes:
+                df[f"Vel. {a}"] = np.nan_to_num(vel[a], nan=0.0)
+                df[f"Acc. {a}"] = np.nan_to_num(acc[a], nan=0.0)
     return df
 
 

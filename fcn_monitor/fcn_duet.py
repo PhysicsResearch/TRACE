@@ -1009,34 +1009,25 @@ def start_selected_gcode_execution(self):
         duet_request(url, params={'gcode': f'M32 0:/gcodes/{fname}'}, timeout=4)
         if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
             self.statusDuetMessage.setText(f"Started execution of 0:/gcodes/{fname}")
-
-        # Start recording straight away upon starting the G-code
-        if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
-            x0 = snapshot.get('X', 0.0) if snapshot else 0.0
-            y0 = snapshot.get('Y', 0.0) if snapshot else 0.0
-            z0 = snapshot.get('Z', 0.0) if snapshot else 0.0
-            extra0 = None
-            if snapshot:
-                sn_e, sn_f = snapshot.get("'e", 15.0), snapshot.get("'f", 15.0)
-                sn_a, sn_b = snapshot.get('A', 15.0), snapshot.get('B', 15.0)
-                sn_c, sn_d = snapshot.get('C', 15.0), snapshot.get('D', 15.0)
-                sn_lo_a, sn_lo_c = snapshot.get("'a", 15.0), snapshot.get("'c", 15.0)
-                extra0 = {
-                    'Roll': 0.0, 'Pitch': 0.0, 'Yaw': snapshot.get('W', 0.0),
-                    'LAT': (sn_e + sn_f) / 2.0,
-                    'AP': (sn_a + sn_b + sn_c + sn_d) / 4.0,
-                    'SI': (sn_lo_a + sn_lo_c) / 2.0
-                }
-            log_data_point(self, 0.0, x0, y0, z0, probe=getattr(self, '_last_probe_val', 0), extra_axes=extra0)
+        # Recording starts with the first live position sample taken after log_t0
+        # (handle_position_sample); no synthetic t=0 row from the G-code target.
     except Exception as e:
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
-def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
+_PLATFORM_LOG_AXES = [("LAT", "mm"), ("SI", "mm"), ("AP", "mm"), ("Roll", "deg"), ("Pitch", "deg"), ("Yaw", "deg")]
+_PHANTOM_LOG_AXES = [("X", "mm"), ("Y", "mm"), ("Z", "mm")]
+
+
+def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, cmd_axes=None):
     """
     Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.csv
     inside the selected output folder (default Desktop).
     Includes computer time on the first line of the log.
+
+    Pos_* columns are the actual position (x/y/z or extra_axes). When cmd_axes is given for
+    the first point of a file, Cmd_* columns are appended with the requested position
+    (Duet userPosition: end point of the last queued move, which runs ahead of the motors).
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
         folder = self.PhOperFolder.text().strip() if hasattr(self, 'PhOperFolder') and self.PhOperFolder and self.PhOperFolder.text() else os.path.join(os.path.expanduser("~"), "Desktop")
@@ -1068,16 +1059,22 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
             f = open(filepath, "w", encoding="utf-8")
             # 1. Computer time in the first line of the log
             f.write(f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            # 2. Column headers in the second line
-            if is_platform:
-                headers = ["Time_s", "Pos_LAT_mm", "Pos_SI_mm", "Pos_AP_mm", "Pos_Roll_deg", "Pos_Pitch_deg", "Pos_Yaw_deg", "Probe"]
-            else:
-                headers = ["Time_s", "Pos_X_mm", "Pos_Y_mm", "Pos_Z_mm", "Probe"]
+            has_cmd = cmd_axes is not None
+            if has_cmd:
+                f.write("# Pos_* = actual motor position (Duet machinePosition) | "
+                        "Cmd_* = requested position (Duet userPosition: end point of the last queued move) | "
+                        "Probe read in the same poll as Pos_*\n")
+            # 2. Column headers
+            axes_spec = _PLATFORM_LOG_AXES if is_platform else _PHANTOM_LOG_AXES
+            headers = ["Time_s"] + [f"Pos_{n}_{u}" for n, u in axes_spec] + ["Probe"]
+            if has_cmd:
+                headers += [f"Cmd_{n}_{u}" for n, u in axes_spec]
             f.write(",".join(headers) + "\n")
             f.flush()
             self.active_log_file = f
             self.active_log_filepath = filepath
             self.active_log_is_platform = is_platform
+            self.active_log_has_cmd = has_cmd
             print(f"Started recording data log to file: {filepath} at computer time {now_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             print(f"Failed to create data log file {filepath}: {e}")
@@ -1086,16 +1083,16 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None):
     try:
         p_val = probe if probe is not None else 0
         if getattr(self, 'active_log_is_platform', False):
-            extra = extra_axes if extra_axes is not None else {}
-            lat = extra.get('LAT', 0.0)
-            si = extra.get('SI', 0.0)
-            ap = extra.get('AP', 0.0)
-            roll = extra.get('Roll', 0.0)
-            pitch = extra.get('Pitch', 0.0)
-            yaw = extra.get('Yaw', 0.0)
-            self.active_log_file.write(f"{t:.4f},{lat:.3f},{si:.3f},{ap:.3f},{roll:.3f},{pitch:.3f},{yaw:.3f},{p_val}\n")
+            axes_spec = _PLATFORM_LOG_AXES
+            pos = extra_axes if extra_axes is not None else {}
         else:
-            self.active_log_file.write(f"{t:.4f},{x:.3f},{y:.3f},{z:.3f},{p_val}\n")
+            axes_spec = _PHANTOM_LOG_AXES
+            pos = {'X': x, 'Y': y, 'Z': z}
+        fields = [f"{t:.4f}"] + [f"{float(pos.get(n, 0.0)):.3f}" for n, _ in axes_spec] + [f"{p_val}"]
+        if getattr(self, 'active_log_has_cmd', False):
+            cmd = cmd_axes if cmd_axes is not None else pos
+            fields += [f"{float(cmd.get(n, pos.get(n, 0.0))):.3f}" for n, _ in axes_spec]
+        self.active_log_file.write(",".join(fields) + "\n")
         self.active_log_file.flush()
     except Exception as e:
         print(f"Error writing to data log file: {e}")
@@ -1438,24 +1435,51 @@ def process_auto_sync_speed(self):
         set_GCODE_speed(self, required_sf)
 
 
+# Status codes for which the live position poll runs (same set the GUI handler accepts)
+_POLL_STATUS_CODES = ("P", "S", "R", "M", "I", "D", "B", "C")
+_LIVE_AXES = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", 'W', 'V']
+
+
+def _num(v):
+    """Float value of an object-model number, or None if missing / null."""
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _put_axis(target, let, value):
+    """Store an axis value under its letter and the plain / quoted aliases ('a, a)."""
+    clean = str(let).strip("'").strip()
+    target[let] = value
+    target[clean] = value
+    target[f"'{clean}"] = value
+
+
 def get_positions_only_fast(self, ip):
     """
-    Highly optimized request to fetch axes positions and homing status (10ms polling).
-    Uses RRF3 /rr_model?key=move.axes or falls back to legacy /rr_status?type=2.
-    Continuously synchronizes self.ext_axes_homed and refreshes UI button styles.
-    """
-    if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
-        self.ext_axes_homed = {}
+    Fetches the axis positions in one light request (safe to call from a worker thread:
+    it touches no widgets). Uses RRF3 /rr_model?key=move.axes&flags=f, falling back to
+    legacy /rr_status?type=2.
 
-    # 1. RRF3 Model Path (lightweight key query using flags=f for fast single-page response of all 11 axes)
+    Returns {'real', 'cmd', 'homed', 'probe'} or None:
+      real  - machinePosition: where the motors actually are (step counters of the
+              executing move; on RRF 3.6 expansion-board axes refresh every 100 ms)
+      cmd   - userPosition: the requested position = end point of the last move that the
+              G-code processor queued. It runs ahead of the motors (jumps to the end of a
+              long G1 as soon as it is queued) and equals 'real' once the queue is empty.
+      homed - {letter: bool}
+      probe - probe value when the response carries it (legacy path), else None
+    """
+    # 1. RRF3 Model Path (lightweight key query using flags=f for fast single-page response of all axes)
     try:
         url = f"http://{ip}/rr_model?key=move.axes&flags=f"
         response = duet_request(url, timeout=0.8)
         if response.status_code == 200:
             axes_list = response.json().get("result", [])
             if isinstance(axes_list, list) and axes_list:
-                axis_positions = {}
-                homed_changed = False
+                real, cmd, homed = {}, {}, {}
+                missing_machine = False
 
                 axes_rrf_order = getattr(self, 'duet_configured_axes', None)
                 if not axes_rrf_order or len(axes_rrf_order) != len(axes_list):
@@ -1465,39 +1489,34 @@ def get_positions_only_fast(self, ip):
                         axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
 
                 for idx, ax in enumerate(axes_list):
-                    if isinstance(ax, dict):
-                        user_pos = ax.get("userPosition", 0.0)
+                    if not isinstance(ax, dict):
+                        continue
+                    if "letter" in ax:
+                        let = str(ax["letter"]).strip()
+                    elif idx < len(axes_rrf_order):
+                        let = axes_rrf_order[idx]
+                    else:
+                        let = str(idx)
 
-                        if "letter" in ax:
-                            let = str(ax["letter"]).strip()
-                        elif idx < len(axes_rrf_order):
-                            let = axes_rrf_order[idx]
-                        else:
-                            let = str(idx)
+                    user_pos = _num(ax.get("userPosition"))
+                    mach_pos = _num(ax.get("machinePosition"))
+                    if mach_pos is None:
+                        missing_machine = True
+                    if user_pos is None:
+                        user_pos = mach_pos if mach_pos is not None else 0.0
+                    _put_axis(cmd, let, user_pos)
+                    _put_axis(real, let, mach_pos if mach_pos is not None else user_pos)
 
-                        clean_let = let.strip("'").strip()
-                        axis_positions[let] = user_pos
-                        axis_positions[clean_let] = user_pos
-                        axis_positions[f"'{clean_let}"] = user_pos
+                    if "homed" in ax or "userHomed" in ax:
+                        homed_val = ax.get("homed", ax.get("userHomed", 0))
+                        homed[let] = (homed_val == 1 or homed_val is True)
 
-                        if "homed" in ax or "userHomed" in ax:
-                            homed_val = ax.get("homed", ax.get("userHomed", 0))
-                            is_h = (homed_val == 1 or homed_val is True)
+                if missing_machine and not getattr(self, '_machine_pos_missing_noted', False):
+                    self._machine_pos_missing_noted = True
+                    print("Duet does not report move.axes[].machinePosition: logging userPosition "
+                          "(requested position, runs ahead of the motors) instead.")
 
-                            if self.ext_axes_homed.get(clean_let) != is_h or self.ext_axes_homed.get(f"'{clean_let}") != is_h:
-                                homed_changed = True
-                            self.ext_axes_homed[let] = is_h
-                            self.ext_axes_homed[clean_let] = is_h
-                            self.ext_axes_homed[f"'{clean_let}"] = is_h
-
-                if homed_changed:
-                    try:
-                        from fcn_control.fcn_control import refresh_external_axis_styles
-                        refresh_external_axis_styles(self)
-                    except Exception:
-                        pass
-
-                return axis_positions
+                return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': None}
     except Exception:
         pass
 
@@ -1507,14 +1526,13 @@ def get_positions_only_fast(self, ip):
         response_legacy = duet_request(url_legacy, timeout=0.8)
         if response_legacy.status_code == 200:
             data = response_legacy.json()
-            xyz = data.get("coords", {}).get("xyz", [0.0, 0.0, 0.0])
-            axes_homed = data.get("coords", {}).get("axesHomed", [])
+            coords = data.get("coords", {})
+            xyz = coords.get("xyz", [0.0, 0.0, 0.0])
+            machine = coords.get("machine")
+            if not isinstance(machine, list) or len(machine) != len(xyz):
+                machine = xyz
+            axes_homed = coords.get("axesHomed", [])
 
-            axis_positions = {
-                'X': xyz[0] if len(xyz) > 0 else 0.0,
-                'Y': xyz[1] if len(xyz) > 1 else 0.0,
-                'Z': xyz[2] if len(xyz) > 2 else 0.0,
-            }
             axes_rrf_order = getattr(self, 'duet_configured_axes', None)
             if not axes_rrf_order:
                 if len(axes_homed) == 11 or len(xyz) == 11:
@@ -1522,34 +1540,206 @@ def get_positions_only_fast(self, ip):
                 else:
                     axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
 
+            real, cmd, homed = {}, {}, {}
             for idx, ax_name in enumerate(axes_rrf_order):
                 if idx < len(xyz):
-                    axis_positions[ax_name] = xyz[idx]
+                    _put_axis(cmd, ax_name, _num(xyz[idx]) or 0.0)
+                    _put_axis(real, ax_name, _num(machine[idx]) or 0.0)
                 if idx < len(axes_homed):
-                    is_h = (axes_homed[idx] == 1)
-                    clean_n = str(ax_name).strip("'")
-                    self.ext_axes_homed[ax_name] = is_h
-                    self.ext_axes_homed[clean_n] = is_h
-                    self.ext_axes_homed[f"'{clean_n}"] = is_h
+                    homed[ax_name] = (axes_homed[idx] == 1)
 
-            try:
-                from fcn_control.fcn_control import refresh_external_axis_styles
-                refresh_external_axis_styles(self)
-            except Exception:
-                pass
-
-            return axis_positions
+            probe = data.get("sensors", {}).get("probeValue") if isinstance(data.get("sensors"), dict) else None
+            return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': probe}
     except Exception:
         pass
 
     return None
 
 
-def update_status_fast(self):
+def _poll_probe_value(ip):
+    """Current Z-probe value from /rr_model?key=sensors.probes, or None."""
+    try:
+        res = duet_request(f'http://{ip}/rr_model?key=sensors.probes', timeout=0.8)
+        if res.status_code == 200:
+            sens = res.json().get("result", [])
+            if isinstance(sens, list) and sens and isinstance(sens[0], dict):
+                vals = sens[0].get("value", [])
+                if isinstance(vals, list) and vals:
+                    return vals[0]
+                if isinstance(vals, (int, float)):
+                    return vals
+    except Exception:
+        pass
+    return None
+
+
+def poll_position_sample(self):
     """
-    Fast status loop (runs every 10ms).
-    Fetches only the user positions from the Duet, updates the status position labels,
-    logs data points to text files (if recording), and appends data to plot buffers.
+    One live sample: positions (real + requested) and the probe, timestamped with
+    time.perf_counter() at the middle of the position request. Worker-thread safe.
+    """
+    ip = getattr(self, 'duet_ip', None) or "192.168.0.1"   # kept current by get_clean_duet_ip (GUI thread)
+    t0 = time.perf_counter()
+    sample = get_positions_only_fast(self, ip)
+    t1 = time.perf_counter()
+    if not sample:
+        return None
+    sample['t'] = 0.5 * (t0 + t1)
+    if sample.get('probe') is None:
+        sample['probe'] = _poll_probe_value(ip)
+    return sample
+
+
+try:
+    from PySide6.QtCore import QObject, Signal, Slot, Qt
+
+    class PositionPoller(QObject):
+        """
+        Polls the Duet live positions on a background thread and hands every sample to
+        `handler` on the GUI thread (queued, in order). The 1 s dashboard and plot redraw
+        can block the GUI thread, but samples are still taken on time and are written with
+        their own timestamps, so the log has no holes.
+
+        Drop-in for the former 15 ms QTimer (`status_fast_timer`): isActive() / start() / stop().
+        start() ignores an interval argument; stop() waits for an in-flight request so file
+        transfers do not overlap a position poll.
+        """
+        sample = Signal(object)
+
+        def __init__(self, ui, handler, min_period=0.02, parent=None):
+            super().__init__(parent)
+            self._ui = ui
+            self._handler = handler
+            self._min_period = float(min_period)
+            self._enabled = threading.Event()
+            self._quit = threading.Event()
+            self._busy = threading.Lock()
+            self._thread = None
+            self.sample.connect(self._deliver, Qt.QueuedConnection)
+
+        @Slot(object)
+        def _deliver(self, s):
+            try:
+                self._handler(s)
+            except Exception as e:
+                print(f"Error in fast status loop: {e}")
+
+        def isActive(self):
+            return self._enabled.is_set()
+
+        def start(self, *_ignored):
+            self._enabled.set()
+            if self._thread is None or not self._thread.is_alive():
+                self._quit.clear()
+                self._thread = threading.Thread(target=self._run, name="DuetPositionPoller", daemon=True)
+                self._thread.start()
+
+        def stop(self, wait=3.0):
+            self._enabled.clear()
+            if self._busy.acquire(timeout=wait):   # wait for an in-flight request
+                self._busy.release()
+
+        def shutdown(self, wait=3.0):
+            self._quit.set()
+            self.stop(wait)
+            th = self._thread
+            if th is not None and th.is_alive():
+                th.join(timeout=wait)
+
+        def _run(self):
+            ui = self._ui
+            while not self._quit.is_set():
+                if not self._enabled.wait(0.1):
+                    continue
+                t_start = time.perf_counter()
+                period = self._min_period
+                s = None
+                if (getattr(ui, 'duet_connected', False) and not getattr(ui, 'status_stopped', False)
+                        and getattr(ui, 'duet_status_code', 'I') in _POLL_STATUS_CODES):
+                    with self._busy:
+                        if self._enabled.is_set() and not self._quit.is_set():
+                            try:
+                                s = poll_position_sample(ui)
+                            except Exception as e:
+                                print(f"Error polling Duet positions: {e}")
+                else:
+                    period = 0.1
+                if s is not None:
+                    self.sample.emit(s)
+                rest = period - (time.perf_counter() - t_start)
+                if rest > 0:
+                    self._quit.wait(rest)
+except ImportError:   # pragma: no cover - Qt is always present in the app
+    PositionPoller = None
+
+
+def _apply_homed_flags(self, homed):
+    """Sync self.ext_axes_homed from a sample and refresh the axis button styles on change (GUI thread)."""
+    if not homed:
+        return
+    if not hasattr(self, 'ext_axes_homed') or not isinstance(self.ext_axes_homed, dict):
+        self.ext_axes_homed = {}
+    changed = False
+    for let, is_h in homed.items():
+        clean = str(let).strip("'").strip()
+        if self.ext_axes_homed.get(clean) != is_h or self.ext_axes_homed.get(f"'{clean}") != is_h:
+            changed = True
+        self.ext_axes_homed[let] = is_h
+        self.ext_axes_homed[clean] = is_h
+        self.ext_axes_homed[f"'{clean}"] = is_h
+    if changed:
+        try:
+            from fcn_control.fcn_control import refresh_external_axis_styles
+            refresh_external_axis_styles(self)
+        except Exception:
+            pass
+
+
+def _platform_dims(self):
+    lat_dim = 100.0
+    if hasattr(self, 'input_plat_lat') and self.input_plat_lat:
+        try: lat_dim = float(self.input_plat_lat.text().strip())
+        except ValueError: pass
+    if lat_dim <= 0.0: lat_dim = 100.0
+
+    si_dim = 100.0
+    if hasattr(self, 'input_plat_si') and self.input_plat_si:
+        try: si_dim = float(self.input_plat_si.text().strip())
+        except ValueError: pass
+    if si_dim <= 0.0: si_dim = 100.0
+
+    y_lo_name = "'c"
+    if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
+        y_lo_name = "'b"
+    return lat_dim, si_dim, y_lo_name
+
+
+def _platform_dof(axes, lat_dim, si_dim, y_lo_name="'c"):
+    """Platform DOF (LAT/SI/AP in mm, Roll/Pitch/Yaw in deg) from actuator positions."""
+    a, b, c, d = axes['A'], axes['B'], axes['C'], axes['D']
+    roll = math.degrees(math.atan2((a + d) / 2.0 - (b + c) / 2.0, lat_dim))
+    pitch = math.degrees(math.atan2((a + b) / 2.0 - (c + d) / 2.0, si_dim))
+    lat = (axes.get("'e", 0.0) + axes.get("'f", 0.0)) / 2.0
+    si = (axes.get("'a", 0.0) + axes.get(y_lo_name, axes.get("'c", 0.0))) / 2.0
+    ap = (a + b + c + d) / 4.0
+    return {'Roll': roll, 'Pitch': pitch, 'Yaw': axes['W'], 'LAT': lat, 'AP': ap, 'SI': si}
+
+
+def update_status_fast(self):
+    """Synchronous poll + handle (kept for callers/tests; the app uses PositionPoller)."""
+    if not getattr(self, 'duet_connected', False) or getattr(self, 'status_stopped', False):
+        return
+    get_clean_duet_ip(self)
+    s = poll_position_sample(self)
+    if s:
+        handle_position_sample(self, s)
+
+
+def handle_position_sample(self, s):
+    """
+    Handles one live sample on the GUI thread: updates the status position labels,
+    logs the data point to the log file (if recording) and appends it to the plot buffers.
+    Uses the sample's own timestamp s['t'] (time.perf_counter() when it was taken).
     Does NOT call render_status_plot (graph redraw throttled to 1s in slow timer).
     """
     if not getattr(self, 'duet_connected', False):
@@ -1557,21 +1747,22 @@ def update_status_fast(self):
     if getattr(self, 'status_stopped', False):
         return
     status_code = getattr(self, 'duet_status_code', 'I')
-    if status_code not in ["P", "S", "R", "M", "I", "D", "B", "C"]:
+    if status_code not in _POLL_STATUS_CODES:
         return
 
-    ip = get_clean_duet_ip(self)
     try:
-        axis_positions = get_positions_only_fast(self, ip)
-        if not axis_positions:
-            return
+        _apply_homed_flags(self, s.get('homed'))
 
         # Ensure we have defaults for all required axes
-        for ax in ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", 'W', 'V']:
+        axis_positions = dict(s.get('real') or {})
+        cmd_positions = dict(s.get('cmd') or {})
+        for ax in _LIVE_AXES:
             if ax not in axis_positions:
                 axis_positions[ax] = 0.0
+            if ax not in cmd_positions:
+                cmd_positions[ax] = axis_positions[ax]
 
-        # Update the UI labels
+        # Update the UI labels (actual position)
         x_val = axis_positions['X']
         y_val = axis_positions['Y']
         z_val = axis_positions['Z']
@@ -1592,49 +1783,12 @@ def update_status_fast(self):
             if lbl is not None:
                 lbl.setText(f"{raw_name} {axis_positions[raw_name]:.2f}")
 
-        # Calculate Roll & Pitch
-        lat_dim = 100.0
-        if hasattr(self, 'input_plat_lat') and self.input_plat_lat:
-            try: lat_dim = float(self.input_plat_lat.text().strip())
-            except ValueError: pass
-        if lat_dim <= 0.0: lat_dim = 100.0
-
-        si_dim = 100.0
-        if hasattr(self, 'input_plat_si') and self.input_plat_si:
-            try: si_dim = float(self.input_plat_si.text().strip())
-            except ValueError: pass
-        if si_dim <= 0.0: si_dim = 100.0
-
-        curr_a = axis_positions['A']
-        curr_b = axis_positions['B']
-        curr_c = axis_positions['C']
-        curr_d = axis_positions['D']
-
-        h_ad = (curr_a + curr_d) / 2.0
-        h_bc = (curr_b + curr_c) / 2.0
-        diff_h = h_ad - h_bc
-        current_roll = math.degrees(math.atan2(diff_h, lat_dim))
-
-        h_ab = (curr_a + curr_b) / 2.0
-        h_cd = (curr_c + curr_d) / 2.0
-        diff_h_pitch = h_ab - h_cd
-        current_pitch = math.degrees(math.atan2(diff_h_pitch, si_dim))
-        
-        current_yaw = axis_positions['W']
-
-        # Calculate LAT, AP, SI
-        curr_lower_e = axis_positions.get("'e", 0.0)
-        curr_lower_f = axis_positions.get("'f", 0.0)
-        current_lat = (curr_lower_e + curr_lower_f) / 2.0
-
-        curr_lower_a = axis_positions.get("'a", 0.0)
-        axis_y_lo_name = "'c"
-        if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
-            axis_y_lo_name = "'b"
-        curr_lower_y_lo = axis_positions.get(axis_y_lo_name, axis_positions.get("'c", 0.0))
-        current_si = (curr_lower_a + curr_lower_y_lo) / 2.0
-
-        current_ap = (curr_a + curr_b + curr_c + curr_d) / 4.0
+        # Platform DOF from the actual and from the requested actuator positions
+        lat_dim, si_dim, y_lo_name = _platform_dims(self)
+        dof = _platform_dof(axis_positions, lat_dim, si_dim, y_lo_name)
+        dof_cmd = _platform_dof(cmd_positions, lat_dim, si_dim, y_lo_name)
+        current_roll, current_pitch, current_yaw = dof['Roll'], dof['Pitch'], dof['Yaw']
+        current_lat, current_ap, current_si = dof['LAT'], dof['AP'], dof['SI']
 
         if hasattr(self, 'statusPosRoll') and self.statusPosRoll:
             self.statusPosRoll.setText(f"Roll {current_roll:.2f}")
@@ -1643,27 +1797,31 @@ def update_status_fast(self):
         if hasattr(self, 'statusPosYaw') and self.statusPosYaw:
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
-        t_now = time.perf_counter()
-        curr_p = getattr(self, '_last_probe_val', 0)
+        t_now = float(s.get('t', time.perf_counter()))
+        curr_p = s.get('probe')
+        if curr_p is None:
+            curr_p = getattr(self, '_last_probe_val', 0)
+
+        # A sample taken before the job was started (but handled after, because the GUI
+        # thread was busy) must not start the new log or plot timeline
+        if getattr(self, 'log_t0', None) is not None and t_now < self.log_t0:
+            return
 
         # Continuous file logging: records straight away when G-code starts, and keeps recording continuously without pause
         if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
             if getattr(self, 'gcode_executing', False) or getattr(self, 'active_log_file', None) is not None:
                 if getattr(self, 'log_t0', None) is None:
                     self.log_t0 = t_now
-                t_log = max(0.0, t_now - self.log_t0)
-                log_data_point(self, t_log, x_val, y_val, z_val, curr_p,
-                               extra_axes={
-                                   'Roll': current_roll, 'Pitch': current_pitch, 'Yaw': current_yaw,
-                                   'LAT': current_lat, 'AP': current_ap, 'SI': current_si
-                               })
+                cmd_axes = {'X': cmd_positions['X'], 'Y': cmd_positions['Y'], 'Z': cmd_positions['Z']}
+                cmd_axes.update(dof_cmd)
+                log_data_point(self, t_now - self.log_t0, x_val, y_val, z_val, curr_p,
+                               extra_axes=dof, cmd_axes=cmd_axes)
         else:
             if getattr(self, 'active_log_file', None) is not None:
                 close_data_log_file(self)
 
         elapsed_t = 0.0
         # Determine whether to update plot data based on status code and 'Include pause' checkbox
-        status_code = getattr(self, 'duet_status_code', 'I')
         include_pause = True
         if hasattr(self, 'check_include_pause') and self.check_include_pause is not None:
             include_pause = self.check_include_pause.isChecked()
@@ -1696,8 +1854,6 @@ def update_status_fast(self):
                     should_update_plot = False
             else:
                 should_update_plot = True
-
-        t_now = time.perf_counter()
 
         if not should_update_plot:
             if is_paused_state and not include_pause:
@@ -1749,7 +1905,6 @@ def update_status_fast(self):
             self.status_plot_data['LAT'].append(current_lat)
             self.status_plot_data['AP'].append(current_ap)
             self.status_plot_data['SI'].append(current_si)
-            curr_p = getattr(self, '_last_probe_val', 0)
             if 'probe' not in self.status_plot_data:
                 self.status_plot_data['probe'] = []
             self.status_plot_data['probe'].append(curr_p)
