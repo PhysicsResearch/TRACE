@@ -823,8 +823,8 @@ def parse_trace_log_file(file_path):
                 plan_df[ax] = 0.0
                 plan_df[f"Vel. {ax}"] = 0.0
                 plan_df[f"Acc. {ax}"] = 0.0
-        # If A, B, C, D actuators are directly recorded in the log file
-        for ax in ['A', 'B', 'C', 'D']:
+        # If the actuators (A, B, C, D, 'e, 'f, 'a, 'c) are directly recorded in the log file
+        for ax in ['A', 'B', 'C', 'D', "'e", "'f", "'a", "'c"]:
             if ax in matched_axes:
                 orig_c = [c for c, a in axis_mapping.items() if a == ax][0]
                 pos_r, vel_r, acc_r = _compute_and_resample_axis(df[orig_c])
@@ -858,7 +858,7 @@ def import_trace_log_action(self, file_path=None):
         if not os.path.exists(start_dir):
             start_dir = ""
 
-        filters = "TRACE Log Files (log_*.txt *.txt);;All Files (*)"
+        filters = "TRACE Log Files (log_*.csv log_*.txt *.txt);;All Files (*)"
         file_path, _ = QFileDialog.getOpenFileName(
             self if isinstance(self, QWidget) else None,
             "Select TRACE Log File to Import",
@@ -885,10 +885,13 @@ def import_trace_log_action(self, file_path=None):
             self.dfEdit = self.dfEdit_lung_phantom
             axis_cols = ['X', 'Y', 'Z']
         elif device == "Motion Platform":
-            if any(ax in ['A', 'B', 'C', 'D'] for ax in matched_axes):
+            has_dof = any(ax in ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw'] for ax in matched_axes)
+            if not has_dof and any(ax in ['A', 'B', 'C', 'D'] for ax in matched_axes):
+                # Only actuators were logged: derive the DOF from them
                 from fcn_plan.fcn_create import _reverse_motion_platform_kinematics
                 plan_df = _reverse_motion_platform_kinematics(self, plan_df)
             else:
+                # The logged DOF are the plan; actuators are recomputed from them
                 plan_df = compute_motion_platform_actuators(self, plan_df)
             # Bake the stepped motion; refresh actuator columns if positions changed
             baked_df = bake_plan_steps(self, plan_df, device)
@@ -1041,7 +1044,7 @@ def unified_import_action(self, file_path=None):
 
             filters = (
                 "All Supported Files (*.gcode *.g *.nc *.vxp *.csv *.txt);;"
-                "TRACE Log Files (log_*.txt *.txt);;"
+                "TRACE Log Files (log_*.csv log_*.txt *.txt);;"
                 "G-code Files (*.gcode *.g *.nc);;"
                 "Motion / Respiratory Files (*.vxp *.csv);;"
                 "All Files (*)"

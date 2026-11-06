@@ -428,6 +428,11 @@ def select_gcode_for_status(self, fpath):
     """
     self.selected_gcode_path = fpath
     self.status_reference_data = None
+    try:
+        from fcn_monitor.fcn_duet import update_gcode_name_label
+        update_gcode_name_label(self, fpath)
+    except Exception:
+        pass
 
     if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
         self.statusDuetMessage.setText(f"File 0:/gcodes/{os.path.basename(fpath)} selected for printing. Press 'Start' to begin motion.")

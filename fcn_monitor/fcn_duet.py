@@ -39,17 +39,20 @@ def get_shared_session():
     return _thread_local.session
 
 
-def duet_request(url, params=None, timeout=4):
+def duet_request(url, params=None, timeout=4, retry=True):
     """
     Send an HTTP GET request to Duet, bypassing Windows system environment proxies
     to avoid false connection timeouts when connecting to local IP addresses.
     Uses a thread-local Session to reuse TCP connections (keep-alive) and prevent socket exhaustion.
     Automatically retries once with a fresh socket if an idle keep-alive connection is reset (WinError 10054).
+    retry=False (live position worker) fails fast instead, so its in-flight time stays bounded.
     """
     session = get_shared_session()
     try:
         return session.get(url, params=params, timeout=timeout)
     except Exception:
+        if not retry:
+            raise
         # Duet closed the idle keep-alive TCP connection. Recreate session & retry once with a fresh socket.
         if hasattr(_thread_local, 'session') and _thread_local.session:
             try:
@@ -259,34 +262,31 @@ def render_status_plot(self):
             pass
     self._probe_span_patches = []
 
+    # Probe classes: 0 none, 0 < v < 1500 detector (red), v >= 1500 Release-button marker (blue)
     probe_data = plot_data.get('probe', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
     if len(probe_data) > 0 and len(t_data) == len(probe_data):
-        in_rad = False
-        rad_start = 0.0
+        span_colors = {1: '#ff0000', 2: '#0288d1'}
+        dt_default = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
+
+        def _add_span(kind, start, end):
+            if end <= start:
+                end = start + dt_default
+            span = self.ax_status.axvspan(start, end, color=span_colors[kind], alpha=0.22, zorder=0)
+            self._probe_span_patches.append(span)
+
+        cur_kind, span_start = 0, 0.0
         for i in range(len(t_data)):
             try:
                 val = float(probe_data[i])
             except (ValueError, TypeError):
                 val = 0.0
-
-            if val > 0 and not in_rad:
-                in_rad = True
-                rad_start = t_data[i]
-            elif val <= 0 and in_rad:
-                in_rad = False
-                rad_end = t_data[i]
-                if rad_end <= rad_start:
-                    dt = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
-                    rad_end = rad_start + dt
-                span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
-                self._probe_span_patches.append(span)
-        if in_rad:
-            rad_end = t_data[-1]
-            if rad_end <= rad_start:
-                dt = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
-                rad_end = rad_start + dt
-            span = self.ax_status.axvspan(rad_start, rad_end, color='#ff0000', alpha=0.22, zorder=0)
-            self._probe_span_patches.append(span)
+            kind = 0 if val <= 0 else (2 if val >= 1500 else 1)
+            if kind != cur_kind:
+                if cur_kind:
+                    _add_span(cur_kind, span_start, t_data[i])
+                cur_kind, span_start = kind, t_data[i]
+        if cur_kind:
+            _add_span(cur_kind, span_start, t_data[-1])
 
     # Parse user-configured time window interval (default 60s)
     time_win = 60.0
@@ -384,6 +384,11 @@ def load_log_file_into_status(self, file_path=None):
     red transparent shading for regions where probe > 0.
     """
     if getattr(self, '_log_dialog_open', False) is True:
+        return
+    if getattr(self, 'run_active', False) is True:
+        # Loading would stop this run's recording and mix the file into the live plot
+        QMessageBox.information(self, "Run in progress",
+                                "A G-code run is being recorded. Load the log file after the run has finished.")
         return
     self._log_dialog_open = True
     try:
@@ -579,9 +584,14 @@ def _load_log_file_into_status_impl(self, file_path=None):
     # Ensure full viewing bounds on axes
     if hasattr(self, 'ax_status') and self.ax_status is not None:
         self.ax_status.set_xlim(0.0, max(max_t, 1.0))
+        # y-range from the traces actually shown (Basic mode hides e.g. the raw actuators)
+        cb_by_key = {key: getattr(self, cb_name, None) for cb_name, key in traces}
         all_visible_vals = []
         for k in matched_axes.keys():
-            all_visible_vals.extend(new_plot_data[k])
+            cb = cb_by_key.get(k)
+            shown = cb is None or (cb.isChecked() and not (hasattr(cb, 'isHidden') and cb.isHidden() is True))
+            if shown:
+                all_visible_vals.extend(new_plot_data[k])
         if all_visible_vals:
             y_min = min(all_visible_vals)
             y_max = max(all_visible_vals)
@@ -908,8 +918,39 @@ def auto_load_current_gcode_reference(self, filename=None, force=False):
 def start_selected_gcode_execution(self):
     """
     Executes the currently selected G-code file on the Duet when the green Start button is clicked.
-    If 'Pre-setup' is enabled, pre-positions the platform at the initial G-code coordinates
-    before launching execution and tracking.
+    Guarded against a second Start while this one is still pre-positioning (the wait processes
+    GUI events, so the button could otherwise be pressed again).
+    """
+    if getattr(self, '_starting_gcode', False) is True:
+        return
+    self._starting_gcode = True
+    btn = getattr(self, 'gcodeStart', None)
+    try:
+        if btn is not None and hasattr(btn, 'setEnabled'):
+            btn.setEnabled(False)
+        _start_selected_gcode_execution_impl(self)
+    finally:
+        self._starting_gcode = False
+        if btn is not None and hasattr(btn, 'setEnabled'):
+            btn.setEnabled(True)
+
+
+def update_gcode_name_label(self, name):
+    """Shows the loaded / running G-code file name in the Status tab (stays visible, unlike the
+    Duet message line)."""
+    lbl = getattr(self, 'statusGcodeName', None)
+    if lbl is None or not hasattr(lbl, 'setText'):
+        return
+    txt = f"G-code: {os.path.basename(str(name)) if name else '--'}"
+    if lbl.text() != txt:
+        lbl.setText(txt)
+        lbl.setToolTip(str(name) if name else "")
+
+
+def _start_selected_gcode_execution_impl(self):
+    """
+    Pre-positions the platform at the initial G-code coordinates, then starts the file (M32)
+    with one time zero for the log and the plot.
     """
     from PySide6.QtWidgets import QMessageBox
     from PySide6.QtCore import QCoreApplication
@@ -929,6 +970,7 @@ def start_selected_gcode_execution(self):
     ip = get_clean_duet_ip(self)
     url = f'http://{ip}/rr_gcode'
     fname = os.path.basename(fpath) if os.path.isabs(fpath) else fpath.strip("/")
+    update_gcode_name_label(self, fname)
 
     # Always pre-position platform to starting coordinates of fname before launching execution
     if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
@@ -936,6 +978,7 @@ def start_selected_gcode_execution(self):
         QCoreApplication.processEvents()
 
     first_g1 = None
+    lines = []
     try:
         dl_url = f'http://{ip}/rr_download?name=/gcodes/{fname}'
         res = duet_request(dl_url, timeout=3)
@@ -951,167 +994,335 @@ def start_selected_gcode_execution(self):
     except Exception as e:
         print(f"Could not read first G1 line from {fname}: {e}")
 
+    # A previous run that is still open ends here
+    if getattr(self, 'run_active', False) is True or getattr(self, 'active_log_file', None) is not None:
+        end_run(self, "new start")
+
+    # Device of THIS job (decides the log columns), from the G-code axis letters
+    run_device = _device_from_gcode_lines(lines)
+    if run_device is None:
+        combo = getattr(self, 'combo_device', None)
+        txt = combo.currentText() if combo is not None and hasattr(combo, 'currentText') else None
+        run_device = txt if isinstance(txt, str) and txt else "Lung Phantom"
+    self.run_device = run_device
+
+    # Parse target starting coordinates from first_g1 for exact snapshot anchor
+    snapshot = _parse_g1_targets(first_g1) if first_g1 else {}
+
+    self.status_stopped = False
     if first_g1:
         try:
+            t_sent = time.perf_counter()
             duet_request(url, params={'gcode': f'G90\n{first_g1}\nM400'}, timeout=5)
-            # Wait for pre-position move to finish
-            t_pre = time.perf_counter()
-            while time.perf_counter() - t_pre < 2.5:
-                status_c = getattr(self, 'duet_status_code', 'I')
-                if status_c in ['I', 'S']:
-                    break
-                time.sleep(0.05)
+            # Wait until the live samples show the platform at the start position
+            _wait_for_preposition(self, snapshot, t_sent)
         except Exception as e:
             print(f"Pre-positioning move failed: {e}")
 
-    # Parse target starting coordinates from first_g1 for exact snapshot anchor
-    snapshot = {}
-    if first_g1:
-        import re
-        pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|\d+)")
-        matches = pattern.findall(first_g1)
-        for axis, val in matches:
-            if axis != 'G' and axis != 'F':
-                if axis.startswith("'") or (len(axis) == 1 and axis.islower()):
-                    clean_ax = axis.strip("'").lower()
-                    snapshot[f"'{clean_ax}"] = float(val)
-                    snapshot[clean_ax] = float(val)
-                else:
-                    norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
-                    snapshot[norm_axis] = float(val)
-
-    if getattr(self, 'active_log_file', None) is not None:
-        close_data_log_file(self)
-    self.status_t0 = None
-    self.status_plot_data = None
-    self.status_stopped = False
     self._start_pos_snapshot = snapshot if snapshot else None
     self._last_auto_sf = 100.0
 
+    # Start from a clean plot (previous curves, reference, pause lines, probe shading) ...
+    try:
+        clear_status_plot_data(self)
+    except Exception as e:
+        print(f"Could not clear the status plot: {e}")
+    # ... and show this file's planned trajectory as reference when it can be loaded
+    # (before t0: downloading/parsing can take a while)
+    ref_ok = False
+    try:
+        ref_ok = bool(auto_load_current_gcode_reference(self, filename=fname, force=False))
+    except Exception as e:
+        print(f"Could not load the reference for {fname}: {e}")
+    if not ref_ok:
+        self.status_reference_data = None
+    show_ref_check = getattr(self, 'check_show_reference', None)
+    if show_ref_check is not None and hasattr(show_ref_check, 'setChecked'):
+        show_ref_check.blockSignals(True)
+        show_ref_check.setChecked(ref_ok)
+        show_ref_check.blockSignals(False)
+
+    # One time zero for the log and the plot, taken right before the job is started
+    t0 = time.perf_counter()
+    self.run_wall = datetime.now()
+    self.run_t0 = t0
+    self.log_t0 = t0
+    self.status_t0 = t0
+    self.status_plot_data = None
+    self._total_pause_duration = 0.0
+    self._pause_start_perf = None
+    self.run_seen_running = False
+    self.run_idle_since = None
+    self._dash_idle_count = 0
+    self._release_mark_t = None
+    self._run_gap_open = False
+    self._log_open_failed = False
+    self.run_gcode = f"0:/gcodes/{fname}"
+    self.run_active = True
     # Mark G-code execution as active for continuous logging and clean completion detection
     self.gcode_executing = True
     self.gcode_seen_running = False
-    self.gcode_started_time = time.perf_counter()
-    self.log_t0 = time.perf_counter()
-    
-    # Load reference data specifically for this G-code file IF 'Show reference' is checked and not already loaded
-    show_ref_check = getattr(self, 'check_show_reference', None)
-    if show_ref_check is not None and show_ref_check.isChecked():
-        if getattr(self, 'status_reference_data', None) is None or getattr(self, '_loaded_ref_filename', None) != fname:
-            auto_load_current_gcode_reference(self, filename=fname, force=False)
-    else:
-        self.status_reference_data = None
-
-    if hasattr(self, 'status_plot_lines'):
-        self.status_plot_lines.clear()
+    self.gcode_started_time = t0
 
     try:
         duet_request(url, params={'gcode': f'M32 0:/gcodes/{fname}'}, timeout=4)
         if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None:
             self.statusDuetMessage.setText(f"Started execution of 0:/gcodes/{fname}")
-        # Recording starts with the first live position sample taken after log_t0
+        # Recording starts with the first live position sample taken after run_t0
         # (handle_position_sample); no synthetic t=0 row from the G-code target.
     except Exception as e:
+        end_run(self, "start failed")
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
-_PLATFORM_LOG_AXES = [("LAT", "mm"), ("SI", "mm"), ("AP", "mm"), ("Roll", "deg"), ("Pitch", "deg"), ("Yaw", "deg")]
-_PHANTOM_LOG_AXES = [("X", "mm"), ("Y", "mm"), ("Z", "mm")]
+_PLATFORM_LETTERS = {"A", "B", "C", "D", "'a", "'c", "'e", "'f"}
+_PHANTOM_LETTERS = {"X", "Y", "Z"}
 
 
-def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, cmd_axes=None):
+def _parse_g1_targets(g1_line):
+    """Axis targets of one G1 line, e.g. {'A': 35.0, "'e": 50.0, 'e': 50.0}."""
+    import re
+    snapshot = {}
+    pattern = re.compile(r"('?[a-zA-Z])([-+]?\d*\.\d+|[-+]?\d+)")
+    for axis, val in pattern.findall(g1_line or ""):
+        if axis in ('G', 'F', 'g', 'f') and not axis.startswith("'"):
+            continue
+        if axis.startswith("'") or (len(axis) == 1 and axis.islower()):
+            clean_ax = axis.strip("'").lower()
+            snapshot[f"'{clean_ax}"] = float(val)
+            snapshot[clean_ax] = float(val)
+        else:
+            norm_axis = axis.upper() if (len(axis) == 1 and axis.isalpha()) else axis
+            snapshot[norm_axis] = float(val)
+    return snapshot
+
+
+def _device_from_gcode_lines(lines):
     """
-    Writes live position, probe, and time data to an auto-named log file log_HH_MM_SS_.csv
-    inside the selected output folder (default Desktop).
-    Includes computer time on the first line of the log.
+    Device of a G-code job from the axis letters of its G0/G1 moves:
+    any of A B C D 'a 'c 'e 'f -> "Motion Platform"; only X/Y/Z -> "Lung Phantom"; else None.
+    """
+    import re
+    word = re.compile(r"('[a-zA-Z]|[A-Za-z])\s*[-+]?(?:\d+\.\d*|\.\d+|\d+)")
+    seen = set()
+    for raw in lines or []:
+        line = str(raw).split(';')[0].strip()
+        if not line or line[0] not in "Gg":
+            continue
+        m = re.match(r"[Gg]0*([01])(?![\d.])", line)
+        if not m:
+            continue
+        for let in word.findall(line[m.end():]):
+            if let.startswith("'"):
+                seen.add("'" + let[1].lower())
+            elif let in ("F", "f"):
+                continue
+            else:
+                seen.add(let.upper())
+        if seen & _PLATFORM_LETTERS:
+            return "Motion Platform"
+    if seen and seen <= _PHANTOM_LETTERS:
+        return "Lung Phantom"
+    return None
 
-    Pos_* columns are the actual position (x/y/z or extra_axes). When cmd_axes is given for
-    the first point of a file, Cmd_* columns are appended with the requested position
-    (Duet userPosition: end point of the last queued move, which runs ahead of the motors).
+
+def _wait_for_preposition(self, targets, t_sent, timeout=30.0, tol=0.02):
+    """
+    Waits (processing GUI events, so live samples keep arriving) until a sample taken
+    after the pre-position command shows every target axis within `tol` mm and, when the
+    sample carries the Duet state, the machine is idle again. Gives up after `timeout` s.
+    """
+    from PySide6.QtCore import QCoreApplication
+    keys = [k for k in targets if k.startswith("'") or (len(k) == 1 and k.isupper())]
+    if not keys:
+        return True
+    min_t = t_sent + 0.25          # machinePosition can be up to ~200 ms old (RRF cache)
+    t_start = time.perf_counter()
+    while time.perf_counter() - t_start < timeout:
+        if not getattr(self, 'duet_connected', False):
+            return False
+        QCoreApplication.processEvents()
+        s = getattr(self, '_latest_sample', None)
+        if isinstance(s, dict) and s.get('t', 0.0) >= min_t:
+            real = s.get('real') or {}
+            at_target = all(k in real and abs(float(real[k]) - float(targets[k])) <= tol for k in keys)
+            st = s.get('status')
+            if at_target and (st is None or st == 'I'):
+                return True
+        time.sleep(0.02)
+    print(f"Pre-positioning: start position not confirmed within {timeout:.0f} s; starting anyway.")
+    return False
+
+
+_PLATFORM_LOG_AXES = [("LAT", "mm"), ("SI", "mm"), ("AP", "mm"), ("Roll", "deg"), ("Pitch", "deg"), ("Yaw", "deg")]
+# Raw actuator axes of the platform (the Status plot can show them too). Never W or V: the log
+# readers map those letters to Yaw / Pitch.
+_PLATFORM_RAW_AXES = ["A", "B", "C", "D", "'e", "'f", "'a", "'c"]
+_PHANTOM_LOG_AXES = [("X", "mm"), ("Y", "mm"), ("Z", "mm")]
+PROBE_RELEASE_MARK = 2000          # Probe value written while the Release button marker is active
+PROBE_RELEASE_HOLD_S = 0.5
+
+
+def _log_device(self, extra_axes):
+    """Device whose columns a new log file gets: the running job's device, else the Planning combo."""
+    dev = getattr(self, 'run_device', None)
+    if isinstance(dev, str) and dev in ("Motion Platform", "Lung Phantom"):
+        return dev
+    combo = getattr(self, 'combo_device', None)
+    txt = combo.currentText() if combo is not None and hasattr(combo, 'currentText') else None
+    if isinstance(txt, str) and txt in ("Motion Platform", "Lung Phantom"):
+        return txt
+    return "Motion Platform" if extra_axes is not None else "Lung Phantom"
+
+
+def _log_file_path(self, when):
+    """<folder>/log_DDMMYYYY_HH_MM_SS.csv (with _1, _2 ... if that name exists)."""
+    folder = None
+    w = getattr(self, 'PhOperFolder', None)
+    try:
+        txt = w.text().strip() if w is not None else ""
+        if isinstance(txt, str) and txt:
+            folder = txt
+    except Exception:
+        folder = None
+    if not folder:
+        folder = os.path.join(os.path.expanduser("~"), "Desktop")
+    if not os.path.exists(folder):
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except Exception:
+            folder = os.path.join(os.path.expanduser("~"), "Desktop")
+    base = f"log_{when.strftime('%d%m%Y_%H_%M_%S')}"
+    filepath = os.path.join(folder, f"{base}.csv")
+    idx = 1
+    while os.path.exists(filepath):
+        filepath = os.path.join(folder, f"{base}_{idx}.csv")
+        idx += 1
+    return filepath
+
+
+def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
+    """
+    Writes one live sample (actual positions + probe) to the log file of the current run,
+    log_DDMMYYYY_HH_MM_SS.csv inside the selected output folder (default Desktop).
+    The file is opened on the first sample, with a commented header (computer time with ms
+    at the run's time zero, device, axis mapping, meaning of the columns).
+
+    Columns follow the running job's device (G-code letters), not the Planning tab:
+      Motion Platform: Time_s, Pos_LAT/SI/AP_mm, Pos_Roll/Pitch/Yaw_deg,
+                       Pos_A/B/C/D_mm, Pos_'e/'f/'a/'c_mm (raw actuators), Probe
+      Lung Phantom:    Time_s, Pos_X/Y/Z_mm, Probe
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
-        folder = self.PhOperFolder.text().strip() if hasattr(self, 'PhOperFolder') and self.PhOperFolder and self.PhOperFolder.text() else os.path.join(os.path.expanduser("~"), "Desktop")
-        
-        if not os.path.exists(folder):
+        if getattr(self, '_log_open_failed', False) is True:
+            return              # already reported for this run; do not retry on every sample
+        in_run = getattr(self, 'run_active', False) is True
+        run_wall = getattr(self, 'run_wall', None)
+        now_dt = run_wall if isinstance(run_wall, datetime) and in_run else datetime.now()
+        device = _log_device(self, extra_axes)
+        is_platform = device == "Motion Platform"
+        gcode = getattr(self, 'run_gcode', None) if in_run else None
+        letters = getattr(self, '_axis_letters_used', None)
+        letters_txt = ",".join(str(l) for l in letters if l) if isinstance(letters, (list, tuple)) and letters else "unknown"
+        t_rec = float(t) if in_run and isinstance(t, (int, float)) else 0.0
+
+        # Fixed 7-line header (every line starts with '#'), then the column names
+        header = [
+            f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}.{now_dt.microsecond // 1000:03d}",
+            f"# G-code: {gcode if isinstance(gcode, str) and gcode else 'none'}",
+            f"# Device: {device}",
+            f"# Axes (Duet order): {letters_txt}",
+            "# Positions: actual (Duet machinePosition; refreshed at most every 200 ms, CAN expansion-board axes about every 100 ms)",
+            f"# Probe: 0 none | 1-1499 detector | {PROBE_RELEASE_MARK} Release button",
+            f"# Recording from: {t_rec:.3f} s of the run",
+        ]
+        if is_platform:
+            columns = (["Time_s"] + [f"Pos_{n}_{u}" for n, u in _PLATFORM_LOG_AXES]
+                       + [f"Pos_{a}_mm" for a in _PLATFORM_RAW_AXES] + ["Probe"])
+        else:
+            columns = ["Time_s"] + [f"Pos_{n}_{u}" for n, u in _PHANTOM_LOG_AXES] + ["Probe"]
+
+        filepath = _log_file_path(self, now_dt)
+        f = None
+        errors = []
+        for attempt in (filepath, os.path.join(os.path.expanduser("~"), "Desktop", os.path.basename(filepath))):
             try:
-                os.makedirs(folder, exist_ok=True)
-            except Exception:
-                folder = os.path.join(os.path.expanduser("~"), "Desktop")
-
-        now_dt = datetime.now()
-        now_str = now_dt.strftime("%H_%M_%S")
-        base_name = f"log_{now_str}_"
-        filename = f"{base_name}.csv"
-        filepath = os.path.join(folder, filename)
-        idx = 1
-        while os.path.exists(filepath):
-            filename = f"{base_name}_{idx}.csv"
-            filepath = os.path.join(folder, filename)
-            idx += 1
-
-        is_platform = False
-        if hasattr(self, 'combo_device') and self.combo_device:
-            is_platform = (self.combo_device.currentText() == "Motion Platform")
-        elif extra_axes is not None:
-            is_platform = True
-
+                f = open(attempt, "w", encoding="utf-8")
+                filepath = attempt
+                break
+            except Exception as e:
+                errors.append(f"{attempt}: {e}")
+        if f is None:
+            self._log_open_failed = True
+            msg = f"Could not create the data log file ({'; '.join(errors)})"
+            print(msg)
+            if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage is not None and hasattr(self.statusDuetMessage, 'setText'):
+                self.statusDuetMessage.setText(msg)
+            return
+        if errors:
+            print(f"Log folder not writable, logging to {filepath} instead ({errors[0]})")
         try:
-            f = open(filepath, "w", encoding="utf-8")
-            # 1. Computer time in the first line of the log
-            f.write(f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            has_cmd = cmd_axes is not None
-            if has_cmd:
-                f.write("# Pos_* = actual motor position (Duet machinePosition) | "
-                        "Cmd_* = requested position (Duet userPosition: end point of the last queued move) | "
-                        "Probe read in the same poll as Pos_*\n")
-            # 2. Column headers
-            axes_spec = _PLATFORM_LOG_AXES if is_platform else _PHANTOM_LOG_AXES
-            headers = ["Time_s"] + [f"Pos_{n}_{u}" for n, u in axes_spec] + ["Probe"]
-            if has_cmd:
-                headers += [f"Cmd_{n}_{u}" for n, u in axes_spec]
-            f.write(",".join(headers) + "\n")
+            f.write("\n".join(header) + "\n")
+            f.write(",".join(columns) + "\n")
             f.flush()
             self.active_log_file = f
             self.active_log_filepath = filepath
             self.active_log_is_platform = is_platform
-            self.active_log_has_cmd = has_cmd
-            print(f"Started recording data log to file: {filepath} at computer time {now_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Started recording data log to file: {filepath} ({device}) at computer time {now_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
-            print(f"Failed to create data log file {filepath}: {e}")
+            print(f"Failed to write data log header {filepath}: {e}")
             return
 
     try:
         p_val = probe if probe is not None else 0
         if getattr(self, 'active_log_is_platform', False):
-            axes_spec = _PLATFORM_LOG_AXES
             pos = extra_axes if extra_axes is not None else {}
+            raw = raw_axes if raw_axes is not None else {}
+            fields = ([f"{t:.4f}"] + [f"{float(pos.get(n, 0.0)):.3f}" for n, _ in _PLATFORM_LOG_AXES]
+                      + [f"{float(raw.get(a, 0.0)):.3f}" for a in _PLATFORM_RAW_AXES] + [f"{p_val}"])
         else:
-            axes_spec = _PHANTOM_LOG_AXES
-            pos = {'X': x, 'Y': y, 'Z': z}
-        fields = [f"{t:.4f}"] + [f"{float(pos.get(n, 0.0)):.3f}" for n, _ in axes_spec] + [f"{p_val}"]
-        if getattr(self, 'active_log_has_cmd', False):
-            cmd = cmd_axes if cmd_axes is not None else pos
-            fields += [f"{float(cmd.get(n, pos.get(n, 0.0))):.3f}" for n, _ in axes_spec]
+            fields = [f"{t:.4f}", f"{float(x):.3f}", f"{float(y):.3f}", f"{float(z):.3f}", f"{p_val}"]
         self.active_log_file.write(",".join(fields) + "\n")
         self.active_log_file.flush()
     except Exception as e:
         print(f"Error writing to data log file: {e}")
 
 
-def close_data_log_file(self):
+def close_data_log_file(self, reason="closed"):
     """
-    Closes the active log file handle when recording is unchecked or when printer becomes Idle.
+    Closes the active log file (recording unchecked, run finished, cancelled, disconnected ...).
+    Appends a '# End: <reason> at <t> s' line so the log says why it stops.
     """
     if hasattr(self, 'active_log_file') and self.active_log_file is not None:
         try:
+            t_end = None
+            t0 = getattr(self, 'run_t0', None)
+            if isinstance(t0, float):
+                t_end = time.perf_counter() - t0
+            if reason:
+                self.active_log_file.write(f"# End: {reason}" + (f" at {t_end:.3f} s" if t_end is not None else "") + "\n")
             self.active_log_file.flush()
             self.active_log_file.close()
-            print(f"Closed data log file: {getattr(self, 'active_log_filepath', '')}")
+            print(f"Closed data log file: {getattr(self, 'active_log_filepath', '')} ({reason})")
         except Exception:
             pass
         self.active_log_file = None
         self.active_log_filepath = None
+    if getattr(self, 'run_active', False) is not True:
         self.log_t0 = None
+
+
+def end_run(self, reason):
+    """Ends the current run: closes its log with `reason` and clears the run flags."""
+    was_active = getattr(self, 'run_active', False) is True
+    self.run_active = False
+    self.gcode_executing = False
+    self.gcode_seen_running = False
+    self.run_idle_since = None
+    close_data_log_file(self, reason)
+    self.log_t0 = None
+    if was_active:
+        print(f"Run ended: {reason}")
 
 
 def update_status_tab_dashboard(self):
@@ -1146,6 +1357,22 @@ def update_status_tab_dashboard(self):
         update_connection_status_ui(self, connected=False)
         log_to_duet_console(self, f"Connection lost: Duet unreachable ({ex})", color="#ff3333")
         return
+
+    self._last_dashboard_poll_t = time.perf_counter()   # lets the 2 s heartbeat skip its duplicate poll
+
+    # A partly failed poll (empty 'state' reply) carries no status: keep the last known one
+    # instead of reading it as 'Idle' (which used to end the log in the middle of a job)
+    if isinstance(data, dict) and not data.get("status"):
+        data["status"] = getattr(self, 'duet_status_code', None) or "I"
+        data["_status_unknown"] = True
+
+    # Keep the G-code name visible: the running job's file, else the selected one
+    try:
+        job_file = data.get("jobFileName") if isinstance(data, dict) else None
+        if job_file and data.get("status") in ("P", "S", "D", "R", "M"):
+            update_gcode_name_label(self, job_file)
+    except Exception:
+        pass
 
     # Update Control tab UI with data even if Status tab widgets aren't instantiated
     try:
@@ -1199,6 +1426,8 @@ def update_status_tab_dashboard(self):
             "C": ("Configuring", "#78909c"), # Grey
             "M": ("Simulating", "#9c27b0"),  # Purple
             "R": ("Resuming", "#4caf50"),    # Green
+            "D": ("Pausing", "#ff9800"),     # Orange
+            "T": ("Tool change", "#ff5722"), # Deep Orange
         }
         status_text, bg_color = status_map.get(status_code, (status_code, "#2196f3"))
         
@@ -1250,21 +1479,24 @@ def update_status_tab_dashboard(self):
         if hasattr(self, 'labelTimeRemaining') and self.labelTimeRemaining:
             self.labelTimeRemaining.setText(f"Time left: {format_sec(time_left)}")
 
-        # 4. Sensors (Z-Probe)
-        probe = data.get("sensors", {}).get("probeValue", 0)
-        self._last_probe_val = probe
-        if hasattr(self, 'statusProbe') and self.statusProbe:
-            self.statusProbe.setText(f"Probe: {probe}")
-            
+        # 4. Sensors (Z-Probe). A failed/empty sensors reply has no probe value: keep the last
+        # one and skip the auto-release / auto-pause checks (it used to read as probe 0)
+        probe = data.get("sensors", {}).get("probeValue", 0) if isinstance(data.get("sensors"), dict) else None
+        probe_known = probe is not None and not data.get("_status_unknown", False)
+        if probe is not None:
+            self._last_probe_val = probe
+            if hasattr(self, 'statusProbe') and self.statusProbe:
+                self.statusProbe.setText(f"Probe: {probe}")
+
         # Auto-release on trigger check: if paused (S), checkbox checked, and probe > 500, auto-resume
-        if status_code == 'S':
+        if status_code == 'S' and probe_known:
             check_auto = getattr(self, 'check_auto_release', None)
             if check_auto is not None and check_auto.isChecked() and probe > 500:
                 self.duet_status_code = 'R'  # Prevent double triggers
                 pause_continue_GCODE(self, pause=False)
 
-        # Auto pause check: if active (not paused 'S' or idle 'I'), checkbox checked, and probe == 0, auto-pause
-        if status_code not in ['S', 'I']:
+        # Auto pause check: if active (not paused 'S', pausing 'D' or idle 'I'), checkbox checked, and probe == 0, auto-pause
+        if status_code not in ['S', 'I', 'D'] and probe_known:
             check_pause = getattr(self, 'check_auto_pause', None)
             if check_pause is not None and check_pause.isChecked() and probe == 0:
                 self.duet_status_code = 'S'  # Prevent double triggers
@@ -1297,18 +1529,25 @@ def update_status_tab_dashboard(self):
                 render_status_plot(self)
             except Exception as pe:
                 print(f"Error rendering status plot: {pe}")
-        if status_code in ["P", "R", "B", "M", "S", "D"]:
-            self.gcode_seen_running = True
-
-        if status_code == "I":
-            if getattr(self, 'gcode_seen_running', False):
-                self.gcode_executing = False
-                self.gcode_seen_running = False
-                if getattr(self, 'active_log_file', None) is not None:
-                    close_data_log_file(self)
-            elif not getattr(self, 'gcode_executing', False):
-                if getattr(self, 'active_log_file', None) is not None:
-                    close_data_log_file(self)
+        # End of a run. When the live samples carry the Duet state (combined poll), the run end is
+        # decided there, per sample (handle_position_sample). Otherwise the dashboard decides,
+        # but only on two consecutive real 'Idle' readings: one stray 'I' must not end the log.
+        last_state_t = getattr(self, '_last_sample_status_t', None)
+        fast_state = isinstance(last_state_t, float) and (time.perf_counter() - last_state_t) < 2.0
+        if not data.get("_status_unknown", False) and not fast_state:
+            if status_code in ["P", "R", "B", "M", "S", "D", "T"]:
+                self.gcode_seen_running = True
+                self._dash_idle_count = 0
+            elif status_code == "I":
+                self._dash_idle_count = getattr(self, '_dash_idle_count', 0) + 1
+                if getattr(self, 'run_active', False) is True and self._dash_idle_count >= 2:
+                    run_t0 = getattr(self, 'run_t0', None)
+                    if getattr(self, 'gcode_seen_running', False):
+                        end_run(self, "job finished")
+                    elif isinstance(run_t0, float) and time.perf_counter() - run_t0 >= RUN_START_TIMEOUT_S:
+                        end_run(self, "job did not start (or finished between status polls)")
+        if getattr(self, 'run_active', False) is not True and getattr(self, 'active_log_file', None) is not None:
+            close_data_log_file(self, "no active run")
 
     except Exception as e:
         print(f"Error updating status tab dashboard: {e}")
@@ -1436,8 +1675,28 @@ def process_auto_sync_speed(self):
 
 
 # Status codes for which the live position poll runs (same set the GUI handler accepts)
-_POLL_STATUS_CODES = ("P", "S", "R", "M", "I", "D", "B", "C")
+_POLL_STATUS_CODES = ("P", "S", "R", "M", "I", "D", "B", "C", "T")
 _LIVE_AXES = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", 'W', 'V']
+_DEFAULT_AXES_11 = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+_DEFAULT_AXES_13 = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+
+# RRF object-model state.status -> one-letter status code used by TRACE
+RRF_STATUS_CODES = {
+    "idle": "I", "processing": "P", "simulating": "M", "paused": "S", "pausing": "D",
+    "resuming": "R", "homing": "H", "busy": "B", "configuring": "C", "updating": "B",
+    "off": "I", "halted": "B", "changingtool": "T", "cancelling": "B", "starting": "B",
+}
+
+# Live poll: one snapshot of the live object model per sample (positions, probe and state at
+# the same instant). Falls back to the keyed requests (positions, then probe) if the Duet
+# cannot serve it reliably or fast enough.
+COMBINED_POLL_PATH = "rr_model?flags=d99f"
+COMBINED_MAX_FAILS = 3              # consecutive failures before falling back
+COMBINED_PROBE_SAMPLES = 20         # requests used to judge the combined latency
+COMBINED_MAX_MEDIAN_S = 0.15        # fall back if the combined request is slower than this
+COMBINED_RETRY_S = 30.0             # in split mode, try the snapshot again this often
+RUN_IDLE_END_S = 1.0                # a run ends after the Duet reports idle this long
+RUN_START_TIMEOUT_S = 10.0          # ... or if the job never shows a running state
 
 
 def _num(v):
@@ -1456,69 +1715,107 @@ def _put_axis(target, let, value):
     target[f"'{clean}"] = value
 
 
-def get_positions_only_fast(self, ip):
+def _om_letter(let):
+    """Object-model axis letter -> TRACE axis name ('a' -> "'a", 'A' -> 'A')."""
+    s = str(let).strip()
+    if s.startswith("'"):
+        return "'" + s[1:].lower() if len(s) > 1 else s
+    if len(s) == 1 and s.islower():
+        return "'" + s
+    return s
+
+
+def _axis_order(self, n):
+    """Axis names for a move.axes list of length n: letters fetched from the Duet when their count
+    matches, else the configured axes, else the default order of this platform build."""
+    fetched = getattr(self, '_om_axis_letters', None)
+    if isinstance(fetched, (list, tuple)) and len(fetched) != n:
+        self._om_axis_letters = None          # axes changed (or stale letters): fetch them again
+        fetched = None
+    for cand in (fetched, getattr(self, 'duet_configured_axes', None)):
+        if isinstance(cand, (list, tuple)) and len(cand) == n:
+            return [_om_letter(c) for c in cand]
+    if n == 11:
+        return list(_DEFAULT_AXES_11)
+    if n == 13:
+        return list(_DEFAULT_AXES_13)
+    return None
+
+
+def _axes_from_list(self, axes_list):
+    """move.axes list -> (real, cmd, homed). real = machinePosition (actual), cmd = userPosition."""
+    real, cmd, homed = {}, {}, {}
+    missing_machine = False
+    order = _axis_order(self, len(axes_list))
+    if order is None and not all(isinstance(ax, dict) and "letter" in ax for ax in axes_list):
+        # Unknown axis count and no letters: naming by index would log zeros for every axis
+        if not getattr(self, '_axis_count_warned', False):
+            self._axis_count_warned = True
+            print(f"Live poll: {len(axes_list)} axes reported and their letters are unknown; samples skipped until the letters are fetched.")
+        return None
+    used = []
+    for idx, ax in enumerate(axes_list):
+        if not isinstance(ax, dict):
+            used.append(None)
+            continue
+        if "letter" in ax:
+            let = _om_letter(ax["letter"])
+        elif order is not None:
+            let = order[idx]
+        else:
+            let = str(idx)
+        used.append(let)
+
+        user_pos = _num(ax.get("userPosition"))
+        mach_pos = _num(ax.get("machinePosition"))
+        if mach_pos is None:
+            missing_machine = True
+        if user_pos is None:
+            user_pos = mach_pos if mach_pos is not None else 0.0
+        _put_axis(cmd, let, user_pos)
+        _put_axis(real, let, mach_pos if mach_pos is not None else user_pos)
+
+        if "homed" in ax or "userHomed" in ax:
+            homed_val = ax.get("homed", ax.get("userHomed", 0))
+            homed[let] = (homed_val == 1 or homed_val is True)
+
+    self._axis_letters_used = used
+    if missing_machine and not getattr(self, '_machine_pos_missing_noted', False):
+        self._machine_pos_missing_noted = True
+        print("Duet does not report move.axes[].machinePosition: logging userPosition "
+              "(requested position, runs ahead of the motors) instead.")
+    return real, cmd, homed
+
+
+def get_positions_only_fast(self, ip, legacy=True, retry=True):
     """
-    Fetches the axis positions in one light request (safe to call from a worker thread:
-    it touches no widgets). Uses RRF3 /rr_model?key=move.axes&flags=f, falling back to
-    legacy /rr_status?type=2.
+    Fetches the axis positions with one light request (safe to call from a worker thread:
+    it touches no widgets). Uses RRF3 /rr_model?key=move.axes&flags=f; with legacy=True it
+    falls back to /rr_status?type=2 (not served by RRF 3.6).
 
     Returns {'real', 'cmd', 'homed', 'probe'} or None:
-      real  - machinePosition: where the motors actually are (step counters of the
-              executing move; on RRF 3.6 expansion-board axes refresh every 100 ms)
-      cmd   - userPosition: the requested position = end point of the last move that the
-              G-code processor queued. It runs ahead of the motors (jumps to the end of a
-              long G1 as soon as it is queued) and equals 'real' once the queue is empty.
-      homed - {letter: bool}
+      real  - machinePosition: where the motors actually are
+      cmd   - userPosition: end point of the last QUEUED move (runs ahead of the motors)
+      homed - {letter: bool} (only when the reply carries it)
       probe - probe value when the response carries it (legacy path), else None
     """
     # 1. RRF3 Model Path (lightweight key query using flags=f for fast single-page response of all axes)
     try:
         url = f"http://{ip}/rr_model?key=move.axes&flags=f"
-        response = duet_request(url, timeout=0.8)
+        response = duet_request(url, timeout=0.8, retry=retry)
         if response.status_code == 200:
             axes_list = response.json().get("result", [])
             if isinstance(axes_list, list) and axes_list:
-                real, cmd, homed = {}, {}, {}
-                missing_machine = False
-
-                axes_rrf_order = getattr(self, 'duet_configured_axes', None)
-                if not axes_rrf_order or len(axes_rrf_order) != len(axes_list):
-                    if len(axes_list) == 11:
-                        axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
-                    else:
-                        axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
-
-                for idx, ax in enumerate(axes_list):
-                    if not isinstance(ax, dict):
-                        continue
-                    if "letter" in ax:
-                        let = str(ax["letter"]).strip()
-                    elif idx < len(axes_rrf_order):
-                        let = axes_rrf_order[idx]
-                    else:
-                        let = str(idx)
-
-                    user_pos = _num(ax.get("userPosition"))
-                    mach_pos = _num(ax.get("machinePosition"))
-                    if mach_pos is None:
-                        missing_machine = True
-                    if user_pos is None:
-                        user_pos = mach_pos if mach_pos is not None else 0.0
-                    _put_axis(cmd, let, user_pos)
-                    _put_axis(real, let, mach_pos if mach_pos is not None else user_pos)
-
-                    if "homed" in ax or "userHomed" in ax:
-                        homed_val = ax.get("homed", ax.get("userHomed", 0))
-                        homed[let] = (homed_val == 1 or homed_val is True)
-
-                if missing_machine and not getattr(self, '_machine_pos_missing_noted', False):
-                    self._machine_pos_missing_noted = True
-                    print("Duet does not report move.axes[].machinePosition: logging userPosition "
-                          "(requested position, runs ahead of the motors) instead.")
-
+                parsed = _axes_from_list(self, axes_list)
+                if parsed is None:
+                    return None
+                real, cmd, homed = parsed
                 return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': None}
     except Exception:
         pass
+
+    if not legacy:
+        return None
 
     # 2. Legacy /rr_status?type=2 Fallback
     try:
@@ -1536,9 +1833,9 @@ def get_positions_only_fast(self, ip):
             axes_rrf_order = getattr(self, 'duet_configured_axes', None)
             if not axes_rrf_order:
                 if len(axes_homed) == 11 or len(xyz) == 11:
-                    axes_rrf_order = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                    axes_rrf_order = list(_DEFAULT_AXES_11)
                 else:
-                    axes_rrf_order = ['X', 'Y', 'Z', 'V', 'W', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
+                    axes_rrf_order = list(_DEFAULT_AXES_13)
 
             real, cmd, homed = {}, {}, {}
             for idx, ax_name in enumerate(axes_rrf_order):
@@ -1556,37 +1853,109 @@ def get_positions_only_fast(self, ip):
     return None
 
 
-def _poll_probe_value(ip):
+def _probe_from_sensors(sensors):
+    """Z-probe value from an object-model 'sensors' object (or its probes list), else None."""
+    probes = sensors.get("probes") if isinstance(sensors, dict) else sensors
+    if isinstance(probes, list) and probes and isinstance(probes[0], dict):
+        vals = probes[0].get("value", [])
+        if isinstance(vals, list) and vals:
+            return vals[0]
+        if isinstance(vals, (int, float)):
+            return vals
+    return None
+
+
+def _poll_probe_value(ip, retry=True):
     """Current Z-probe value from /rr_model?key=sensors.probes, or None."""
     try:
-        res = duet_request(f'http://{ip}/rr_model?key=sensors.probes', timeout=0.8)
+        res = duet_request(f'http://{ip}/rr_model?key=sensors.probes', timeout=0.8, retry=retry)
         if res.status_code == 200:
-            sens = res.json().get("result", [])
-            if isinstance(sens, list) and sens and isinstance(sens[0], dict):
-                vals = sens[0].get("value", [])
-                if isinstance(vals, list) and vals:
-                    return vals[0]
-                if isinstance(vals, (int, float)):
-                    return vals
+            return _probe_from_sensors(res.json().get("result", []))
     except Exception:
         pass
     return None
 
 
-def poll_position_sample(self):
+def fetch_axis_letters(ip, timeout=0.8):
     """
-    One live sample: positions (real + requested) and the probe, timestamped with
-    time.perf_counter() at the middle of the position request. Worker-thread safe.
+    Axis letters in Duet order from /rr_model?key=move.axes&flags=d99, following the 'next'
+    pagination. Returns TRACE axis names (e.g. "'a") or None if incomplete.
+    """
+    letters = []
+    flags = "d99"
+    for _page in range(4):
+        res = duet_request(f"http://{ip}/rr_model?key=move.axes&flags={flags}", timeout=timeout, retry=False)
+        if res.status_code != 200:
+            return None
+        js = res.json()
+        arr = js.get("result", [])
+        if not isinstance(arr, list):
+            return None
+        for ax in arr:
+            if not isinstance(ax, dict) or "letter" not in ax:
+                return None
+            letters.append(_om_letter(ax["letter"]))
+        nxt = js.get("next", 0)
+        if not nxt:
+            return letters or None
+        flags = f"d99a{int(nxt)}"
+    return None
+
+
+def _parse_combined_snapshot(self, js):
+    """Live object model (flags=d99f) -> {'real', 'cmd', 'homed', 'probe', 'status'} or None."""
+    res = js.get("result") if isinstance(js, dict) else None
+    if not isinstance(res, dict):
+        return None
+    move = res.get("move")
+    axes_list = move.get("axes") if isinstance(move, dict) else None
+    if not isinstance(axes_list, list) or not axes_list:
+        return None
+    parsed = _axes_from_list(self, axes_list)
+    if parsed is None:
+        return None
+    real, cmd, homed = parsed
+    probe = _probe_from_sensors(res.get("sensors"))
+    state = res.get("state")
+    st_txt = state.get("status") if isinstance(state, dict) else None
+    status = RRF_STATUS_CODES.get(str(st_txt).lower()) if st_txt else None
+    return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': probe, 'status': status}
+
+
+def poll_position_sample(self, mode="split", retry=True):
+    """
+    One live sample, timestamped with time.perf_counter() at the middle of its request
+    (worker-thread safe):
+      mode="combined": one rr_model?flags=d99f snapshot -> positions, probe and Duet state
+                       from the same instant
+      mode="split":    positions (key=move.axes&flags=f), then the probe (key=sensors.probes);
+                       no state (status None)
+    Returns {'t', 'real', 'cmd', 'homed', 'probe', 'status', 'mode', 'latency'} or None.
     """
     ip = getattr(self, 'duet_ip', None) or "192.168.0.1"   # kept current by get_clean_duet_ip (GUI thread)
+    if mode == "combined":
+        t0 = time.perf_counter()
+        try:
+            res = duet_request(f"http://{ip}/{COMBINED_POLL_PATH}", timeout=0.8, retry=retry)
+            t1 = time.perf_counter()
+            if res.status_code != 200:
+                return None
+            sample = _parse_combined_snapshot(self, res.json())
+        except Exception:
+            return None
+        if not sample:
+            return None
+        sample.update({'t': 0.5 * (t0 + t1), 'mode': 'combined', 'latency': t1 - t0})
+        return sample
+
     t0 = time.perf_counter()
-    sample = get_positions_only_fast(self, ip)
+    sample = get_positions_only_fast(self, ip, legacy=retry, retry=retry)
     t1 = time.perf_counter()
     if not sample:
         return None
-    sample['t'] = 0.5 * (t0 + t1)
+    sample.update({'t': 0.5 * (t0 + t1), 'mode': 'split', 'latency': t1 - t0, 'status': None})
     if sample.get('probe') is None:
-        sample['probe'] = _poll_probe_value(ip)
+        sample['probe'] = _poll_probe_value(ip, retry=retry)
     return sample
 
 
@@ -1595,26 +1964,34 @@ try:
 
     class PositionPoller(QObject):
         """
-        Polls the Duet live positions on a background thread and hands every sample to
-        `handler` on the GUI thread (queued, in order). The 1 s dashboard and plot redraw
-        can block the GUI thread, but samples are still taken on time and are written with
-        their own timestamps, so the log has no holes.
+        Polls the Duet live positions (+ probe + state) on a background thread and hands every
+        sample to `handler` on the GUI thread (queued, in order). The 1 s dashboard and plot
+        redraw can block the GUI thread, but samples are still taken on time and are written
+        with their own timestamps, so the log has no holes.
 
         Drop-in for the former 15 ms QTimer (`status_fast_timer`): isActive() / start() / stop().
         start() ignores an interval argument; stop() waits for an in-flight request so file
-        transfers do not overlap a position poll.
+        transfers do not overlap a position poll (worker requests do not retry, which bounds it).
+        A connected -> disconnected change is delivered as {'event': 'disconnected', 't': ...}.
         """
         sample = Signal(object)
 
-        def __init__(self, ui, handler, min_period=0.02, parent=None):
+        def __init__(self, ui, handler, min_period=0.05, parent=None, mode="combined"):
             super().__init__(parent)
             self._ui = ui
             self._handler = handler
             self._min_period = float(min_period)
+            self._preferred_mode = mode
+            self.mode = mode
             self._enabled = threading.Event()
             self._quit = threading.Event()
             self._busy = threading.Lock()
             self._thread = None
+            self._fails = 0
+            self._latencies = []
+            self._next_letter_try = 0.0
+            self._settle_until = 0.0
+            self._next_combined_try = 0.0
             self.sample.connect(self._deliver, Qt.QueuedConnection)
 
         @Slot(object)
@@ -1646,27 +2023,108 @@ try:
             if th is not None and th.is_alive():
                 th.join(timeout=wait)
 
+        def _reset_connection(self):
+            self.mode = self._preferred_mode
+            self._fails = 0
+            self._latencies = []
+            self._next_letter_try = 0.0
+            self._settle_until = time.perf_counter() + 2.0     # judge latency after the connect burst
+            self._next_combined_try = 0.0
+            self._ui._om_axis_letters = None
+
+        def _switch_to_split(self, why):
+            if self.mode != "split":
+                self.mode = "split"
+                self._next_combined_try = time.perf_counter() + COMBINED_RETRY_S
+                print(f"Live poll: combined snapshot not usable ({why}); using separate position and probe requests "
+                      f"(retrying the snapshot every {COMBINED_RETRY_S:.0f} s).")
+
+        def _try_combined_again(self, s):
+            """In split mode: result of the periodic snapshot attempt."""
+            if s is not None and float(s.get('latency', 1.0)) <= COMBINED_MAX_MEDIAN_S:
+                self.mode = "combined"
+                self._fails = 0
+                self._latencies = []
+                self._settle_until = 0.0
+                print(f"Live poll: snapshot available again ({float(s['latency']) * 1000:.0f} ms); back to one request per sample.")
+                return True
+            self._next_combined_try = time.perf_counter() + COMBINED_RETRY_S
+            return False
+
+        def _account(self, s):
+            if self.mode != "combined":
+                return
+            if s is None:
+                self._fails += 1
+                if self._fails >= COMBINED_MAX_FAILS:
+                    self._switch_to_split(f"{self._fails} failed requests")
+                return
+            self._fails = 0
+            if float(s.get('t', 0.0)) < self._settle_until:
+                return
+            if len(self._latencies) < COMBINED_PROBE_SAMPLES:
+                self._latencies.append(float(s.get('latency', 0.0)))
+                if len(self._latencies) == COMBINED_PROBE_SAMPLES:
+                    med = float(np.median(self._latencies))
+                    if med > COMBINED_MAX_MEDIAN_S:
+                        self._switch_to_split(f"median {med * 1000:.0f} ms")
+                    else:
+                        print(f"Live poll: one snapshot per sample (positions, probe, state), median {med * 1000:.0f} ms")
+
+        def _guarded(self, fn):
+            """Runs one Duet request block under the in-flight lock (skipped once stopped)."""
+            with self._busy:
+                if not self._enabled.is_set() or self._quit.is_set():
+                    return None
+                try:
+                    return fn()
+                except Exception as e:
+                    print(f"Error polling Duet positions: {e}")
+                    return None
+
         def _run(self):
             ui = self._ui
+            was_connected = False
             while not self._quit.is_set():
                 if not self._enabled.wait(0.1):
                     continue
                 t_start = time.perf_counter()
-                period = self._min_period
+                connected = bool(getattr(ui, 'duet_connected', False))
+                if not connected:
+                    if was_connected:
+                        self.sample.emit({'event': 'disconnected', 't': time.perf_counter()})
+                    was_connected = False
+                    self._quit.wait(0.1)
+                    continue
+                if not was_connected:
+                    self._reset_connection()
+                    was_connected = True
+                if getattr(ui, 'status_stopped', False) or getattr(ui, 'duet_status_code', 'I') not in _POLL_STATUS_CODES:
+                    self._quit.wait(0.1)
+                    continue
+
+                # Axis letters once per connection (flags=f replies carry none)
+                if getattr(ui, '_om_axis_letters', None) is None and t_start >= self._next_letter_try:
+                    ip = getattr(ui, 'duet_ip', None) or "192.168.0.1"
+                    letters = self._guarded(lambda: fetch_axis_letters(ip))
+                    if letters:
+                        ui._om_axis_letters = letters
+                    else:
+                        self._next_letter_try = time.perf_counter() + 5.0
+
                 s = None
-                if (getattr(ui, 'duet_connected', False) and not getattr(ui, 'status_stopped', False)
-                        and getattr(ui, 'duet_status_code', 'I') in _POLL_STATUS_CODES):
-                    with self._busy:
-                        if self._enabled.is_set() and not self._quit.is_set():
-                            try:
-                                s = poll_position_sample(ui)
-                            except Exception as e:
-                                print(f"Error polling Duet positions: {e}")
-                else:
-                    period = 0.1
+                if self.mode == "split" and time.perf_counter() >= self._next_combined_try:
+                    s = self._guarded(lambda: poll_position_sample(ui, mode="combined", retry=False))
+                    if not self._try_combined_again(s):
+                        s = None
+                if s is None:
+                    mode = self.mode
+                    s = self._guarded(lambda: poll_position_sample(ui, mode=mode, retry=False))
+                    if self._enabled.is_set():
+                        self._account(s)
                 if s is not None:
                     self.sample.emit(s)
-                rest = period - (time.perf_counter() - t_start)
+                rest = self._min_period - (time.perf_counter() - t_start)
                 if rest > 0:
                     self._quit.wait(rest)
 except ImportError:   # pragma: no cover - Qt is always present in the app
@@ -1699,17 +2157,18 @@ def _platform_dims(self):
     lat_dim = 100.0
     if hasattr(self, 'input_plat_lat') and self.input_plat_lat:
         try: lat_dim = float(self.input_plat_lat.text().strip())
-        except ValueError: pass
-    if lat_dim <= 0.0: lat_dim = 100.0
+        except (ValueError, TypeError, AttributeError): pass
+    if not isinstance(lat_dim, float) or lat_dim <= 0.0: lat_dim = 100.0
 
     si_dim = 100.0
     if hasattr(self, 'input_plat_si') and self.input_plat_si:
         try: si_dim = float(self.input_plat_si.text().strip())
-        except ValueError: pass
-    if si_dim <= 0.0: si_dim = 100.0
+        except (ValueError, TypeError, AttributeError): pass
+    if not isinstance(si_dim, float) or si_dim <= 0.0: si_dim = 100.0
 
     y_lo_name = "'c"
-    if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
+    lims = getattr(self, 'axis_max_limits', None)
+    if isinstance(lims, dict) and ("b" in lims or "'b" in lims):
         y_lo_name = "'b"
     return lat_dim, si_dim, y_lo_name
 
@@ -1725,6 +2184,19 @@ def _platform_dof(axes, lat_dim, si_dim, y_lo_name="'c"):
     return {'Roll': roll, 'Pitch': pitch, 'Yaw': axes['W'], 'LAT': lat, 'AP': ap, 'SI': si}
 
 
+def _apply_release_mark(self, t, probe):
+    """Probe value for a sample at time t: PROBE_RELEASE_MARK while the Release-button marker is
+    active (PROBE_RELEASE_HOLD_S after the press, and at least the first sample after it)."""
+    mark = getattr(self, '_release_mark_t', None)
+    if not isinstance(mark, float) or t < mark:
+        return probe
+    if t < mark + PROBE_RELEASE_HOLD_S or not getattr(self, '_release_mark_done', False):
+        self._release_mark_done = True
+        return PROBE_RELEASE_MARK
+    self._release_mark_t = None
+    return probe
+
+
 def update_status_fast(self):
     """Synchronous poll + handle (kept for callers/tests; the app uses PositionPoller)."""
     if not getattr(self, 'duet_connected', False) or getattr(self, 'status_stopped', False):
@@ -1737,16 +2209,41 @@ def update_status_fast(self):
 
 def handle_position_sample(self, s):
     """
-    Handles one live sample on the GUI thread: updates the status position labels,
-    logs the data point to the log file (if recording) and appends it to the plot buffers.
-    Uses the sample's own timestamp s['t'] (time.perf_counter() when it was taken).
+    Handles one live sample on the GUI thread: updates the status position labels, and during a
+    run (Start -> job finished) writes the SAME sample to the log file and to the plot buffers,
+    both on the run's time zero. Outside a run only the plot is fed (when the Duet is moving).
+    Uses the sample's own timestamp s['t'] (time.perf_counter() when it was taken) and, when the
+    sample carries it, the Duet state at that instant.
     Does NOT call render_status_plot (graph redraw throttled to 1s in slow timer).
     """
+    if s.get('event') == 'disconnected':
+        # The job keeps running on the Duet: keep the run (same t0) and mark the gap in the log;
+        # after reconnecting, logging continues and the run ends normally when the job is done.
+        if getattr(self, 'run_active', False) is True:
+            run_t0 = getattr(self, 'run_t0', None)
+            t_gap = (float(s.get('t', time.perf_counter())) - run_t0) if isinstance(run_t0, float) else 0.0
+            f = getattr(self, 'active_log_file', None)
+            if f is not None:
+                try:
+                    f.write(f"# Gap: connection lost at {t_gap:.3f} s\n")
+                    f.flush()
+                except Exception:
+                    pass
+            self._run_gap_open = True
+            print(f"Connection lost during the run at {t_gap:.1f} s; logging resumes after reconnecting.")
+        elif getattr(self, 'active_log_file', None) is not None:
+            close_data_log_file(self, "connection lost")
+        return
     if not getattr(self, 'duet_connected', False):
         return
     if getattr(self, 'status_stopped', False):
         return
-    status_code = getattr(self, 'duet_status_code', 'I')
+
+    t_now = float(s.get('t', time.perf_counter()))
+    sample_status = s.get('status')
+    if sample_status is not None:
+        self._last_sample_status_t = time.perf_counter()
+    status_code = sample_status if sample_status is not None else getattr(self, 'duet_status_code', 'I')
     if status_code not in _POLL_STATUS_CODES:
         return
 
@@ -1755,12 +2252,9 @@ def handle_position_sample(self, s):
 
         # Ensure we have defaults for all required axes
         axis_positions = dict(s.get('real') or {})
-        cmd_positions = dict(s.get('cmd') or {})
         for ax in _LIVE_AXES:
             if ax not in axis_positions:
                 axis_positions[ax] = 0.0
-            if ax not in cmd_positions:
-                cmd_positions[ax] = axis_positions[ax]
 
         # Update the UI labels (actual position)
         x_val = axis_positions['X']
@@ -1783,10 +2277,9 @@ def handle_position_sample(self, s):
             if lbl is not None:
                 lbl.setText(f"{raw_name} {axis_positions[raw_name]:.2f}")
 
-        # Platform DOF from the actual and from the requested actuator positions
+        # Platform DOF from the actual actuator positions
         lat_dim, si_dim, y_lo_name = _platform_dims(self)
         dof = _platform_dof(axis_positions, lat_dim, si_dim, y_lo_name)
-        dof_cmd = _platform_dof(cmd_positions, lat_dim, si_dim, y_lo_name)
         current_roll, current_pitch, current_yaw = dof['Roll'], dof['Pitch'], dof['Yaw']
         current_lat, current_ap, current_si = dof['LAT'], dof['AP'], dof['SI']
 
@@ -1797,28 +2290,53 @@ def handle_position_sample(self, s):
         if hasattr(self, 'statusPosYaw') and self.statusPosYaw:
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
-        t_now = float(s.get('t', time.perf_counter()))
         curr_p = s.get('probe')
         if curr_p is None:
             curr_p = getattr(self, '_last_probe_val', 0)
+        curr_p = _apply_release_mark(self, t_now, curr_p)
 
-        # A sample taken before the job was started (but handled after, because the GUI
-        # thread was busy) must not start the new log or plot timeline
-        if getattr(self, 'log_t0', None) is not None and t_now < self.log_t0:
-            return
+        self._latest_sample = {'t': t_now, 'real': axis_positions, 'status': sample_status}
 
-        # Continuous file logging: records straight away when G-code starts, and keeps recording continuously without pause
-        if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
-            if getattr(self, 'gcode_executing', False) or getattr(self, 'active_log_file', None) is not None:
-                if getattr(self, 'log_t0', None) is None:
-                    self.log_t0 = t_now
-                cmd_axes = {'X': cmd_positions['X'], 'Y': cmd_positions['Y'], 'Z': cmd_positions['Z']}
-                cmd_axes.update(dof_cmd)
-                log_data_point(self, t_now - self.log_t0, x_val, y_val, z_val, curr_p,
-                               extra_axes=dof, cmd_axes=cmd_axes)
-        else:
-            if getattr(self, 'active_log_file', None) is not None:
-                close_data_log_file(self)
+        # --- Run (Start -> job finished): log and plot get the same samples on the same t0 ---
+        run_active = getattr(self, 'run_active', False) is True
+        run_t0 = getattr(self, 'run_t0', None) if run_active else None
+        if run_active and not isinstance(run_t0, float):
+            run_active = False
+        if run_active and t_now < run_t0:
+            return              # taken before the job was started (handled late)
+        in_run = run_active
+
+        ended = None
+        if in_run and sample_status is not None:
+            if sample_status == 'I':
+                if getattr(self, 'run_idle_since', None) is None:
+                    self.run_idle_since = t_now
+                if getattr(self, 'run_seen_running', False) and t_now - self.run_idle_since >= RUN_IDLE_END_S:
+                    ended = "job finished"
+                elif not getattr(self, 'run_seen_running', False) and t_now - run_t0 >= RUN_START_TIMEOUT_S:
+                    ended = "job did not start"
+            else:
+                self.run_seen_running = True
+                self.gcode_seen_running = True
+                self.run_idle_since = None
+
+        if in_run and getattr(self, '_run_gap_open', False) is True:
+            self._run_gap_open = False
+            f = getattr(self, 'active_log_file', None)
+            if f is not None:
+                try:
+                    f.write(f"# Gap end: reconnected at {t_now - run_t0:.3f} s\n")
+                except Exception:
+                    pass
+
+        if in_run:
+            if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
+                raw = {a: axis_positions[a] for a in _PLATFORM_RAW_AXES}
+                log_data_point(self, t_now - run_t0, x_val, y_val, z_val, curr_p, extra_axes=dof, raw_axes=raw)
+            elif getattr(self, 'active_log_file', None) is not None:
+                close_data_log_file(self, "record off")
+        elif getattr(self, 'active_log_file', None) is not None:
+            close_data_log_file(self, "no active run")
 
         elapsed_t = 0.0
         # Determine whether to update plot data based on status code and 'Include pause' checkbox
@@ -1840,18 +2358,17 @@ def handle_position_sample(self, s):
             return any(k in text for k in ["waiting", "wait for", "pausing", "paused", "m226", "sensor_wait"])
 
         is_paused_state = False
-        if status_code == "S":
+        if status_code in ("S", "D"):
             is_paused_state = True
         elif check_paused_message(msg_text) or check_paused_message(reply_text):
             is_paused_state = True
 
         should_update_plot = False
-        if status_code in ["P", "S", "R", "M", "B"]:
+        if in_run:
+            should_update_plot = include_pause or not is_paused_state
+        elif status_code in ["P", "S", "R", "M", "B", "D", "T"]:
             if is_paused_state:
-                if include_pause:
-                    should_update_plot = True
-                else:
-                    should_update_plot = False
+                should_update_plot = include_pause
             else:
                 should_update_plot = True
 
@@ -1873,10 +2390,13 @@ def handle_position_sample(self, s):
                     'Roll': [], 'Pitch': [], 'Yaw': [],
                     'LAT': [], 'AP': [], 'SI': []
                 }
-                self._total_pause_duration = 0.0
-                self._pause_start_perf = None
+                if not in_run:
+                    self._total_pause_duration = 0.0
+                    self._pause_start_perf = None
 
-            if not hasattr(self, 'status_t0') or self.status_t0 is None:
+            if in_run:
+                self.status_t0 = run_t0
+            elif not hasattr(self, 'status_t0') or self.status_t0 is None:
                 self.status_t0 = t_now
                 self._total_pause_duration = 0.0
                 self._pause_start_perf = None
@@ -1913,6 +2433,9 @@ def handle_position_sample(self, s):
             if len(self.status_plot_data['t']) > 100000:
                 for k in self.status_plot_data.keys():
                     self.status_plot_data[k].pop(0)
+
+        if ended:
+            end_run(self, ended)
 
     except Exception as e:
         print(f"Error in fast status loop: {e}")
@@ -2016,7 +2539,7 @@ def get_duet_status(self):
             data['x'] = contents['coords']['xyz'][0] * -1 + ampl_scale
             data['y'] = contents['coords']['xyz'][1] * -1 + ampl_scale
             data['z'] = contents['coords']['xyz'][2] * -1 + ampl_scale
-            data['geiger'] = contents['sensors']['probeValue']
+            data['geiger'] = contents['sensors'].get('probeValue') or 0
             data['t'] = time.time() - t0 + tprint
             return data
         else:
@@ -2068,10 +2591,7 @@ def cancel_GCODE_job(self):
 
     result = msg.exec()
     if result == QMessageBox.StandardButton.Ok:
-        self.gcode_executing = False
-        self.gcode_seen_running = False
-        if getattr(self, 'active_log_file', None) is not None:
-            close_data_log_file(self)
+        end_run(self, "cancelled")
         self.status_t0 = None
         self.status_plot_data = None
         self.status_stopped = True
@@ -2115,23 +2635,11 @@ def translate_machine_status_to_legacy(om_data):
 
     legacy = {}
     
-    # 1. Status Mapping
+    # 1. Status Mapping. An empty/failed 'state' reply gives status None ("unknown"), which the
+    # dashboard replaces by the last known status instead of reading it as Idle.
     state = om_data.get("state") or {}
-    om_status = str(state.get("status", "idle")).lower()
-    status_map = {
-        "idle": "I",
-        "processing": "P",
-        "simulating": "M",
-        "paused": "S",
-        "resuming": "R",
-        "homing": "H",
-        "busy": "B",
-        "configuring": "C",
-        "updating": "B",
-        "off": "I",
-        "halted": "B",
-    }
-    legacy["status"] = status_map.get(om_status, "I")
+    om_status = str(state.get("status", "")).lower() if isinstance(state, dict) else ""
+    legacy["status"] = RRF_STATUS_CODES.get(om_status, "B") if om_status else None
     
     # 2. Extract Axes Information
     move = om_data.get("move") or {}
@@ -2202,6 +2710,8 @@ def translate_machine_status_to_legacy(om_data):
             file_percent = job_file.get("fractionPrinted", 0.0) * 100.0
         
     legacy["fractionPrinted"] = file_percent
+    job_file_obj = job.get("file") if isinstance(job, dict) else None
+    legacy["jobFileName"] = job_file_obj.get("fileName") if isinstance(job_file_obj, dict) else None
     legacy["printDuration"] = job.get("duration", 0.0) if isinstance(job, dict) else 0.0
     
     times_left = job.get("timesLeft") or {} if isinstance(job, dict) else {}
@@ -2227,16 +2737,10 @@ def translate_machine_status_to_legacy(om_data):
         elif isinstance(vin_val, (int, float)):
             vin = float(vin_val)
         
-    # Probe value
+    # Probe value (None when the sensors reply is empty/failed: keep the last value)
     sensors = om_data.get("sensors") or {}
-    probe_val = 0
-    if isinstance(sensors, dict):
-        probes = sensors.get("probes") or []
-        if isinstance(probes, list) and probes and isinstance(probes[0], dict):
-            probe_val_list = probes[0].get("value")
-            if isinstance(probe_val_list, list) and probe_val_list:
-                probe_val = probe_val_list[0]
-        
+    probe_val = _probe_from_sensors(sensors) if isinstance(sensors, dict) and sensors else None
+
     legacy["sensors"] = {
         "vin": vin,
         "mcuTemp": {
@@ -2475,8 +2979,12 @@ def duet_status_request(self, ip, timeout=5):
 def release_sensor_wait_action(self):
     """
     Sends force release signal to Duet to break out of the sensor_wait macro loop.
+    Marks the press in the live data: Probe reads PROBE_RELEASE_MARK (2000) for
+    PROBE_RELEASE_HOLD_S in the log and the plot, distinct from a detector trigger.
     """
     from fcn_control.fcn_control import send_cmd, log_to_duet_console
+    self._release_mark_t = time.perf_counter()
+    self._release_mark_done = False
     log_to_duet_console(self, "Sending force release signal to sensor_wait macro on Duet...", color="#0288d1")
     send_cmd(self, "global force_release_sensor = true")
     send_cmd(self, "set global.force_release_sensor = true")

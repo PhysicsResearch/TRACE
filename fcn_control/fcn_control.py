@@ -388,6 +388,16 @@ def set_global_step_size(self, val_str):
                 btn.setStyleSheet(inactive_style)
 
 
+def _duet_heartbeat_tick(self):
+    """2 s connection heartbeat. Skipped while the Status-tab dashboard polls the Duet anyway
+    (it already refreshes this UI every second), so the Duet is not asked everything twice."""
+    import time as _time
+    last = getattr(self, '_last_dashboard_poll_t', None)
+    if isinstance(last, float) and _time.perf_counter() - last < 3.0:
+        return
+    update_duet_status_ui(self)
+
+
 def update_duet_status_ui(self, data=None):
     """
     Fetch current status from Duet and update Home button colors & current position displays.
@@ -822,7 +832,7 @@ def update_connection_status_ui(self, connected=False):
         if not hasattr(self, '_duet_heartbeat_timer') or self._duet_heartbeat_timer is None:
             self._duet_heartbeat_timer = QTimer(self)
             self._duet_heartbeat_timer.setInterval(2000)
-            self._duet_heartbeat_timer.timeout.connect(lambda: update_duet_status_ui(self))
+            self._duet_heartbeat_timer.timeout.connect(lambda: _duet_heartbeat_tick(self))
         if not self._duet_heartbeat_timer.isActive():
             self._duet_heartbeat_timer.start()
     else:

@@ -384,10 +384,19 @@ def build_status_tab(self):
     prog_info_box.addStretch()
     prog_info_box.addWidget(self.labelTimeRemaining)
 
+    # Loaded / running G-code file: always visible (the Duet message line gets overwritten)
+    self.statusGcodeName = QLabel("G-code: --", self.card_status)
+    self.statusGcodeName.setStyleSheet("font-size: 14px; font-weight: bold; color: #1b5e20;")
+    self.statusGcodeName.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    sel = getattr(self, 'selected_gcode_path', None)
+    if isinstance(sel, str) and sel:
+        self.statusGcodeName.setText(f"G-code: {os.path.basename(sel)}")
+
     # Right 2/3 column for Duet Message label
     duet_info_box = QHBoxLayout()
     duet_info_box.addWidget(lbl_msg)
     duet_info_box.addStretch()
+    duet_info_box.addWidget(self.statusGcodeName)
 
     top_info_layout.addLayout(prog_info_box, stretch=1)
     top_info_layout.addLayout(duet_info_box, stretch=2)
@@ -601,9 +610,10 @@ def build_status_tab(self):
         }
     """)
 
-    self.check_record_log = QCheckBox("Record Data Log (log_HH_MM_SS_.csv)", plot_box)
+    self.check_record_log = QCheckBox("Record Data Log (log_DDMMYYYY_HH_MM_SS.csv)", plot_box)
     self.check_record_log.setStyleSheet("font-weight: bold; color: #b71c1c; font-size: 14px;")
-    self.check_record_log.toggled.connect(lambda checked: __import__('fcn_monitor.fcn_duet', fromlist=['close_data_log_file']).close_data_log_file(self) if not checked else None)
+    self.check_record_log.setChecked(True)      # record every run by default
+    self.check_record_log.toggled.connect(lambda checked: __import__('fcn_monitor.fcn_duet', fromlist=['close_data_log_file']).close_data_log_file(self, "record off") if not checked else None)
 
     # Max Speed Adjustment Limit control (default 20%)
     lbl_max_speed_adj = QLabel("Max Speed Adj (%):", plot_box)
@@ -830,7 +840,7 @@ def build_status_tab(self):
     # 1 s dashboard / plot redraw no longer leaves holes in the log.
     # Keeps the 'status_fast_timer' name: isActive()/stop()/start() as before.
     self.status_fast_timer = PositionPoller(self, lambda s: handle_position_sample(self, s),
-                                            min_period=0.02, parent=self.tab_status)
+                                            min_period=0.05, parent=self.tab_status)
     self.status_fast_timer.start()
 
     # Initialize Advanced vs Basic mode from persisted configuration

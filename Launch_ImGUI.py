@@ -270,6 +270,12 @@ class MyApp(QMainWindow):
         except Exception:
             pass
         try:
+            if getattr(self, 'run_active', False) is True or getattr(self, 'active_log_file', None) is not None:
+                from fcn_monitor.fcn_duet import end_run
+                end_run(self, "application closed")
+        except Exception:
+            pass
+        try:
             if hasattr(self, 'check_advanced_mode') and self.check_advanced_mode is not None:
                 from fcn_create_gui.tab_status import save_status_advanced_mode
                 save_status_advanced_mode(self, self.check_advanced_mode.isChecked())
