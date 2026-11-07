@@ -79,6 +79,44 @@ def clear_status_plot(self):
     render_status_plot(self)
 
 
+# Probe shading classes of the Status plot: (kind, key label, colour); same labels as the Log files tab
+_PROBE_KEY = ((1, 'Detector (Probe 1-1499)', '#ff0000'),
+              (2, 'Release button (Probe 2000)', '#0288d1'),
+              (3, 'Waiting for sensor (Probe -1000)', '#ffb300'))
+_PROBE_SPAN_ALPHA = 0.22
+
+
+def _update_probe_key(self, kinds):
+    """Colour key of the probe shading, in one row above the plot area (it covers no curve): only
+    the classes present in the plotted data, same colours / alpha as the spans. Separate from the
+    trace legend; rebuilt only when the classes present change."""
+    ax = self.ax_status
+    key = getattr(self, '_probe_key', None)
+    present = tuple(k for k, _l, _c in _PROBE_KEY if k in kinds)
+    alive = key is not None and key in ax.artists          # ax.clear() (Clear plot, Start) drops it
+    if alive and getattr(self, '_probe_key_kinds', None) == present:
+        return
+    if alive:
+        try:
+            key.remove()
+        except Exception:
+            pass
+    self._probe_key = None
+    self._probe_key_kinds = present
+    if not present:
+        return
+    from matplotlib.patches import Patch
+    from matplotlib.legend import Legend
+    handles = [Patch(facecolor=c, edgecolor=c, alpha=_PROBE_SPAN_ALPHA) for k, _l, c in _PROBE_KEY if k in present]
+    labels = [l for k, l, _c in _PROBE_KEY if k in present]
+    key = Legend(ax, handles, labels, loc='lower left', bbox_to_anchor=(0.0, 1.0), ncol=len(handles), fontsize=10,
+                 frameon=False, borderaxespad=0.15, borderpad=0.2, handlelength=1.6, handleheight=0.9,
+                 handletextpad=0.5, columnspacing=1.4)
+    ax.add_artist(key)
+    key.set_clip_on(False)          # outside the plot area: tight_layout then keeps a row for it
+    self._probe_key = key
+
+
 def render_status_plot(self):
     """
     Highly optimized updates of the Matplotlib plot using line reuse and draw_idle.
@@ -262,17 +300,20 @@ def render_status_plot(self):
             pass
     self._probe_span_patches = []
 
-    # Probe classes: 0 none, 0 < v < 1500 detector (red), v >= 1500 Release-button marker (blue)
+    # Probe classes: 0 none, 0 < v < 1500 detector (red), v >= 1500 Release-button marker (blue),
+    # v <= -500 waiting for sensor (amber; sensor_wait.g, logged as PROBE_WAIT_MARK)
     probe_data = plot_data.get('probe', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
+    kinds_shown = set()
     if len(probe_data) > 0 and len(t_data) == len(probe_data):
-        span_colors = {1: '#ff0000', 2: '#0288d1'}
+        span_colors = {k: c for k, _l, c in _PROBE_KEY}
         dt_default = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
 
         def _add_span(kind, start, end):
             if end <= start:
                 end = start + dt_default
-            span = self.ax_status.axvspan(start, end, color=span_colors[kind], alpha=0.22, zorder=0)
+            span = self.ax_status.axvspan(start, end, color=span_colors[kind], alpha=_PROBE_SPAN_ALPHA, zorder=0)
             self._probe_span_patches.append(span)
+            kinds_shown.add(kind)
 
         cur_kind, span_start = 0, 0.0
         for i in range(len(t_data)):
@@ -280,13 +321,17 @@ def render_status_plot(self):
                 val = float(probe_data[i])
             except (ValueError, TypeError):
                 val = 0.0
-            kind = 0 if val <= 0 else (2 if val >= 1500 else 1)
+            kind = 3 if val <= -500 else (0 if val <= 0 else (2 if val >= 1500 else 1))
             if kind != cur_kind:
                 if cur_kind:
                     _add_span(cur_kind, span_start, t_data[i])
                 cur_kind, span_start = kind, t_data[i]
         if cur_kind:
             _add_span(cur_kind, span_start, t_data[-1])
+    try:
+        _update_probe_key(self, kinds_shown)
+    except Exception as e:
+        print(f"Could not draw the probe colour key: {e}")
 
     # Parse user-configured time window interval (default 60s)
     time_win = 60.0
@@ -421,13 +466,17 @@ def _load_log_file_into_status_impl(self, file_path=None):
     import pandas as pd
     import numpy as np
     import math
-    from fcn_plan.fcn_import import match_log_axis_name
+    from fcn_plan.fcn_import import match_log_axis_name, sniff_trace_log_format
 
     encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
     df = None
+    log_sep, log_dec = sniff_trace_log_format(file_path)
     for enc in encodings:
         try:
-            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
+            if log_sep == ';':      # format v2: ';' columns, decimal comma, '#' notes after the data
+                df = pd.read_csv(file_path, sep=';', decimal=log_dec, encoding=enc, comment='#')
+            else:
+                df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
         except Exception:
             continue
@@ -601,7 +650,7 @@ def _load_log_file_into_status_impl(self, file_path=None):
             self.statusCanvas.draw_idle()
 
     axes_str = ", ".join(sorted(matched_axes.keys()))
-    has_pos_probe = any(p > 0 for p in new_plot_data['probe'])
+    has_pos_probe = any(p > 0 or p <= -500 for p in new_plot_data['probe'])   # detector, Release or sensor wait
     probe_info = "with active probe shading" if has_pos_probe else "no active probe"
     msg = f"Loaded {os.path.basename(file_path)}: {n_pts} pts, {max_t:.1f}s, axes [{axes_str}], {probe_info}"
     if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
@@ -1055,6 +1104,11 @@ def _start_selected_gcode_execution_impl(self):
     self.run_idle_since = None
     self._dash_idle_count = 0
     self._release_mark_t = None
+    self._sensor_wait = None             # sensor_wait.g wait being marked (PROBE_WAIT_MARK)
+    self._wait_triggers = []             # recent in-run samples with detector > 500 or Release (race guard)
+    self._release_used_t = None          # Release press that already ended a marked wait
+    self._wait_prev_sample_t = None
+    self._pending_log_comments = []
     self._run_gap_open = False
     self._log_open_failed = False
     self.run_gcode = f"0:/gcodes/{fname}"
@@ -1161,6 +1215,34 @@ _PLATFORM_RAW_AXES = ["A", "B", "C", "D", "'e", "'f", "'a", "'c"]
 _PHANTOM_LOG_AXES = [("X", "mm"), ("Y", "mm"), ("Z", "mm")]
 PROBE_RELEASE_MARK = 2000          # Probe value written while the Release button marker is active
 PROBE_RELEASE_HOLD_S = 0.5
+PROBE_WAIT_MARK = -1000            # Probe value written while sensor_wait.g waits (detector at 0 or below)
+SENSOR_WAIT_THRESHOLD = 500        # sensor_wait.g waits while sensors.probes[0].value[0] <= 500
+SENSOR_WAIT_MSG = "Waiting for sensor signal"    # sensor_wait.g echo when its wait starts
+SENSOR_WAIT_END_MSGS = ("continuing", "force released", "sensor detected")   # ... when it ends (lower case)
+REPLY_POLL_PERIOD_S = 0.5          # ReplyPoller without reply sequence numbers: rr_reply read this often
+REPLY_POLL_SLOW_S = 1.0            # ... in split mode (slow link): at each dashboard tick (its 1 s timer), as before
+REPLY_POLL_SAFETY_S = 5.0          # ... with sequence numbers (seqs.reply): read on a change, else this often
+REPLY_SEQ_FRESH_S = 1.0            # sequence numbers count while a position sample carried one this recently
+REPLY_SEQ_MIN_GAP_S = 0.15         # ... and a changed one is read at most this soon after the previous read
+REPLY_POLL_RETRY_S = 0.25          # a failed read is repeated after this (the Duet may still hold the text)
+REPLY_POLL_TIMEOUT_S = 2.5         # rr_reply hands its text out on handling: a timed-out read loses it
+REPLY_STOP_WAIT_S = 0.5            # stop() waits at most this long for an in-flight read (normally ~0.07 s)
+REPLY_LATENCY_GUESS_S = 0.06       # send time of a read when the caller gives none (t_fetch - this)
+WAIT_RACE_SLACK_S = 0.02           # the macro's 10 ms loop + 10 ms: race window after a sample's reply
+RELEASE_CMD_DELAY_S = 0.15         # press -> force-release command handled by the Duet (at most)
+WAIT_POS_SETTLE_S = 0.35           # machinePosition can lag 200 ms after the wait's M400: settle first
+WAIT_MOVE_TOL = 0.02               # mm / deg: an axis moved this far during a wait -> the wait has ended
+LOG_SEP = ";"                      # log format v2: ';' between the columns and a decimal comma (Excel, NL/EU locale)
+
+
+def _dc(x, fmt):
+    """A number for the log (format v2): decimal comma."""
+    return format(x, fmt).replace('.', ',')
+
+
+def _note_text(line):
+    """A '#' line of the log never holds ';' (Excel would split it into cells)."""
+    return str(line).replace(';', ',')
 
 
 def _log_device(self, extra_axes):
@@ -1226,15 +1308,23 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
         letters_txt = ",".join(str(l) for l in letters if l) if isinstance(letters, (list, tuple)) and letters else "unknown"
         t_rec = float(t) if in_run and isinstance(t, (int, float)) else 0.0
 
-        # Fixed 7-line header (every line starts with '#'), then the column names
+        # Fixed 10-line header (format v2, every line starts with '#'), then the column names
         header = [
             f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}.{now_dt.microsecond // 1000:03d}",
-            f"# G-code: {gcode if isinstance(gcode, str) and gcode else 'none'}",
+            _note_text(f"# G-code: {gcode if isinstance(gcode, str) and gcode else 'none'}"),
             f"# Device: {device}",
             f"# Axes (Duet order): {letters_txt}",
-            "# Positions: actual (Duet machinePosition; refreshed at most every 200 ms, CAN expansion-board axes about every 100 ms)",
-            f"# Probe: 0 none | 1-1499 detector | {PROBE_RELEASE_MARK} Release button",
-            f"# Recording from: {t_rec:.3f} s of the run",
+            "# Positions: actual (Duet machinePosition, refreshed at most every 200 ms, CAN expansion-board axes about every 100 ms)",
+            f"# Probe: 0 none | 1-1499 detector | {PROBE_RELEASE_MARK} Release button | {PROBE_WAIT_MARK} waiting for sensor (sensor_wait)",
+            f"# Wait timing: start = when TRACE received the Duet message (read as soon as a position sample shows a new "
+            f"message, else every {_dc(REPLY_POLL_PERIOD_S, 'g')}-{_dc(REPLY_POLL_SLOW_S, 'g')} s), so the real start is "
+            f"earlier, normally by up to ~{_dc(REPLY_POLL_PERIOD_S, 'g')} s. End = first position sample with the detector "
+            f"above {SENSOR_WAIT_THRESHOLD} or Release pressed (within one sample, ~0,08 s), otherwise as stated at the end "
+            f"of the file",
+            "# Run notes: the times of each sensor wait (with the window in which the Duet sent its message), connection "
+            "gaps and the run end are listed at the end of the file",
+            f"# Recording from: {_dc(t_rec, '.3f')} s of the run",
+            "# Format: columns separated by semicolons, decimal comma",
         ]
         if is_platform:
             columns = (["Time_s"] + [f"Pos_{n}_{u}" for n, u in _PLATFORM_LOG_AXES]
@@ -1263,7 +1353,12 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
             print(f"Log folder not writable, logging to {filepath} instead ({errors[0]})")
         try:
             f.write("\n".join(header) + "\n")
-            f.write(",".join(columns) + "\n")
+            f.write(LOG_SEP.join(columns) + "\n")
+            # Run notes are kept in memory and written after the last row (close_data_log_file);
+            # '# Wait ...' notes from before the first row join them
+            pending = getattr(self, '_pending_log_comments', None)
+            self._log_notes = [x for x in pending if isinstance(x, tuple)] if isinstance(pending, list) else []
+            self._pending_log_comments = []
             f.flush()
             self.active_log_file = f
             self.active_log_filepath = filepath
@@ -1282,7 +1377,8 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
                       + [f"{float(raw.get(a, 0.0)):.3f}" for a in _PLATFORM_RAW_AXES] + [f"{p_val}"])
         else:
             fields = [f"{t:.4f}", f"{float(x):.3f}", f"{float(y):.3f}", f"{float(z):.3f}", f"{p_val}"]
-        self.active_log_file.write(",".join(fields) + "\n")
+        # format v2: ';' between the columns, decimal comma (the fields are numbers only)
+        self.active_log_file.write(LOG_SEP.join(fields).replace('.', ',') + "\n")
         self.active_log_file.flush()
     except Exception as e:
         print(f"Error writing to data log file: {e}")
@@ -1291,7 +1387,8 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
 def close_data_log_file(self, reason="closed"):
     """
     Closes the active log file (recording unchecked, run finished, cancelled, disconnected ...).
-    Appends a '# End: <reason> at <t> s' line so the log says why it stops.
+    Writes the run notes kept in memory ('# Wait ...', '# Gap ...', '# Message read failed ...', in
+    time order) after the last row, then a '# End: <reason> at <t> s' line (always the last line).
     """
     if hasattr(self, 'active_log_file') and self.active_log_file is not None:
         try:
@@ -1299,8 +1396,12 @@ def close_data_log_file(self, reason="closed"):
             t0 = getattr(self, 'run_t0', None)
             if isinstance(t0, float):
                 t_end = time.perf_counter() - t0
+            notes = getattr(self, '_log_notes', None)
+            out = [line for _t, line in sorted(notes, key=lambda x: x[0])] if isinstance(notes, list) else []
             if reason:
-                self.active_log_file.write(f"# End: {reason}" + (f" at {t_end:.3f} s" if t_end is not None else "") + "\n")
+                out.append(_note_text(f"# End: {reason}" + (f" at {_dc(t_end, '.3f')} s" if t_end is not None else "")))
+            if out:
+                self.active_log_file.write("\n".join(out) + "\n")
             self.active_log_file.flush()
             self.active_log_file.close()
             print(f"Closed data log file: {getattr(self, 'active_log_filepath', '')} ({reason})")
@@ -1308,6 +1409,7 @@ def close_data_log_file(self, reason="closed"):
             pass
         self.active_log_file = None
         self.active_log_filepath = None
+        self._log_notes = []
     if getattr(self, 'run_active', False) is not True:
         self.log_t0 = None
 
@@ -1315,11 +1417,14 @@ def close_data_log_file(self, reason="closed"):
 def end_run(self, reason):
     """Ends the current run: closes its log with `reason` and clears the run flags."""
     was_active = getattr(self, 'run_active', False) is True
+    _end_sensor_wait_at_run_end(self, reason)       # a sensor wait still marked ends with the run
     self.run_active = False
     self.gcode_executing = False
     self.gcode_seen_running = False
     self.run_idle_since = None
     close_data_log_file(self, reason)
+    self._sensor_wait = None
+    self._pending_log_comments = []
     self.log_t0 = None
     if was_active:
         print(f"Run ended: {reason}")
@@ -1385,19 +1490,23 @@ def update_status_tab_dashboard(self):
         return
 
     try:
-        # Poll /rr_reply for Duet messages (e.g. M117, macro responses, 'waiting for radiation')
-        try:
-            res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
-            if res_reply.status_code == 200:
-                reply_str = res_reply.text.strip()
-                if reply_str and reply_str != getattr(self, '_last_duet_reply', ''):
-                    self._last_duet_reply = reply_str
-                    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
-                        self.statusDuetMessage.setText(reply_str)
-                    from fcn_control.fcn_control import log_to_duet_console
-                    log_to_duet_console(self, f"Duet Message: {reply_str}", color="#00acc1")
-        except Exception:
-            pass
+        # Poll /rr_reply for Duet messages (e.g. M117, macro responses, 'waiting for radiation'),
+        # unless the ReplyPoller runs: it is then the only rr_reply reader (the Duet hands each
+        # reply out once) and its replies reach handle_duet_reply directly
+        if not _reply_poller_running(self):
+            try:
+                t_send = time.perf_counter()
+                res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
+                if res_reply.status_code == 200:
+                    t_prev, self._rr_reply_prev_t = getattr(self, '_rr_reply_prev_t', None), t_send
+                    handle_duet_reply(self, (time.perf_counter(), t_prev, res_reply.text, t_send))
+            except Exception:
+                pass
+        else:
+            try:
+                self.duet_reply_poller.dashboard_tick()    # split mode: the poller reads now, the tick waits (old rate)
+            except Exception:
+                pass
 
         # Check for message payload fields in status response (e.g. RRF object model displayMessage/message)
         om_msg = None
@@ -1919,7 +2028,12 @@ def _parse_combined_snapshot(self, js):
     state = res.get("state")
     st_txt = state.get("status") if isinstance(state, dict) else None
     status = RRF_STATUS_CODES.get(str(st_txt).lower()) if st_txt else None
-    return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': probe, 'status': status}
+    # seqs.reply (live): goes up when the Duet has a new message for rr_reply (ReplyPoller reads it then)
+    seqs = res.get("seqs")
+    reply_seq = seqs.get("reply") if isinstance(seqs, dict) else None
+    if not isinstance(reply_seq, int) or isinstance(reply_seq, bool):
+        reply_seq = None
+    return {'real': real, 'cmd': cmd, 'homed': homed, 'probe': probe, 'status': status, 'reply_seq': reply_seq}
 
 
 def poll_position_sample(self, mode="split", retry=True):
@@ -1992,6 +2106,7 @@ try:
             self._next_letter_try = 0.0
             self._settle_until = 0.0
             self._next_combined_try = 0.0
+            self.companion = None      # e.g. the ReplyPoller: started / stopped / shut down with this poller
             self.sample.connect(self._deliver, Qt.QueuedConnection)
 
         @Slot(object)
@@ -2010,14 +2125,20 @@ try:
                 self._quit.clear()
                 self._thread = threading.Thread(target=self._run, name="DuetPositionPoller", daemon=True)
                 self._thread.start()
+            if self.companion is not None:
+                self.companion.start()
 
         def stop(self, wait=3.0):
             self._enabled.clear()
+            if self.companion is not None:
+                self.companion.stop(wait)
             if self._busy.acquire(timeout=wait):   # wait for an in-flight request
                 self._busy.release()
 
         def shutdown(self, wait=3.0):
             self._quit.set()
+            if self.companion is not None:
+                self.companion.shutdown(wait)      # first: it then does not wait in stop() below
             self.stop(wait)
             th = self._thread
             if th is not None and th.is_alive():
@@ -2124,11 +2245,229 @@ try:
                         self._account(s)
                 if s is not None:
                     self.sample.emit(s)
+                    comp = self.companion
+                    if comp is not None and hasattr(comp, 'note_sample'):
+                        try:
+                            comp.note_sample(s)     # reply sequence number -> read the new Duet message now
+                        except Exception:
+                            pass
                 rest = self._min_period - (time.perf_counter() - t_start)
                 if rest > 0:
                     self._quit.wait(rest)
+
+    class ReplyPoller(QObject):
+        """
+        Reads the Duet messages (rr_reply) on a background thread while connected and hands every
+        reply to `handler` on the GUI thread (queued, in order) as (t_fetch, t_prev, text, t_send,
+        t_fail): t_fetch = time.perf_counter() when the reply arrived, t_send = when this read was
+        sent, t_prev = lower bound of when the Duet queued the text (the previous successful read's
+        send time, or later when the reply sequence number showed nothing new until then; None
+        before the first read), t_fail = send time of the first read that failed since the previous
+        successful one (a text the Duet handed out to it is lost), else None. Empty replies are only
+        handed on when a read failed before them.
+
+        When to read: the position snapshots carry seqs.reply, which the Duet increments for every
+        new message (the PositionPoller passes each sample to note_sample()). A change is read at
+        once, so the extra load is about one request per message plus a safety read every
+        REPLY_POLL_SAFETY_S. Without fresh sequence numbers it reads every `period` s (other
+        firmware); in split mode (slow link) at each dashboard tick (dashboard_tick(), the rate at
+        which the dashboard read rr_reply itself before), else every REPLY_POLL_SAFETY_S.
+
+        The Duet hands each reply out once, so while this poller runs it is the ONLY rr_reply
+        reader: the dashboard and pause_continue_GCODE skip their own reads (request_now() asks
+        for an immediate read instead). Same interface as PositionPoller (isActive / start / stop /
+        shutdown); it is that poller's `companion`, so it is started, stopped (file transfers) and
+        shut down together with it. Requests do not retry and time out after `timeout` s (long, so a
+        WiFi stall does not lose a text the Duet already handed out); stop() waits at most
+        REPLY_STOP_WAIT_S for an in-flight read, whose reply is still delivered afterwards.
+        """
+        reply = Signal(object)
+
+        def __init__(self, ui, handler, period=REPLY_POLL_PERIOD_S, timeout=REPLY_POLL_TIMEOUT_S, parent=None):
+            super().__init__(parent)
+            self._ui = ui
+            self._handler = handler
+            self._period = float(period)
+            self._slow_period = max(self._period, REPLY_POLL_SAFETY_S)   # split mode: safety read (see dashboard_tick)
+            self._timeout = float(timeout)
+            self._enabled = threading.Event()
+            self._quit = threading.Event()
+            self._wake = threading.Event()
+            self._busy = threading.Lock()
+            self._thread = None
+            self._asap = None          # perf_counter() time of a requested immediate read
+            self._t_prev = None        # send time of the last successful read
+            self._t_last_send = None   # send time of the last read (successful or not)
+            self._t_fail = None        # send time of the first failed read since the last successful one
+            self._seq_lock = threading.Lock()
+            self._seq_seen = None      # latest seqs.reply of a position sample
+            self._seq_read = None      # seqs.reply seen before the last successful read was sent
+            self._seq_t = None         # perf_counter() when a sample last carried seqs.reply
+            self._quiet_t0 = None      # send time of the latest sample that still showed _seq_read
+            self._split = False        # the position poll is in split mode (slow link)
+            self.reads = 0             # rr_reply requests sent (diagnostics / tests)
+            self.reply.connect(self._deliver, Qt.QueuedConnection)
+
+        @Slot(object)
+        def _deliver(self, r):
+            try:
+                self._handler(r)
+            except Exception as e:
+                print(f"Error handling a Duet message: {e}")
+
+        def isActive(self):
+            th = self._thread
+            return self._enabled.is_set() and th is not None and th.is_alive()
+
+        def start(self, *_ignored):
+            self._enabled.set()
+            if self._thread is None or not self._thread.is_alive():
+                self._quit.clear()
+                self._thread = threading.Thread(target=self._run, name="DuetReplyPoller", daemon=True)
+                self._thread.start()
+
+        def stop(self, wait=3.0):
+            self._enabled.clear()
+            self._wake.set()
+            if self._quit.is_set():
+                return                     # shutting down: no file transfer follows
+            if self._busy.acquire(timeout=min(float(wait), REPLY_STOP_WAIT_S)):   # wait for an in-flight read
+                self._busy.release()
+
+        def shutdown(self, wait=3.0):
+            already = self._quit.is_set()
+            self._quit.set()
+            self.stop(wait)
+            th = self._thread
+            if th is not None and th.is_alive() and not already:
+                th.join(timeout=min(float(wait), REPLY_STOP_WAIT_S))      # daemon thread: never holds the exit
+
+        def request_now(self, delay=0.0):
+            """Read rr_reply `delay` s from now instead of at the next periodic read."""
+            self._asap = time.perf_counter() + max(0.0, float(delay))
+            self._wake.set()
+
+        def dashboard_tick(self, wait=REPLY_POLL_TIMEOUT_S):
+            """GUI thread, once per dashboard tick: in split mode (slow link, no sequence numbers)
+            the Duet messages are read now and the tick waits for that read, as it waited for its own
+            read before. The dashboard then ticks (its 1 s timer fires about every 2 s on a slow link)
+            and loads the link as before; the read stays with the poller (only rr_reply reader, send
+            times, failed reads noted). A tick that no longer waited would come sooner and send more
+            dashboard requests, which costs position samples on a link that serves one at a time."""
+            if not self._split or self._seq_mode(time.perf_counter()):
+                return
+            n0 = self.reads
+            self.request_now()
+            t_end = time.perf_counter() + float(wait)
+            while time.perf_counter() < t_end and self.isActive():
+                if self.reads > n0 and not self._busy.locked():
+                    return                 # the requested read is done (its reply follows, queued)
+                time.sleep(0.002)
+
+        def note_sample(self, s):
+            """PositionPoller thread: one position sample. A new seqs.reply value means a new Duet
+            message, which is read right away."""
+            self._split = s.get('mode') == 'split'
+            seq = s.get('reply_seq')
+            if seq is None:
+                return
+            try:
+                t0 = float(s.get('t', 0.0)) - 0.5 * float(s.get('latency') or 0.0)   # sample request sent
+            except (TypeError, ValueError):
+                return
+            with self._seq_lock:
+                self._seq_t = time.perf_counter()
+                self._seq_seen = seq
+                if seq == self._seq_read:
+                    if self._quiet_t0 is None or t0 > self._quiet_t0:
+                        self._quiet_t0 = t0
+                    return
+            self._wake.set()
+
+        def _seq_mode(self, now):
+            t = self._seq_t
+            return t is not None and now - t < REPLY_SEQ_FRESH_S
+
+        def _next_read_t(self, now):
+            """perf_counter() time of the next read."""
+            last = self._t_last_send
+            if last is None:
+                t_next = now
+            elif self._seq_mode(now):
+                with self._seq_lock:
+                    changed = self._seq_seen != self._seq_read
+                if self._t_fail is not None:
+                    t_next = last + REPLY_POLL_RETRY_S     # a read failed: the Duet may still hold the text
+                else:
+                    t_next = last + (REPLY_SEQ_MIN_GAP_S if changed else REPLY_POLL_SAFETY_S)
+            else:
+                t_next = last + (self._slow_period if self._split else self._period)
+            asap = self._asap
+            return min(t_next, asap) if asap is not None else t_next
+
+        def _read(self):
+            ip = getattr(self._ui, 'duet_ip', None) or "192.168.0.1"
+            with self._seq_lock:
+                seq_at_send = self._seq_seen
+                quiet = self._quiet_t0
+            t_send = time.perf_counter()
+            self._t_last_send = t_send
+            self.reads += 1
+            try:
+                res = duet_request(f"http://{ip}/rr_reply", timeout=self._timeout, retry=False)
+                ok = res.status_code == 200
+            except Exception:
+                res, ok = None, False      # timeout / connection error
+            t_got = time.perf_counter()
+            if not ok:
+                if self._t_fail is None:
+                    self._t_fail = t_send
+                return None
+            t_prev = self._t_prev
+            if isinstance(quiet, float) and t_prev is not None and quiet > t_prev:
+                t_prev = quiet             # the samples showed no new message until then
+            self._t_prev = t_send
+            with self._seq_lock:
+                if seq_at_send is not None and seq_at_send != self._seq_read:
+                    self._seq_read = seq_at_send
+                    self._quiet_t0 = None
+            t_fail, self._t_fail = self._t_fail, None
+            text = (res.text or "").strip()
+            if not text and t_fail is None:
+                return None
+            return (t_got, t_prev, text, t_send, t_fail)
+
+        def _run(self):
+            while not self._quit.is_set():
+                if not self._enabled.wait(0.1):
+                    continue
+                if not getattr(self._ui, 'duet_connected', False):
+                    self._quit.wait(0.1)
+                    continue
+                now = time.perf_counter()
+                rest = self._next_read_t(now) - now
+                if rest > 0:
+                    self._wake.wait(min(rest, 0.25))       # woken by note_sample / request_now / stop
+                    self._wake.clear()
+                    continue
+                r = None
+                with self._busy:
+                    if self._enabled.is_set() and not self._quit.is_set():
+                        asap = self._asap
+                        if asap is not None and asap <= time.perf_counter():
+                            self._asap = None      # this read serves request_now(); a later one stays due
+                        try:
+                            r = self._read()
+                        except Exception:
+                            r = None
+                if r is not None:
+                    try:
+                        self.reply.emit(r)     # also after stop(): a text the Duet handed out is not dropped
+                    except RuntimeError:
+                        return                 # the Qt object is gone (application closed during a long read)
 except ImportError:   # pragma: no cover - Qt is always present in the app
     PositionPoller = None
+    ReplyPoller = None
 
 
 def _apply_homed_flags(self, homed):
@@ -2197,6 +2536,339 @@ def _apply_release_mark(self, t, probe):
     return probe
 
 
+# --- sensor_wait.g mark (Probe PROBE_WAIT_MARK in the log and the plot while the macro waits) ---
+# The macro keeps the job 'processing'; only its echo "Waiting for sensor signal..." tells that it
+# waits. TRACE reads that text with the ReplyPoller (on a seqs.reply change, else on its timer), so
+# the wait is known from the read that brought it (t_fetch); samples are marked from the first one
+# taken at or after t_fetch. The wait ends on the FIRST sample with the detector above
+# SENSOR_WAIT_THRESHOLD or with the Release marker of a press made during it (no waiting for the
+# Duet's "Continuing" message). Backup ends: that message, the machine moving (the macro runs M400
+# before its echo, so the axes stand still while it waits), a new wait, the run end.
+# Race guard: the read that brought the start text had no end text, so the wait still ran when the
+# Duet handled it (at or after t_send). Only a trigger the Duet can have seen after t_send can have
+# ended the wait before TRACE knew of it; such a wait is left unmarked ('# Wait not marked').
+# The mark goes to the log and the plot only, never to _last_probe_val / auto-pause / auto-release.
+
+def _run_t(self, t):
+    """Run time (s after run_t0) of a perf_counter() time."""
+    t0 = getattr(self, 'run_t0', None)
+    return float(t) - t0 if isinstance(t0, float) else float(t)
+
+
+def _clean_msg(text):
+    """One Duet message line for a '# ...' log comment: single line, no double quotes, no ';'."""
+    return " ".join(str(text).replace('"', "'").replace(';', ',').split())[:160]
+
+
+def _write_run_comment(self, line, t=None):
+    """Keeps a '# ...' run note of the open log in memory (time order by t, the perf_counter() time
+    it is about); close_data_log_file writes the notes after the last row. Before the log file is
+    open (no sample of the run logged so far) the note waits in _pending_log_comments."""
+    try:
+        t_key = _run_t(self, t) if isinstance(t, (int, float)) and not isinstance(t, bool) else _run_t(self, time.perf_counter())
+    except Exception:
+        t_key = 0.0
+    note = (float(t_key), _note_text(line))
+    if getattr(self, 'active_log_file', None) is not None:
+        notes = getattr(self, '_log_notes', None)
+        if not isinstance(notes, list):
+            notes = []
+            self._log_notes = notes
+        notes.append(note)
+    elif getattr(self, 'run_active', False) is True:
+        pending = getattr(self, '_pending_log_comments', None)
+        if not isinstance(pending, list):
+            pending = []
+            self._pending_log_comments = pending
+        pending.append(note)
+
+
+def _wait_sent_bounds(self, w):
+    """'between <t_prev> and <t_fetch> s' (run times) of a wait message."""
+    if isinstance(w.get('t_prev'), float):
+        return f"between {_dc(_run_t(self, w['t_prev']), '.3f')} and {_dc(_run_t(self, w['t_fetch']), '.3f')} s"
+    return f"before {_dc(_run_t(self, w['t_fetch']), '.3f')} s (no earlier read)"
+
+
+def _wait_start_line(self, w):
+    return (f"# Wait start: \"{w['msg']}\" received at {_dc(_run_t(self, w['t_fetch']), '.3f')} s "
+            f"(Duet sent it {_wait_sent_bounds(self, w)})")
+
+
+def _wait_not_marked(self, w, why):
+    """The wait message arrived, but the wait may already have ended (race): no row is marked."""
+    self._sensor_wait = None
+    _write_run_comment(self, f"# Wait not marked: \"{w['msg']}\" received at {_dc(_run_t(self, w['t_fetch']), '.3f')} s "
+                             f"(Duet sent it {_wait_sent_bounds(self, w)}), the wait may already have ended: {why}",
+                       t=w['t_fetch'])
+
+
+def _end_sensor_wait(self, what, how, t):
+    """Ends the marked sensor wait: '# Wait end: <what> at <t> s (<how>)' (and its start line if no
+    sample has been marked yet)."""
+    w = getattr(self, '_sensor_wait', None)
+    self._sensor_wait = None
+    if not isinstance(w, dict):
+        return
+    if not w.get('started'):
+        _write_run_comment(self, _wait_start_line(self, w), t=w['t_fetch'])
+    _write_run_comment(self, f"# Wait end: {what} at {_dc(_run_t(self, t), '.3f')} s ({how})", t=t)
+
+
+def _end_sensor_wait_at_run_end(self, reason):
+    """A sensor wait still marked when the run ends (job end, Cancel, start of a new run)."""
+    w = getattr(self, '_sensor_wait', None)
+    if not isinstance(w, dict):
+        return
+    try:
+        if w.get('end') is not None:
+            _end_sensor_wait(self, *w['end'][1:3], t=w['end'][0])
+        else:
+            _end_sensor_wait(self, "run end", f"the run ended: {reason}", t=time.perf_counter())
+    except Exception as e:
+        print(f"Error in the sensor wait mark (run end): {e}")
+        self._sensor_wait = None
+
+
+def _sensor_wait_reply(self, t_fetch, t_prev, text):
+    """
+    One Duet reply (GUI thread): arms the wait mark on the macro's start text during a run, and
+    ends a marked wait on its end text (backup end; normally a sample ends it first). Several
+    messages can come in one reply; they are handled in order. The read's send time comes in
+    self._reply_t_send (set by handle_duet_reply; t_fetch - REPLY_LATENCY_GUESS_S when unknown).
+    """
+    try:
+        t_fetch = float(t_fetch)
+        t_prev = float(t_prev) if isinstance(t_prev, (int, float)) and not isinstance(t_prev, bool) else None
+        t_send = getattr(self, '_reply_t_send', None)
+        if not isinstance(t_send, (int, float)) or isinstance(t_send, bool) or not t_send <= t_fetch:
+            t_send = t_fetch - REPLY_LATENCY_GUESS_S
+        t_send = float(t_send)
+        text = str(text)
+        low_text = text.lower()
+        events = []                     # (position in the text, is_start)
+        for phrase, is_start in [(SENSOR_WAIT_MSG.lower(), True)] + [(m, False) for m in SENSOR_WAIT_END_MSGS]:
+            i = low_text.find(phrase)
+            while i >= 0:
+                events.append((i, is_start))
+                i = low_text.find(phrase, i + 1)
+        events.sort()
+        for pos, is_start in events:
+            ls = text.rfind('\n', 0, pos) + 1
+            le = text.find('\n', pos)
+            line = text[ls:le if le >= 0 else len(text)].strip()
+            w = getattr(self, '_sensor_wait', None)
+            if isinstance(w, dict):
+                if not w.get('started') and w.get('t_fetch') == t_fetch:
+                    # start and end in the same read: the wait ended before TRACE knew of it
+                    _wait_not_marked(self, w, f"Duet message \"{_clean_msg(line)}\" in the same read")
+                elif w.get('end') is not None:
+                    if is_start:      # backup end already received: close it before the next wait
+                        _end_sensor_wait(self, *w['end'][1:3], t=w['end'][0])
+                elif is_start:
+                    # A new wait while this one is still marked: its end message never arrived (lost
+                    # in a failed read), so the end is only known to lie before this message
+                    tf = w.get('read_failed')
+                    note = f", a Duet message read failed at {_dc(_run_t(self, tf), '.3f')} s" if isinstance(tf, float) else ""
+                    _end_sensor_wait(self, f"Duet message \"{_clean_msg(line)}\"",
+                                     f"its end message was not received{note}, the wait ended before this "
+                                     f"message was sent", t=t_fetch)
+                else:
+                    # Backup end from the Duet message. It takes effect at the first sample taken at
+                    # or after this read, so a detector / Release sample still on its way (taken
+                    # before the read) can end the wait exactly.
+                    dt = (t_fetch - t_prev) if t_prev is not None else REPLY_POLL_PERIOD_S
+                    w['end'] = (t_fetch, f"Duet message \"{_clean_msg(line)}\"",
+                                f"from the Duet message, up to ~{_dc(dt, '.1f')} s late")
+            if not is_start:
+                continue
+            run_t0 = getattr(self, 'run_t0', None)
+            if getattr(self, 'run_active', False) is not True or not isinstance(run_t0, float) or t_fetch < run_t0:
+                continue
+            self._sensor_wait = {'t_fetch': t_fetch, 't_prev': t_prev, 't_send': min(t_send, t_fetch),
+                                 'msg': _clean_msg(line), 'started': False, 'marked': 0, 'end': None,
+                                 'ref': None, 'read_failed': None}
+    except Exception as e:
+        print(f"Error in the sensor wait mark (reply): {e}")
+
+
+def _axes_moved(real, ref):
+    """True when an axis present in both position dicts differs by more than WAIT_MOVE_TOL."""
+    for k, v in real.items():
+        r = ref.get(k)
+        if r is None:
+            continue
+        try:
+            if abs(float(v) - float(r)) > WAIT_MOVE_TOL:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None):
+    """
+    Probe value to log and plot for an in-run sample at time t (raw = Duet probe value, val = after
+    the Release marker; probe_known False when the sample carried no probe value, pos = its axis
+    positions, latency = its request time). While a sensor wait is marked: raw <= 0 (or unknown) ->
+    PROBE_WAIT_MARK; 0 < raw <= SENSOR_WAIT_THRESHOLD keeps raw (the macro still waits); raw above
+    the threshold or the Release marker of a press that can belong to this wait ends the wait on
+    this sample, which keeps its real value (e.g. 1000 / 2000). The hold of an earlier press keeps
+    2000 and does not end it (sensor_wait.g clears force_release_sensor when it starts).
+    """
+    try:
+        try:
+            raw_f = float(raw)
+        except (TypeError, ValueError):
+            raw_f, probe_known = 0.0, False
+        press = getattr(self, '_release_mark_t', None)
+        release_on = (val == PROBE_RELEASE_MARK and raw_f != PROBE_RELEASE_MARK and isinstance(press, float)
+                      and press != getattr(self, '_release_used_t', None))
+        detector_on = probe_known is not False and raw_f > SENSOR_WAIT_THRESHOLD
+        try:
+            half = 0.5 * float(latency) if latency is not None else 0.04
+        except (TypeError, ValueError):
+            half = 0.04
+        prev_t = getattr(self, '_wait_prev_sample_t', None)
+        self._wait_prev_sample_t = t
+        trigs = getattr(self, '_wait_triggers', None)
+        if not isinstance(trigs, list):
+            trigs = []
+            self._wait_triggers = trigs
+        # Latest time the Duet can have seen each trigger of this sample: the probe was read before the
+        # sample's reply came back (+ the macro's loop); the Release command reaches it after the press
+        new = []
+        if detector_on:
+            new.append((t + half + WAIT_RACE_SLACK_S, f"detector {_dc(raw_f, 'g')}", t))
+        if release_on:
+            new.append((press + RELEASE_CMD_DELAY_S, "Release button", t))
+        out = _wait_mark_value(self, t, raw_f, val, probe_known is not False, pos, prev_t, trigs,
+                               detector_on, release_on, press, t - half)
+        used = getattr(self, '_release_used_t', None)       # a press that ended a wait cannot end a later one
+        trigs.extend(x for x in new if not (x[1] == "Release button" and used == press))
+        trigs[:] = [x for x in trigs if x[2] >= t - 5.0]
+        return out
+    except Exception as e:
+        print(f"Error in the sensor wait mark: {e}")
+        return val
+
+
+def _wait_mark_value(self, t, raw_f, val, probe_known, pos, prev_t, trigs, detector_on, release_on, press,
+                     t_sent=None):
+    """_apply_wait_mark for the current wait (trigs: earlier samples' triggers, this one not yet;
+    t_sent: when this sample's request was sent, i.e. about when the Duet read its positions)."""
+    w = getattr(self, '_sensor_wait', None)
+    if not isinstance(w, dict) or t < w['t_fetch']:
+        return val
+    t_send = w.get('t_send', w['t_fetch'])
+    if not w.get('started'):
+        # Race guard: a trigger the Duet can have seen after this read was sent may have ended the
+        # wait before TRACE got the message -> nothing is marked
+        race = [x for x in trigs if x[0] >= t_send]
+        if race:
+            _wait_not_marked(self, w, f"{race[-1][1]} at {_dc(_run_t(self, race[-1][2]), '.3f')} s")
+            return val
+        w['started'] = True
+        _write_run_comment(self, _wait_start_line(self, w), t=w['t_fetch'])
+    # A press can end this wait only if its command reached the Duet after the read that brought the
+    # start text was handled (the macro clears the flag before its echo, and that read had no end text)
+    release_ends = release_on and press + RELEASE_CMD_DELAY_S >= t_send
+    if detector_on or release_ends:
+        what = f"detector {_dc(raw_f, 'g')}" if detector_on else "Release button"
+        how = (f"exact to one sample, previous sample at {_dc(_run_t(self, prev_t), '.3f')} s"
+               if isinstance(prev_t, float) else "exact to one sample")
+        _end_sensor_wait(self, what, how, t=t)
+        if release_ends:
+            self._release_used_t = press
+        return val
+    if w.get('end') is not None and t >= w['end'][0]:
+        _end_sensor_wait(self, *w['end'][1:3], t=w['end'][0])     # backup end (Duet message)
+        return val
+    # Backup end without a message: the axes stand still while the macro waits (M400 before the echo).
+    # machinePosition can lag ~200 ms after the M400, so the reference follows the samples until one
+    # whose request was SENT (the Duet read its positions then) WAIT_POS_SETTLE_S or more after the
+    # read that brought the start text; only such a reference is compared (a stalled response of an
+    # earlier request can hold a pre-M400 position).
+    if isinstance(pos, dict) and pos:
+        if t_sent is None:
+            t_sent = t - 0.04
+        if w.get('ref') is None or not w.get('ref_fresh'):
+            w['ref'] = dict(pos)
+            w['ref_fresh'] = t_sent >= w['t_fetch'] + WAIT_POS_SETTLE_S
+        elif _axes_moved(pos, w['ref']):
+            p_txt = _dc(_run_t(self, prev_t), '.3f') if isinstance(prev_t, float) else "?"
+            _end_sensor_wait(self, "motion", f"no end message yet, the axes moved after the previous sample at "
+                                             f"{p_txt} s, positions lag up to 0,2 s", t=t)
+            return val
+    if val == PROBE_RELEASE_MARK:
+        return val              # hold of an earlier Release press (kept as the press marker)
+    if not probe_known or raw_f <= 0:
+        w['marked'] += 1
+        return PROBE_WAIT_MARK
+    return val
+
+
+def _reply_poller_running(self):
+    """True while the ReplyPoller reads rr_reply (it is then the only rr_reply reader)."""
+    rp = getattr(self, 'duet_reply_poller', None)
+    try:
+        return ReplyPoller is not None and isinstance(rp, ReplyPoller) and rp.isActive()
+    except Exception:
+        return False
+
+
+def _reply_read_failed(self, t_prev, t_send, t_fail):
+    """A Duet-message read failed (timeout / connection error) before this reply: a text the Duet
+    handed out to it is lost. Noted in the run's log and on the marked wait (its end may be missing)."""
+    try:
+        t_fail = float(t_fail)
+        w = getattr(self, '_sensor_wait', None)
+        if isinstance(w, dict) and w.get('read_failed') is None:
+            w['read_failed'] = t_fail
+        run_t0 = getattr(self, 'run_t0', None)
+        if getattr(self, 'run_active', False) is not True or not isinstance(run_t0, float) or t_fail < run_t0:
+            return
+        lo = (f"between {_dc(_run_t(self, t_prev), '.3f')} and" if isinstance(t_prev, (int, float)) and not isinstance(t_prev, bool)
+              else "before")
+        hi = _run_t(self, t_send) if isinstance(t_send, (int, float)) and not isinstance(t_send, bool) else _run_t(self, t_fail)
+        _write_run_comment(self, f"# Message read failed at {_dc(_run_t(self, t_fail), '.3f')} s: Duet messages sent {lo} "
+                                 f"{_dc(hi, '.3f')} s may be lost (a sensor wait start or end may be missing)", t=t_fail)
+    except Exception as e:
+        print(f"Error noting a failed Duet message read: {e}")
+
+
+def handle_duet_reply(self, r):
+    """
+    GUI thread: one Duet reply r = (t_fetch, t_prev, text[, t_send[, t_fail]]) from the ReplyPoller
+    (or from the dashboard's own read when the poller is not running). Same effects as the
+    dashboard's former read (Duet message field, _last_duet_reply that the include-pause logic
+    reads, console line), plus the sensor_wait mark of the live log (every reply, also a repeated
+    text) and a '# Message read failed' note when a read failed before this one (t_fail).
+    """
+    try:
+        t_fetch, t_prev, text = r[0], r[1], r[2]
+        t_send = r[3] if len(r) > 3 else None
+        t_fail = r[4] if len(r) > 4 else None
+    except (TypeError, ValueError, IndexError, KeyError):
+        return
+    if t_fail is not None:
+        _reply_read_failed(self, t_prev, t_send, t_fail)
+    reply_str = str(text or "").strip()
+    if not reply_str:
+        return
+    self._reply_t_send = t_send
+    try:
+        _sensor_wait_reply(self, t_fetch, t_prev, reply_str)
+    finally:
+        self._reply_t_send = None
+    if reply_str != getattr(self, '_last_duet_reply', ''):
+        self._last_duet_reply = reply_str
+        if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+            self.statusDuetMessage.setText(reply_str)
+        from fcn_control.fcn_control import log_to_duet_console
+        log_to_duet_console(self, f"Duet Message: {reply_str}", color="#00acc1")
+
+
 def update_status_fast(self):
     """Synchronous poll + handle (kept for callers/tests; the app uses PositionPoller)."""
     if not getattr(self, 'duet_connected', False) or getattr(self, 'status_stopped', False):
@@ -2222,13 +2894,9 @@ def handle_position_sample(self, s):
         if getattr(self, 'run_active', False) is True:
             run_t0 = getattr(self, 'run_t0', None)
             t_gap = (float(s.get('t', time.perf_counter())) - run_t0) if isinstance(run_t0, float) else 0.0
-            f = getattr(self, 'active_log_file', None)
-            if f is not None:
-                try:
-                    f.write(f"# Gap: connection lost at {t_gap:.3f} s\n")
-                    f.flush()
-                except Exception:
-                    pass
+            if getattr(self, 'active_log_file', None) is not None:      # run note, written when the log closes
+                _write_run_comment(self, f"# Gap: connection lost at {_dc(t_gap, '.3f')} s",
+                                   t=float(s.get('t', time.perf_counter())))
             self._run_gap_open = True
             print(f"Connection lost during the run at {t_gap:.1f} s; logging resumes after reconnecting.")
         elif getattr(self, 'active_log_file', None) is not None:
@@ -2291,9 +2959,11 @@ def handle_position_sample(self, s):
             self.statusPosYaw.setText(f"Yaw {current_yaw:.2f}")
 
         curr_p = s.get('probe')
+        probe_known = curr_p is not None      # else the dashboard's last value (never ends a sensor wait)
         if curr_p is None:
             curr_p = getattr(self, '_last_probe_val', 0)
-        curr_p = _apply_release_mark(self, t_now, curr_p)
+        raw_p = curr_p
+        curr_p = _apply_release_mark(self, t_now, curr_p)   # + _apply_wait_mark below (in-run samples)
 
         self._latest_sample = {'t': t_now, 'real': axis_positions, 'status': sample_status}
 
@@ -2322,14 +2992,13 @@ def handle_position_sample(self, s):
 
         if in_run and getattr(self, '_run_gap_open', False) is True:
             self._run_gap_open = False
-            f = getattr(self, 'active_log_file', None)
-            if f is not None:
-                try:
-                    f.write(f"# Gap end: reconnected at {t_now - run_t0:.3f} s\n")
-                except Exception:
-                    pass
+            if getattr(self, 'active_log_file', None) is not None:      # run note, written when the log closes
+                _write_run_comment(self, f"# Gap end: reconnected at {_dc(t_now - run_t0, '.3f')} s", t=t_now)
 
         if in_run:
+            # sensor_wait.g: PROBE_WAIT_MARK while it waits; same value for the log row and the plot point
+            curr_p = _apply_wait_mark(self, t_now, raw_p, curr_p, probe_known=probe_known,
+                                      pos=s.get('real'), latency=s.get('latency'))
             if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
                 raw = {a: axis_positions[a] for a in _PLATFORM_RAW_AXES}
                 log_data_point(self, t_now - run_t0, x_val, y_val, z_val, curr_p, extra_axes=dof, raw_axes=raw)
@@ -2561,17 +3230,28 @@ def pause_continue_GCODE(self, pause=True):
         duet_request(url, params={'gcode': code}, timeout=4)
         
         # Immediately fetch any console reply message sent by Duet upon pause/resume (e.g. 'waiting for radiation')
-        time.sleep(0.1)
-        try:
-            res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
-            if res_reply.status_code == 200 and res_reply.text.strip():
-                reply_text = res_reply.text.strip()
-                if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
-                    self.statusDuetMessage.setText(reply_text)
-                from fcn_control.fcn_control import log_to_duet_console
-                log_to_duet_console(self, f"Duet Message: {reply_text}", color="#00acc1")
-        except Exception:
-            pass
+        if _reply_poller_running(self):
+            self.duet_reply_poller.request_now(0.1)     # it is the only rr_reply reader while it runs
+        else:
+            time.sleep(0.1)
+            try:
+                t_send = time.perf_counter()
+                res_reply = duet_request(f'http://{ip}/rr_reply', timeout=2)
+                if res_reply.status_code == 200:
+                    t_prev, self._rr_reply_prev_t = getattr(self, '_rr_reply_prev_t', None), t_send
+                if res_reply.status_code == 200 and res_reply.text.strip():
+                    reply_text = res_reply.text.strip()
+                    self._reply_t_send = t_send
+                    try:
+                        _sensor_wait_reply(self, time.perf_counter(), t_prev, reply_text)
+                    finally:
+                        self._reply_t_send = None
+                    if hasattr(self, 'statusDuetMessage') and self.statusDuetMessage:
+                        self.statusDuetMessage.setText(reply_text)
+                    from fcn_control.fcn_control import log_to_duet_console
+                    log_to_duet_console(self, f"Duet Message: {reply_text}", color="#00acc1")
+            except Exception:
+                pass
 
         update_status_tab_dashboard(self)
     except Exception as e:
@@ -2986,6 +3666,9 @@ def release_sensor_wait_action(self):
     self._release_mark_t = time.perf_counter()
     self._release_mark_done = False
     log_to_duet_console(self, "Sending force release signal to sensor_wait macro on Duet...", color="#0288d1")
-    send_cmd(self, "global force_release_sensor = true")
+    # Only 'set': sensor_wait.g creates the global and resets it to false every time it starts, so
+    # a 'global force_release_sensor = true' never releases a wait (before a wait the macro resets
+    # it, during a wait RRF rejects it with "variable 'force_release_sensor' already exists", and
+    # that error would become the last Duet message, which the 'Include pause' check reads).
     send_cmd(self, "set global.force_release_sensor = true")
 

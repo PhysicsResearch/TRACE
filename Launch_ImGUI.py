@@ -267,6 +267,9 @@ class MyApp(QMainWindow):
             poller = getattr(self, 'status_fast_timer', None)
             if poller is not None and hasattr(poller, 'shutdown'):
                 poller.shutdown()
+            reply_poller = getattr(self, 'duet_reply_poller', None)   # normally shut down with the position poll
+            if reply_poller is not None and hasattr(reply_poller, 'shutdown'):
+                reply_poller.shutdown()
         except Exception:
             pass
         try:

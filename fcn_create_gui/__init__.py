@@ -69,6 +69,7 @@ def create_gui(self):
     self.tab_files = QWidget()
     self.tab_planning = QWidget()
     self.tab_editor = QWidget()
+    self.tab_logs = QWidget()
 
     # Add tabs to tabModules with exact titles expected by software logic
     self.tabModules.addTab(self.tab_2, "Control")
@@ -76,6 +77,7 @@ def create_gui(self):
     self.tabModules.addTab(self.tab_files, "Files")
     self.tabModules.addTab(self.tab_planning, "Planning")
     self.tabModules.addTab(self.tab_editor, "Editor")
+    self.tabModules.addTab(self.tab_logs, "Log files")
 
     # Track loaded main tabs for lazy loading
     self._loaded_tabs = set()
@@ -107,6 +109,12 @@ def on_main_tab_changed(self, index):
         return
 
     if index in self._loaded_tabs:
+        return
+
+    if index == 5:  # Log files Tab (self-contained; binds its own widgets)
+        from .tab_logs import build_logs_tab
+        build_logs_tab(self)
+        self._loaded_tabs.add(5)
         return
 
     if index == 1:  # Status Tab

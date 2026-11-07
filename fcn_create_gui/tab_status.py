@@ -831,7 +831,8 @@ def build_status_tab(self):
     self.status_polling_timer = QTimer(self.tab_status)
     self.status_polling_timer.setInterval(1000)
     
-    from fcn_monitor.fcn_duet import update_status_tab_dashboard, PositionPoller, handle_position_sample
+    from fcn_monitor.fcn_duet import (update_status_tab_dashboard, PositionPoller, handle_position_sample,
+                                      ReplyPoller, handle_duet_reply)
     self.status_polling_timer.timeout.connect(lambda: update_status_tab_dashboard(self))
     self.status_polling_timer.start()
 
@@ -841,6 +842,12 @@ def build_status_tab(self):
     # Keeps the 'status_fast_timer' name: isActive()/stop()/start() as before.
     self.status_fast_timer = PositionPoller(self, lambda s: handle_position_sample(self, s),
                                             min_period=0.05, parent=self.tab_status)
+    # Duet messages (rr_reply) on their own thread, read when a position snapshot shows a new one
+    # (seqs.reply), else every 0.5 s: the only rr_reply reader while it runs (sensor_wait mark, Duet
+    # message field). Started / stopped / shut down with the position poll.
+    if ReplyPoller is not None:
+        self.duet_reply_poller = ReplyPoller(self, lambda r: handle_duet_reply(self, r), parent=self.tab_status)
+        self.status_fast_timer.companion = self.duet_reply_poller
     self.status_fast_timer.start()
 
     # Initialize Advanced vs Basic mode from persisted configuration

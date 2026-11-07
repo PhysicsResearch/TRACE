@@ -585,6 +585,44 @@ class ImportMotionDialog(QDialog):
         )
 
 
+TRACE_LOG_HEADER_SCAN = 200        # '#' lines read at most before the column-names line of a TRACE log
+_DECIMAL_COMMA_RE = re.compile(r'-?\d+,\d+')
+
+
+def sniff_trace_log_format(file_path, max_lines=TRACE_LOG_HEADER_SCAN):
+    """
+    (separator, decimal) of a TRACE log, from its column-names line (the first line that is not
+    empty and not a '#' comment): ';' when that line holds one (format v2, Excel with NL/EU
+    settings), else ',' when it holds one (v1), else None (unknown: the caller sniffs as before).
+    The decimal mark is ',' when the separator is ';' and the data tokens look like -?\\d+,\\d+.
+    """
+    sep, dec = None, '.'
+    try:
+        with open(file_path, 'r', errors='ignore', encoding='utf-8') as f:
+            header, data = None, []
+            for _ in range(max_lines + 50):
+                line = f.readline()
+                if not line:
+                    break
+                s = line.strip()
+                if not s or s.startswith('#'):
+                    continue
+                if header is None:
+                    header = s
+                    continue
+                data.append(s)
+                if len(data) >= 20:
+                    break
+        if header is None:
+            return None, '.'
+        sep = ';' if ';' in header else (',' if ',' in header else None)
+        if sep == ';' and any(_DECIMAL_COMMA_RE.fullmatch(tok.strip()) for row in data for tok in row.split(';')):
+            dec = ','
+    except Exception:
+        return None, '.'
+    return sep, dec
+
+
 def is_trace_log_file(file_path):
     """
     Checks if a file is a TRACE-generated log file by inspecting its header and initial rows.
@@ -599,11 +637,14 @@ def is_trace_log_file(file_path):
         for enc in encodings:
             try:
                 with open(file_path, 'r', errors='ignore', encoding=enc) as f:
-                    for _ in range(15):
+                    # up to the first non-'#' line (the column names; v2 logs have a 10-line header)
+                    for i in range(TRACE_LOG_HEADER_SCAN):
                         line = f.readline()
                         if not line:
                             break
                         sample_lines.append(line)
+                        if i >= 14 and line.strip() and not line.strip().startswith('#'):
+                            break
                 if sample_lines:
                     break
             except Exception:
@@ -702,9 +743,13 @@ def parse_trace_log_file(file_path):
     """
     encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
     df = None
+    log_sep, log_dec = sniff_trace_log_format(file_path)
     for enc in encodings:
         try:
-            df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
+            if log_sep == ';':      # format v2: ';' columns, decimal comma, '#' notes after the data
+                df = pd.read_csv(file_path, sep=';', decimal=log_dec, encoding=enc, comment='#')
+            else:
+                df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
         except Exception:
             continue

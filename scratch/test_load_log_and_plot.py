@@ -152,7 +152,7 @@ def test_log_file_saved_as_csv():
     with open(filepath, 'r', encoding='utf-8') as f:
         first_line = f.readline().strip()
         assert first_line.startswith("# Computer Time:"), f"Expected Computer Time on line 1, got {first_line}"
-    df = pd.read_csv(filepath, comment='#')
+    df = pd.read_csv(filepath, comment='#', sep=';', decimal=',')   # log format v2 (';' columns, decimal comma)
     print("First line:", first_line)
     print("Saved CSV columns:", list(df.columns))
     assert list(df.columns) == ['Time_s', 'Pos_X_mm', 'Pos_Y_mm', 'Pos_Z_mm', 'Probe']
