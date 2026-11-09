@@ -119,9 +119,11 @@ def on_main_tab_changed(self, index):
 
     if index == 1:  # Status Tab
         build_status_tab(self)
+        from .tab_status_modern import modernise_status_tab; modernise_status_tab(self)   # modern controls (new file)
         self._loaded_tabs.add(1)
     elif index == 3:  # Planning Tab
         build_planning_tab(self)
+        from .tab_planning_modern import modernise_planning_tab; modernise_planning_tab(self)   # modern controls (new file)
         self._loaded_tabs.add(3)
     elif index == 4:  # Editor Tab
         from .tab_editor import build_editor_tab

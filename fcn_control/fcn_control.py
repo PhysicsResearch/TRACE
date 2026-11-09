@@ -778,7 +778,7 @@ def update_connection_status_ui(self, connected=False):
 
     # 1. Update Window Title
     if hasattr(self, 'setWindowTitle'):
-        self.setWindowTitle(f"TRACE - {status_text}")
+        self.setWindowTitle(f"LogIQ - {status_text}")
 
     # 2. Update connect_status widget
     if hasattr(self, 'connect_status') and self.connect_status:

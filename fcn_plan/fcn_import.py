@@ -589,23 +589,49 @@ TRACE_LOG_HEADER_SCAN = 200        # '#' lines read at most before the column-na
 _DECIMAL_COMMA_RE = re.compile(r'-?\d+,\d+')
 
 
+def is_trace_log_comment(line):
+    """True for a '#' line of a TRACE log, also as Excel writes it back after opening and saving the
+    log: a cell holding '"' is quoted ('"# Wait start: ""Waiting ..."" ...";;;'), and a UTF-8 BOM or
+    spaces may come first."""
+    s = str(line).lstrip('\ufeff \t')
+    if s.startswith('"'):
+        s = s[1:]
+    return s.startswith('#')
+
+
+def read_trace_log_v2_table(file_path, decimal=',', encoding='utf-8'):
+    """
+    The data rows of a format-v2 TRACE log (';' columns) as a DataFrame: the '#' lines are dropped
+    first (is_trace_log_comment: also the ones Excel quoted when it saved the file again), so a note
+    after the data never becomes a value of the Time_s column. Raises like pd.read_csv (e.g. a
+    UnicodeDecodeError for the wrong encoding, so the caller can try the next one).
+    """
+    import io
+    with open(file_path, 'r', encoding=encoding) as f:
+        text = f.read()
+    text = text.lstrip('\ufeff')
+    keep = [line for line in text.splitlines() if not is_trace_log_comment(line)]
+    return pd.read_csv(io.StringIO("\n".join(keep) + "\n"), sep=';', decimal=decimal, comment='#')
+
+
 def sniff_trace_log_format(file_path, max_lines=TRACE_LOG_HEADER_SCAN):
     """
     (separator, decimal) of a TRACE log, from its column-names line (the first line that is not
     empty and not a '#' comment): ';' when that line holds one (format v2, Excel with NL/EU
     settings), else ',' when it holds one (v1), else None (unknown: the caller sniffs as before).
     The decimal mark is ',' when the separator is ';' and the data tokens look like -?\\d+,\\d+.
+    A UTF-8 BOM and '#' lines quoted by Excel ('"# ...') are skipped like any '#' line.
     """
     sep, dec = None, '.'
     try:
-        with open(file_path, 'r', errors='ignore', encoding='utf-8') as f:
+        with open(file_path, 'r', errors='ignore', encoding='utf-8-sig') as f:
             header, data = None, []
             for _ in range(max_lines + 50):
                 line = f.readline()
                 if not line:
                     break
-                s = line.strip()
-                if not s or s.startswith('#'):
+                s = line.strip().lstrip('\ufeff')
+                if not s or is_trace_log_comment(s):
                     continue
                 if header is None:
                     header = s
@@ -655,7 +681,7 @@ def is_trace_log_file(file_path):
 
         header_line = ""
         for line in sample_lines:
-            line_str = line.strip()
+            line_str = line.strip().lstrip('\ufeff')      # a UTF-8 BOM (read as 'utf-8') is not part of the line
             if line_str and not line_str.startswith('#'):
                 header_line = line_str
                 break
@@ -747,7 +773,7 @@ def parse_trace_log_file(file_path):
     for enc in encodings:
         try:
             if log_sep == ';':      # format v2: ';' columns, decimal comma, '#' notes after the data
-                df = pd.read_csv(file_path, sep=';', decimal=log_dec, encoding=enc, comment='#')
+                df = read_trace_log_v2_table(file_path, decimal=log_dec, encoding=enc)
             else:
                 df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
@@ -903,10 +929,10 @@ def import_trace_log_action(self, file_path=None):
         if not os.path.exists(start_dir):
             start_dir = ""
 
-        filters = "TRACE Log Files (log_*.csv log_*.txt *.txt);;All Files (*)"
+        filters = "LogIQ Log Files (log_*.csv log_*.txt *.txt);;All Files (*)"
         file_path, _ = QFileDialog.getOpenFileName(
             self if isinstance(self, QWidget) else None,
-            "Select TRACE Log File to Import",
+            "Select LogIQ Log File to Import",
             start_dir,
             filters
         )
@@ -1007,7 +1033,7 @@ def import_trace_log_action(self, file_path=None):
         QMessageBox.information(
             self if isinstance(self, QWidget) else None,
             "Log Import Successful",
-            f"Successfully imported TRACE log file:\n{os.path.basename(file_path)}\n\n"
+            f"Successfully imported LogIQ log file:\n{os.path.basename(file_path)}\n\n"
             f"• Target Device: {device}\n"
             f"• Matched Axes: {', '.join(sorted(set(matched_axes)))}\n"
             f"• Recorded Points: {orig_count:,} ({t_max:.2f} s)\n"
@@ -1022,7 +1048,7 @@ def import_trace_log_action(self, file_path=None):
         QMessageBox.critical(
             self if isinstance(self, QWidget) else None,
             "Log Import Error",
-            f"Failed to import TRACE log file:\n{str(e)}"
+            f"Failed to import LogIQ log file:\n{str(e)}"
         )
 
 
@@ -1089,14 +1115,14 @@ def unified_import_action(self, file_path=None):
 
             filters = (
                 "All Supported Files (*.gcode *.g *.nc *.vxp *.csv *.txt);;"
-                "TRACE Log Files (log_*.csv log_*.txt *.txt);;"
+                "LogIQ Log Files (log_*.csv log_*.txt *.txt);;"
                 "G-code Files (*.gcode *.g *.nc);;"
                 "Motion / Respiratory Files (*.vxp *.csv);;"
                 "All Files (*)"
             )
             file_path, selected_filter = QFileDialog.getOpenFileName(
                 self if isinstance(self, QWidget) else None,
-                "Select File to Import (G-code, Motion Data, or TRACE Log)",
+                "Select File to Import (G-code, Motion Data, or LogIQ Log)",
                 start_dir,
                 filters
             )
@@ -1109,7 +1135,7 @@ def unified_import_action(self, file_path=None):
             self.tabModules.setCurrentIndex(3)
 
         # Determine format based on user filter selection or content detection
-        if "TRACE Log" in selected_filter:
+        if "LogIQ Log" in selected_filter:
             fmt = 'trace_log'
         elif "G-code Files" in selected_filter:
             fmt = 'gcode'

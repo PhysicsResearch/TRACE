@@ -117,6 +117,16 @@ def _update_probe_key(self, kinds):
     self._probe_key = key
 
 
+def _refresh_probe_key(self):
+    """Colour key for the probe classes with a span (of the last render) in the shown x range.
+    True when the listed classes changed."""
+    spans = getattr(self, '_probe_spans_drawn', None) or []
+    x_lo, x_hi = sorted(self.ax_status.get_xlim())
+    before = getattr(self, '_probe_key_kinds', None)
+    _update_probe_key(self, {k for k, a, b in spans if b >= x_lo and a <= x_hi})
+    return getattr(self, '_probe_key_kinds', None) != before
+
+
 def render_status_plot(self):
     """
     Highly optimized updates of the Matplotlib plot using line reuse and draw_idle.
@@ -303,7 +313,7 @@ def render_status_plot(self):
     # Probe classes: 0 none, 0 < v < 1500 detector (red), v >= 1500 Release-button marker (blue),
     # v <= -500 waiting for sensor (amber; sensor_wait.g, logged as PROBE_WAIT_MARK)
     probe_data = plot_data.get('probe', []) if (plot_data is not None and isinstance(plot_data, dict)) else []
-    kinds_shown = set()
+    spans_drawn = []                # (kind, start, end): the colour key lists the classes in the shown x range
     if len(probe_data) > 0 and len(t_data) == len(probe_data):
         span_colors = {k: c for k, _l, c in _PROBE_KEY}
         dt_default = (t_data[1] - t_data[0]) if len(t_data) > 1 else 0.05
@@ -313,7 +323,7 @@ def render_status_plot(self):
                 end = start + dt_default
             span = self.ax_status.axvspan(start, end, color=span_colors[kind], alpha=_PROBE_SPAN_ALPHA, zorder=0)
             self._probe_span_patches.append(span)
-            kinds_shown.add(kind)
+            spans_drawn.append((kind, start, end))
 
         cur_kind, span_start = 0, 0.0
         for i in range(len(t_data)):
@@ -328,10 +338,6 @@ def render_status_plot(self):
                 cur_kind, span_start = kind, t_data[i]
         if cur_kind:
             _add_span(cur_kind, span_start, t_data[-1])
-    try:
-        _update_probe_key(self, kinds_shown)
-    except Exception as e:
-        print(f"Could not draw the probe colour key: {e}")
 
     # Parse user-configured time window interval (default 60s)
     time_win = 60.0
@@ -366,6 +372,14 @@ def render_status_plot(self):
         if min_y < max_y:
             pad = (max_y - min_y) * 0.1 if max_y != min_y else 1.0
             self.ax_status.set_ylim(min_y - pad, max_y + pad)
+
+    # Colour key of the probe shading: the classes with a span in the shown time range (the live
+    # window scrolls past old ones); rebuilt only when that set changes
+    try:
+        self._probe_spans_drawn = spans_drawn
+        _refresh_probe_key(self)
+    except Exception as e:
+        print(f"Could not draw the probe colour key: {e}")
 
     # Rebuild legend containing ONLY currently visible checked line traces
     visible_handles = []
@@ -466,7 +480,7 @@ def _load_log_file_into_status_impl(self, file_path=None):
     import pandas as pd
     import numpy as np
     import math
-    from fcn_plan.fcn_import import match_log_axis_name, sniff_trace_log_format
+    from fcn_plan.fcn_import import match_log_axis_name, sniff_trace_log_format, read_trace_log_v2_table
 
     encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
     df = None
@@ -474,7 +488,7 @@ def _load_log_file_into_status_impl(self, file_path=None):
     for enc in encodings:
         try:
             if log_sep == ';':      # format v2: ';' columns, decimal comma, '#' notes after the data
-                df = pd.read_csv(file_path, sep=';', decimal=log_dec, encoding=enc, comment='#')
+                df = read_trace_log_v2_table(file_path, decimal=log_dec, encoding=enc)
             else:
                 df = pd.read_csv(file_path, sep=None, engine='python', encoding=enc, comment='#')
             break
@@ -633,6 +647,11 @@ def _load_log_file_into_status_impl(self, file_path=None):
     # Ensure full viewing bounds on axes
     if hasattr(self, 'ax_status') and self.ax_status is not None:
         self.ax_status.set_xlim(0.0, max(max_t, 1.0))
+        try:
+            if _refresh_probe_key(self):          # the whole log is shown now: key for all its classes
+                self.fig_status.tight_layout()
+        except Exception:
+            pass
         # y-range from the traces actually shown (Basic mode hides e.g. the raw actuators)
         cb_by_key = {key: getattr(self, cb_name, None) for cb_name, key in traces}
         all_visible_vals = []
@@ -1220,7 +1239,7 @@ SENSOR_WAIT_THRESHOLD = 500        # sensor_wait.g waits while sensors.probes[0]
 SENSOR_WAIT_MSG = "Waiting for sensor signal"    # sensor_wait.g echo when its wait starts
 SENSOR_WAIT_END_MSGS = ("continuing", "force released", "sensor detected")   # ... when it ends (lower case)
 REPLY_POLL_PERIOD_S = 0.5          # ReplyPoller without reply sequence numbers: rr_reply read this often
-REPLY_POLL_SLOW_S = 1.0            # ... in split mode (slow link): at each dashboard tick (its 1 s timer), as before
+REPLY_POLL_SLOW_S = 1.0            # ... in split mode (slow link) during a run (sensor-wait marks); else at each dashboard tick
 REPLY_POLL_SAFETY_S = 5.0          # ... with sequence numbers (seqs.reply): read on a change, else this often
 REPLY_SEQ_FRESH_S = 1.0            # sequence numbers count while a position sample carried one this recently
 REPLY_SEQ_MIN_GAP_S = 0.15         # ... and a changed one is read at most this soon after the previous read
@@ -1230,6 +1249,7 @@ REPLY_STOP_WAIT_S = 0.5            # stop() waits at most this long for an in-fl
 REPLY_LATENCY_GUESS_S = 0.06       # send time of a read when the caller gives none (t_fetch - this)
 WAIT_RACE_SLACK_S = 0.02           # the macro's 10 ms loop + 10 ms: race window after a sample's reply
 RELEASE_CMD_DELAY_S = 0.15         # press -> force-release command handled by the Duet (at most)
+RELEASE_DEBOUNCE_S = 0.3           # a Release press this soon after the previous one was handled is a double click
 WAIT_POS_SETTLE_S = 0.35           # machinePosition can lag 200 ms after the wait's M400: settle first
 WAIT_MOVE_TOL = 0.02               # mm / deg: an axis moved this far during a wait -> the wait has ended
 LOG_SEP = ";"                      # log format v2: ';' between the columns and a decimal comma (Excel, NL/EU locale)
@@ -1243,6 +1263,15 @@ def _dc(x, fmt):
 def _note_text(line):
     """A '#' line of the log never holds ';' (Excel would split it into cells)."""
     return str(line).replace(';', ',')
+
+
+def _product_device_label(device):
+    """'Motion Platform' -> 'KINETIQ', 'Lung Phantom' -> 'DYNAMIQ' for the '# Device:' log line."""
+    try:
+        from fcn_logs.product_names import device_label
+        return device_label(device)
+    except Exception:
+        return device
 
 
 def _log_device(self, extra_axes):
@@ -1312,13 +1341,14 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
         header = [
             f"# Computer Time: {now_dt.strftime('%Y-%m-%d %H:%M:%S')}.{now_dt.microsecond // 1000:03d}",
             _note_text(f"# G-code: {gcode if isinstance(gcode, str) and gcode else 'none'}"),
-            f"# Device: {device}",
+            f"# Device: {_product_device_label(device)}",          # DYNAMIQ / KINETIQ (readers accept old names)
             f"# Axes (Duet order): {letters_txt}",
             "# Positions: actual (Duet machinePosition, refreshed at most every 200 ms, CAN expansion-board axes about every 100 ms)",
             f"# Probe: 0 none | 1-1499 detector | {PROBE_RELEASE_MARK} Release button | {PROBE_WAIT_MARK} waiting for sensor (sensor_wait)",
-            f"# Wait timing: start = when TRACE received the Duet message (read as soon as a position sample shows a new "
+            f"# Wait timing: start = when LogIQ received the Duet message (read as soon as a position sample shows a new "
             f"message, else every {_dc(REPLY_POLL_PERIOD_S, 'g')}-{_dc(REPLY_POLL_SLOW_S, 'g')} s), so the real start is "
-            f"earlier, normally by up to ~{_dc(REPLY_POLL_PERIOD_S, 'g')} s. End = first position sample with the detector "
+            f"earlier, normally by up to ~{_dc(REPLY_POLL_PERIOD_S, 'g')} s (on a slow link up to "
+            f"~{_dc(REPLY_POLL_SLOW_S + 1.0, 'g')} s). End = first position sample with the detector "
             f"above {SENSOR_WAIT_THRESHOLD} or Release pressed (within one sample, ~0,08 s), otherwise as stated at the end "
             f"of the file",
             "# Run notes: the times of each sensor wait (with the window in which the Duet sent its message), connection "
@@ -1363,6 +1393,9 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
             self.active_log_file = f
             self.active_log_filepath = filepath
             self.active_log_is_platform = is_platform
+            w = getattr(self, '_sensor_wait', None)
+            if in_run and isinstance(w, dict) and w.get('started'):
+                _note_wait_start(self, w)     # opened during a marked wait (Record off and on again)
             print(f"Started recording data log to file: {filepath} ({device}) at computer time {now_dt.strftime('%Y-%m-%d %H:%M:%S')}")
         except Exception as e:
             print(f"Failed to write data log header {filepath}: {e}")
@@ -1396,8 +1429,20 @@ def close_data_log_file(self, reason="closed"):
             t0 = getattr(self, 'run_t0', None)
             if isinstance(t0, float):
                 t_end = time.perf_counter() - t0
+            w = getattr(self, '_sensor_wait', None)
+            if (getattr(self, 'run_active', False) is True and isinstance(w, dict) and w.get('started')
+                    and w.get('end') is not None):
+                # The Duet's end message was already read (no sample applied it yet): that is the end
+                _end_sensor_wait(self, *w['end'][1:3], t=w['end'][0])
+                w = None
             notes = getattr(self, '_log_notes', None)
-            out = [line for _t, line in sorted(notes, key=lambda x: x[0])] if isinstance(notes, list) else []
+            notes = list(notes) if isinstance(notes, list) else []
+            if (getattr(self, 'run_active', False) is True and isinstance(w, dict) and w.get('started')
+                    and t_end is not None):
+                # Record off during a marked wait: this log's -1000 rows stop here, the wait goes on
+                notes.append((t_end, _note_text(f"# Wait end: {reason} at {_dc(t_end, '.3f')} s (the log was "
+                                                f"closed while the wait was still going on)")))
+            out = [line for _t, line in sorted(notes, key=lambda x: x[0])]
             if reason:
                 out.append(_note_text(f"# End: {reason}" + (f" at {_dc(t_end, '.3f')} s" if t_end is not None else "")))
             if out:
@@ -2070,6 +2115,7 @@ def poll_position_sample(self, mode="split", retry=True):
     sample.update({'t': 0.5 * (t0 + t1), 'mode': 'split', 'latency': t1 - t0, 'status': None})
     if sample.get('probe') is None:
         sample['probe'] = _poll_probe_value(ip, retry=retry)
+        sample['probe_t'] = time.perf_counter()     # the probe was read in a 2nd request, by this time (after 't')
     return sample
 
 
@@ -2271,7 +2317,9 @@ try:
         once, so the extra load is about one request per message plus a safety read every
         REPLY_POLL_SAFETY_S. Without fresh sequence numbers it reads every `period` s (other
         firmware); in split mode (slow link) at each dashboard tick (dashboard_tick(), the rate at
-        which the dashboard read rr_reply itself before), else every REPLY_POLL_SAFETY_S.
+        which the dashboard read rr_reply itself before), and during a run also every
+        REPLY_POLL_SLOW_S (a sensor wait's start text must arrive within ~1 s to be marked; that
+        costs some position samples on a slow link, in runs only), else every REPLY_POLL_SAFETY_S.
 
         The Duet hands each reply out once, so while this poller runs it is the ONLY rr_reply
         reader: the dashboard and pause_continue_GCODE skip their own reads (request_now() asks
@@ -2356,6 +2404,8 @@ try:
             dashboard requests, which costs position samples on a link that serves one at a time."""
             if not self._split or self._seq_mode(time.perf_counter()):
                 return
+            if getattr(self._ui, 'run_active', False) is True:
+                return                     # during a run the poller reads every REPLY_POLL_SLOW_S itself
             n0 = self.reads
             self.request_now()
             t_end = time.perf_counter() + float(wait)
@@ -2400,8 +2450,13 @@ try:
                     t_next = last + REPLY_POLL_RETRY_S     # a read failed: the Duet may still hold the text
                 else:
                     t_next = last + (REPLY_SEQ_MIN_GAP_S if changed else REPLY_POLL_SAFETY_S)
+            elif self._split:
+                # slow link: during a run every REPLY_POLL_SLOW_S (sensor-wait marks), else the
+                # dashboard tick reads (dashboard_tick) and this safety read
+                in_run = getattr(self._ui, 'run_active', False) is True
+                t_next = last + (max(self._period, REPLY_POLL_SLOW_S) if in_run else self._slow_period)
             else:
-                t_next = last + (self._slow_period if self._split else self._period)
+                t_next = last + self._period
             asap = self._asap
             return min(t_next, asap) if asap is not None else t_next
 
@@ -2595,6 +2650,18 @@ def _wait_start_line(self, w):
             f"(Duet sent it {_wait_sent_bounds(self, w)})")
 
 
+def _note_wait_start(self, w):
+    """The '# Wait start' note of wait w in the notes of the open log (or of the next one) unless it is
+    there already: a log opened while the wait goes on (Record off and on again) then has the start
+    of the wait whose end it gets."""
+    line = _note_text(_wait_start_line(self, w))
+    notes = (getattr(self, '_log_notes', None) if getattr(self, 'active_log_file', None) is not None
+             else getattr(self, '_pending_log_comments', None))
+    if isinstance(notes, list) and any(isinstance(n, tuple) and len(n) > 1 and n[1] == line for n in notes):
+        return
+    _write_run_comment(self, line, t=w['t_fetch'])
+
+
 def _wait_not_marked(self, w, why):
     """The wait message arrived, but the wait may already have ended (race): no row is marked."""
     self._sensor_wait = None
@@ -2612,6 +2679,8 @@ def _end_sensor_wait(self, what, how, t):
         return
     if not w.get('started'):
         _write_run_comment(self, _wait_start_line(self, w), t=w['t_fetch'])
+    else:
+        _note_wait_start(self, w)        # a log opened during the wait (Record off and on again) gets it too
     _write_run_comment(self, f"# Wait end: {what} at {_dc(_run_t(self, t), '.3f')} s ({how})", t=t)
 
 
@@ -2706,11 +2775,12 @@ def _axes_moved(real, ref):
     return False
 
 
-def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None):
+def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None, probe_t=None):
     """
     Probe value to log and plot for an in-run sample at time t (raw = Duet probe value, val = after
     the Release marker; probe_known False when the sample carried no probe value, pos = its axis
-    positions, latency = its request time). While a sensor wait is marked: raw <= 0 (or unknown) ->
+    positions, latency = its request time, probe_t = when its probe value came back when it was read
+    in a second request, split mode). While a sensor wait is marked: raw <= 0 (or unknown) ->
     PROBE_WAIT_MARK; 0 < raw <= SENSOR_WAIT_THRESHOLD keeps raw (the macro still waits); raw above
     the threshold or the Release marker of a press that can belong to this wait ends the wait on
     this sample, which keeps its real value (e.g. 1000 / 2000). The hold of an earlier press keeps
@@ -2729,6 +2799,10 @@ def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None
             half = 0.5 * float(latency) if latency is not None else 0.04
         except (TypeError, ValueError):
             half = 0.04
+        # split mode: the probe was read after the positions, up to probe_lag s after the row time t
+        probe_lag = None
+        if isinstance(probe_t, float) and probe_t > t + half:
+            probe_lag = probe_t - t
         prev_t = getattr(self, '_wait_prev_sample_t', None)
         self._wait_prev_sample_t = t
         trigs = getattr(self, '_wait_triggers', None)
@@ -2743,7 +2817,7 @@ def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None
         if release_on:
             new.append((press + RELEASE_CMD_DELAY_S, "Release button", t))
         out = _wait_mark_value(self, t, raw_f, val, probe_known is not False, pos, prev_t, trigs,
-                               detector_on, release_on, press, t - half)
+                               detector_on, release_on, press, t - half, probe_lag)
         used = getattr(self, '_release_used_t', None)       # a press that ended a wait cannot end a later one
         trigs.extend(x for x in new if not (x[1] == "Release button" and used == press))
         trigs[:] = [x for x in trigs if x[2] >= t - 5.0]
@@ -2754,9 +2828,10 @@ def _apply_wait_mark(self, t, raw, val, probe_known=True, pos=None, latency=None
 
 
 def _wait_mark_value(self, t, raw_f, val, probe_known, pos, prev_t, trigs, detector_on, release_on, press,
-                     t_sent=None):
+                     t_sent=None, probe_lag=None):
     """_apply_wait_mark for the current wait (trigs: earlier samples' triggers, this one not yet;
-    t_sent: when this sample's request was sent, i.e. about when the Duet read its positions)."""
+    t_sent: when this sample's request was sent, i.e. about when the Duet read its positions;
+    probe_lag: split mode, the probe was read in a second request up to this many s after t)."""
     w = getattr(self, '_sensor_wait', None)
     if not isinstance(w, dict) or t < w['t_fetch']:
         return val
@@ -2777,6 +2852,11 @@ def _wait_mark_value(self, t, raw_f, val, probe_known, pos, prev_t, trigs, detec
         what = f"detector {_dc(raw_f, 'g')}" if detector_on else "Release button"
         how = (f"exact to one sample, previous sample at {_dc(_run_t(self, prev_t), '.3f')} s"
                if isinstance(prev_t, float) else "exact to one sample")
+        if detector_on and probe_lag is not None:
+            # split mode: the row time is that of the positions, the probe came in a later request,
+            # so the detector rose after the previous sample and before t + probe_lag
+            how = (f"split mode, the probe was read up to {_dc(probe_lag, '.3f')} s after this row"
+                   + (f", previous sample at {_dc(_run_t(self, prev_t), '.3f')} s" if isinstance(prev_t, float) else ""))
         _end_sensor_wait(self, what, how, t=t)
         if release_ends:
             self._release_used_t = press
@@ -2998,7 +3078,7 @@ def handle_position_sample(self, s):
         if in_run:
             # sensor_wait.g: PROBE_WAIT_MARK while it waits; same value for the log row and the plot point
             curr_p = _apply_wait_mark(self, t_now, raw_p, curr_p, probe_known=probe_known,
-                                      pos=s.get('real'), latency=s.get('latency'))
+                                      pos=s.get('real'), latency=s.get('latency'), probe_t=s.get('probe_t'))
             if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
                 raw = {a: axis_positions[a] for a in _PLATFORM_RAW_AXES}
                 log_data_point(self, t_now - run_t0, x_val, y_val, z_val, curr_p, extra_axes=dof, raw_axes=raw)
@@ -3281,6 +3361,13 @@ def cancel_GCODE_job(self):
             # First pause, then issue cancel job command (M0 H1)
             duet_request(url, params={'gcode': 'M25'}, timeout=4)
             duet_request(url, params={'gcode': 'M0 H1'}, timeout=4)
+            # 5V trigger (planned trigger windows, M42 on fcn_trigger.TRIGGER_PORT) off: a cancelled
+            # job must not leave it on
+            try:
+                from fcn_plan.fcn_trigger import TRIGGER_OFF_CMD
+            except Exception:
+                TRIGGER_OFF_CMD = 'M42 P5 S0'
+            duet_request(url, params={'gcode': TRIGGER_OFF_CMD}, timeout=4)
             update_status_tab_dashboard(self)
         except Exception as e:
             print(f"Exception while cancelling GCODE job on http://{ip}: {e}")
@@ -3663,7 +3750,17 @@ def release_sensor_wait_action(self):
     PROBE_RELEASE_HOLD_S in the log and the plot, distinct from a detector trigger.
     """
     from fcn_control.fcn_control import send_cmd, log_to_duet_console
-    self._release_mark_t = time.perf_counter()
+    # Double click: the 2nd press (often handled right after the 1st returns, which waits for the
+    # Duet) would release the NEXT wait and overwrite the 1st press's 2000 marker -> ignored
+    now = time.perf_counter()
+    last, done = getattr(self, '_release_press_t', None), getattr(self, '_release_press_done_t', None)
+    if ((isinstance(last, float) and 0.0 <= now - last < PROBE_RELEASE_HOLD_S)
+            or (isinstance(done, float) and 0.0 <= now - done < RELEASE_DEBOUNCE_S)):
+        log_to_duet_console(self, "Release pressed again right away: ignored (the first press releases the wait)",
+                            color="#0288d1")
+        return
+    self._release_press_t = now
+    self._release_mark_t = now
     self._release_mark_done = False
     log_to_duet_console(self, "Sending force release signal to sensor_wait macro on Duet...", color="#0288d1")
     # Only 'set': sensor_wait.g creates the global and resets it to false every time it starts, so
@@ -3671,4 +3768,5 @@ def release_sensor_wait_action(self):
     # it, during a wait RRF rejects it with "variable 'force_release_sensor' already exists", and
     # that error would become the last Duet message, which the 'Include pause' check reads).
     send_cmd(self, "set global.force_release_sensor = true")
+    self._release_press_done_t = time.perf_counter()
 

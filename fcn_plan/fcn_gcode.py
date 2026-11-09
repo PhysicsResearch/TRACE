@@ -25,6 +25,9 @@ import re
 
 import numpy as np
 
+from .fcn_trigger import (cell_has_output_command, cell_gcode_lines, trg_safety_lines,  # beam trigger (M42)
+                          output_state_changes)
+
 DUET_MIN_SPEED = 0.5       # mm/s  RRF default minimum movement speed (M203 I30) when a file sets none
 DEFAULT_MIN_SPEED = 0.1    # mm/s  minimum speed written to the G-code header (M203 I6); slower motion is stepped
 STEP_SPEED = 5.0           # mm/s  axis speed of a quick step (<= lowest jerk option, 300 mm/min)
@@ -43,17 +46,20 @@ PHANTOM_PLAN_COLS = ("X", "Y", "Z")
 # Commands
 # ----------------------------------------------------------------------------
 def is_plan_command(cmd):
-    """True for planning pause commands (wait radiation / wait user)."""
+    """True for planning pause commands (wait radiation / wait user) and output switches 'M42 P<port> S<0|1>'."""
     if not isinstance(cmd, str):
         return False
     c = cmd.strip()
     if not c:
         return False
-    return "sensor_wait" in c.lower() or "M226" in c.upper()
+    return "sensor_wait" in c.lower() or "M226" in c.upper() or cell_has_output_command(c)
 
 
 def format_command_lines(cmd):
     """Formats planning pause commands with clear descriptive comment lines."""
+    multi = cell_gcode_lines(cmd, format_command_lines, is_plan_command)  # several commands / M42: one line each
+    if multi is not None:
+        return multi
     cmd_str = str(cmd).strip()
     cmd_lower = cmd_str.lower()
     lines = []
@@ -533,6 +539,8 @@ def generate_gcode_string(
             if is_plan_command(cmd):
                 new_idx = int(np.argmin(np.abs(t - t_orig[idx])))
                 cmd_at.setdefault(new_idx, []).append(str(cmd).strip())
+    trg_safety = trg_safety_lines(columns_data.get("Command"))  # 'M42 P5 S0' at start and end (plans with a trigger)
+    lines.extend(trg_safety)
 
     stats = {"moves": 0, "dwells": 0}
     state = {"carry": 0.0, "pending": 0.0, "pending_start": 0.0, "next_mark": 10.0}
@@ -647,6 +655,7 @@ def generate_gcode_string(
         if n - 1 > 0 and (n - 1) in cmd_at:
             emit_commands(n - 1)
         mark(t_max)
+        lines.extend(trg_safety)
 
     if isinstance(info, dict):
         info.update(stats)
@@ -669,7 +678,8 @@ class GcodeTimelineParser:
     Incremental G-code reader producing timeline rows ({axis: value, 'time', 'timestamp',
     'Command'}) using the RRF time model: per-move duration from feed (min-speed clamp, linear
     vs rotary axes, M203 caps), G4 dwells plus the file's ``; STEP_OVERHEAD_MS:`` value.
-    Pause commands (sensor_wait / M226) are added as rows at the time they occur.
+    Pause commands (sensor_wait / M226) are added as rows at the time they occur, and so are the output switches
+    (M42 P<port> S<0|1>, the beam trigger) that change an output (a repeated / safety 'S0' adds no row).
     """
 
     def __init__(self, bare_lowercase_as_quoted=False):
@@ -683,6 +693,7 @@ class GcodeTimelineParser:
         self.rows = []
         self.pause_times = []
         self._pending_cmds = []
+        self._outputs = {}  # M42 output states: only switches that change an output become rows
 
     def _key(self, axis):
         if axis.startswith("'"):
@@ -727,7 +738,7 @@ class GcodeTimelineParser:
                 self.pause_times.append(("M226", self.time))
             elif "sensor_wait" in code.lower():
                 self.pause_times.append(("sensor_wait", self.time))
-            if is_plan_command(code):
+            if is_plan_command(code) and output_state_changes(self._outputs, code):
                 if self.last:
                     self._row(code)
                 else:

@@ -172,6 +172,8 @@ def build_planning_tab(self):
     curve_scroll.setWidget(curve_scroll_content)
     curve_tab_outer_layout.addWidget(curve_scroll)
     self.create_settings_tab_widget.addTab(curve_tab_widget, "Curve")
+    from fcn_create_gui.tab_planning_trigger import trg_build_tabs  # beam trigger: 'Periodic' and 'Trigger' tabs
+    trg_build_tabs(self)
 
     # Tools Tab Setup (wrapped in QScrollArea for vertical flexibility)
     tools_tab_widget = QWidget(self.create_settings_tab_widget)
@@ -959,7 +961,7 @@ def build_planning_tab(self):
 
     self.button_import_curve = QPushButton("Import File", self.groupBox_BrCv_createCurve)
     self.button_import_curve.setMinimumHeight(45)
-    self.button_import_curve.setToolTip("Import G-code (.gcode, .nc), TRACE Log files (log_*.txt), or Motion / Respiratory files (.vxp, .csv, .txt)")
+    self.button_import_curve.setToolTip("Import G-code (.gcode, .nc), LogIQ Log files (log_*.csv, log_*.txt), or Motion / Respiratory files (.vxp, .csv, .txt)")
     self.button_import_curve.setStyleSheet("""
         QPushButton {
             background-color: #5e35b1;
@@ -1119,6 +1121,8 @@ def build_planning_tab(self):
     wait_button_vlay.setSpacing(2)
     wait_button_vlay.addWidget(QLabel("", self.groupBox_BrCv_createCurve))
     wait_button_vlay.addLayout(wait_buttons_layout)
+    from fcn_create_gui.tab_planning_trigger import trg_add_buttons  # beam trigger: Trigger On / Off / Clear
+    trg_add_buttons(self, wait_button_vlay, wait_time_vlay)
     wait_rad_layout.addLayout(wait_button_vlay)
     wait_rad_layout.addStretch()
 

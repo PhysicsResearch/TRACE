@@ -36,7 +36,7 @@ class MyApp(QMainWindow):
         
         # Set up programmatic user interface with lazy loading
         create_gui(self)
-        self.setWindowTitle("TRACE")
+        self.setWindowTitle("LogIQ")
 
         # Initialize core variables
         initialize_software_variables(self)
@@ -297,7 +297,7 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TRACE.App.1.0")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("LogIQ.App.1.0")
         except Exception:
             pass
 
@@ -358,11 +358,13 @@ if __name__ == "__main__":
         pix = pix.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     splash = QSplashScreen(pix)
     splash.setStyleSheet("background: transparent;")
-    splash.showMessage("Starting TRACE…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.black)
+    splash.showMessage("Starting LogIQ…", Qt.AlignBottom | Qt.AlignHCenter | Qt.TextWordWrap, Qt.black)
     splash.show()
     app.processEvents()  # let splash paint immediately
 
     # --- Create main window ---
+    from fcn_create_gui.logiq_theme import prepare_logiq_theme
+    prepare_logiq_theme()              # LogIQ colours (every stylesheet remapped), DYNAMIQ / KINETIQ names on screen
     folder_path = sys.argv[1] if len(sys.argv) > 1 else None
     window = MyApp(folder_path)
     window.setWindowIcon(app_icon)
@@ -372,6 +374,14 @@ if __name__ == "__main__":
     app.processEvents()
 
     # --- Show window and close splash ---
+    from fcn_create_gui.window_fit import fit_tabs_to_current_page
+    fit_tabs_to_current_page(window)   # only the shown tab sets the minimum size: stays above the taskbar
+    from fcn_create_gui.top_bar_style import style_top_bar
+    style_top_bar(window)              # white main tab bar / logo strip (no grey)
+    from fcn_create_gui.console_theme import add_console_theme_button
+    add_console_theme_button(window)   # sun / moon switch for the Duet command console
+    from fcn_create_gui.logiq_theme import apply_logiq_theme
+    apply_logiq_theme(window)          # olive palette, LogIQ word mark next to the logo
     window.showMaximized()
     splash.finish(window)
 

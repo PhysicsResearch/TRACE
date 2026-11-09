@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from .fcn_trigger import (add_cell_command, remove_cell_commands, cell_has_trigger, merge_cell,  # beam trigger cells
+                          TRIGGER_ROW_COLOR, plan_has_trigger, trg_normalise, trg_cut_commands)
 
 
 def compute_motion_platform_actuators(self, df):
@@ -63,15 +65,15 @@ def compute_motion_platform_actuators(self, df):
     roll_rad = np.radians(roll_vals)
     pitch_rad = np.radians(pitch_vals)
 
-    lat_eff = off_lat + lat_vals + off_ap * np.sin(roll_rad)
-    si_eff = off_si + si_vals + off_ap * np.sin(pitch_rad)
-
-    df["LAT"] = np.clip(lat_eff, 0.0, lim_lat)
-    df["SI"] = np.clip(si_eff, 0.0, lim_si)
-    df["'e"] = df["LAT"]
-    df["'f"] = df["LAT"]
-    df["'a"] = df["SI"]
-    df["'c"] = df["SI"]
+    # LAT / SI stay the nominal plan values (clipped like the G-code does); only the actuator columns 'e/'f/'a/'c
+    # carry the offsets + sway compensation (set at the end, from the achievable Roll / Pitch), so repeated passes
+    # do not add AP*sin(angle) again and fcn_gcode.platform_actuators applies the compensation exactly once.
+    lat_nom = np.clip(lat_vals, 0.0, lim_lat)
+    si_nom = np.clip(si_vals, 0.0, lim_si)
+    df["LAT"] = lat_nom
+    df["SI"] = si_nom
+    for col in ("'e", "'f", "'a", "'c"):  # keep the column order; filled at the end
+        df[col] = 0.0
 
     # Read platform dimensions
     try:
@@ -151,7 +153,21 @@ def compute_motion_platform_actuators(self, df):
     df["Roll"] = np.degrees(np.arcsin(sin_r))
 
     cos_r = np.cos(np.radians(df["Roll"].values))
-    df["AP"] = (A_arr + B_arr + C_arr + D_arr) / 4.0 - off_ap * (1.0 - cos_r * cos_p)
+    # Rotation centre off the A-D centre (LAT/SI offsets) shifts the mean support height by X*sin(r)*cos(p) -
+    # Y*sin(p); remove it as well so AP stays the nominal value on repeated passes (0 when both offsets are 0).
+    yaw_r = np.radians(yaw_vals)
+    cen_x = np.cos(yaw_r) * off_lat - np.sin(yaw_r) * off_si
+    cen_y = np.sin(yaw_r) * off_lat + np.cos(yaw_r) * off_si
+    df["AP"] = ((A_arr + B_arr + C_arr + D_arr) / 4.0 - off_ap * (1.0 - cos_r * cos_p)
+                - cen_x * sin_r * cos_p + cen_y * sin_p)
+
+    # Sway compensation from the achievable Roll / Pitch (the values the G-code uses)
+    lat_eff = np.clip(off_lat + lat_nom + off_ap * np.sin(np.radians(df["Roll"].values)), 0.0, lim_lat)
+    si_eff = np.clip(off_si + si_nom + off_ap * np.sin(np.radians(df["Pitch"].values)), 0.0, lim_si)
+    df["'e"] = lat_eff
+    df["'f"] = lat_eff
+    df["'a"] = si_eff
+    df["'c"] = si_eff
 
     return df
 
@@ -383,7 +399,9 @@ def trigger_plot_update(self):
     vel_plot = {col: vel_full[col][::step] if step > 1 else vel_full[col] for col in checked_axes}
     acc_plot = {col: acc_full[col][::step] if step > 1 else acc_full[col] for col in checked_axes}
 
+    self._trg_df_full = df_full  # beam trigger overlay: windows / margins from the full plan, not the downsampled one
     update_plot(self, df_to_plot, checked_axes, vel_plot=vel_plot, acc_plot=acc_plot)
+    self._trg_df_full = None
 
 
 def select_all_axes(self):
@@ -524,6 +542,8 @@ def rebuild_axis_checkboxes(self, axes):
         self.check_show_acc.setToolTip("Show Acceleration as point/dotted line (···)")
         self.check_show_acc.stateChanged.connect(lambda state: on_kinematic_checkbox_changed(self))
         layout_cb.addWidget(self.check_show_acc)
+        from fcn_create_gui.tab_planning_trigger import trg_add_margins_checkbox  # beam trigger: Margins checkbox
+        trg_add_margins_checkbox(self, layout_cb)
         
         layout_cb.addStretch()
 
@@ -818,6 +838,7 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
 
         is_pause = False
         is_user_wait = False
+        is_trigger = False
         if 'Command' in dataframe.columns:
             cmd_val = dataframe.iat[bg_row, dataframe.columns.get_loc('Command')]
             if isinstance(cmd_val, str):
@@ -825,6 +846,8 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
                     is_pause = True
                 elif 'M226' in cmd_val:
                     is_user_wait = True
+                elif cell_has_trigger(cmd_val):
+                    is_trigger = True
 
         for col, col_name in enumerate(display_columns):
             is_derived = False
@@ -856,6 +879,8 @@ def loadTable_create(self, dataframe, progress=None, start_val=0):
                 item.setBackground(QColor("#ffcdd2"))
             elif is_user_wait:
                 item.setBackground(QColor("#fff9c4"))
+            elif is_trigger:
+                item.setBackground(QColor(TRIGGER_ROW_COLOR))
                 
             table.setItem(row_idx, col, item)
             
@@ -1386,13 +1411,11 @@ def update_plot(self, dataframe, axes_list, vel_plot=None, acc_plot=None):
 
     # Draw vertical lines for pause/wait commands
     if 'Command' in dataframe.columns:
-        for idx, cmd in enumerate(dataframe['Command'].values):
-            if isinstance(cmd, str) and cmd.strip():
-                t_val = dataframe['time'].values[idx]
-                if 'sensor_wait.g' in cmd:
-                    ax.axvline(x=t_val, color='#e53935', linestyle='--', linewidth=1.5, alpha=0.85)
-                elif 'M226' in cmd:
-                    ax.axvline(x=t_val, color='#fbc02d', linestyle='--', linewidth=1.5, alpha=0.85)
+        from fcn_create_gui.tab_planning_trigger import trg_draw_wait_lines  # from the full plan, both waits of a row
+        trg_draw_wait_lines(self, ax, dataframe)
+
+    from fcn_create_gui.tab_planning_trigger import trg_draw_overlay  # beam trigger windows / margins preview
+    trg_draw_overlay(self, ax, dataframe, AXIS_COLORS)
 
     handles, labels = ax.get_legend_handles_labels()
     if handles:
@@ -1882,8 +1905,8 @@ def add_wait_radiation_action(self):
     if 'Command' not in self.dfEdit.columns:
         self.dfEdit['Command'] = ""
 
-    # Set command
-    self.dfEdit.at[idx, 'Command'] = 'M98 P"0:macros/sensor_wait.g"'
+    # Set command (added to the cell: other commands of that row, e.g. a trigger, are kept)
+    self.dfEdit.at[idx, 'Command'] = add_cell_command(self.dfEdit.at[idx, 'Command'], 'M98 P"0:macros/sensor_wait.g"')
 
     # Save the reference back to the appropriate persistent dataframe
     device = self.combo_device.currentText()
@@ -1934,8 +1957,8 @@ def add_wait_user_action(self):
     if 'Command' not in self.dfEdit.columns:
         self.dfEdit['Command'] = ""
 
-    # Set command
-    self.dfEdit.at[idx, 'Command'] = 'M226'
+    # Set command (added to the cell: other commands of that row, e.g. a trigger, are kept)
+    self.dfEdit.at[idx, 'Command'] = add_cell_command(self.dfEdit.at[idx, 'Command'], 'M226')
 
     # Save the reference back to the appropriate persistent dataframe
     device = self.combo_device.currentText()
@@ -1972,7 +1995,7 @@ def clear_rad_pauses_action(self):
         for idx in range(len(self.dfEdit)):
             val = self.dfEdit.at[idx, 'Command']
             if isinstance(val, str) and 'sensor_wait.g' in val:
-                self.dfEdit.at[idx, 'Command'] = ""
+                self.dfEdit.at[idx, 'Command'] = remove_cell_commands(val, 'sensor_wait.g')  # other commands kept
 
     # Save reference
     device = self.combo_device.currentText()
@@ -2005,7 +2028,7 @@ def clear_usr_pauses_action(self):
         for idx in range(len(self.dfEdit)):
             val = self.dfEdit.at[idx, 'Command']
             if isinstance(val, str) and 'M226' in val:
-                self.dfEdit.at[idx, 'Command'] = ""
+                self.dfEdit.at[idx, 'Command'] = remove_cell_commands(val, 'M226')  # other commands kept
 
     # Save reference
     device = self.combo_device.currentText()
@@ -2252,7 +2275,9 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
                 for t_val, cmd in zip(df.loc[cmd_mask, 'time'], df.loc[cmd_mask, 'Command']):
                     grid_idx = int(round(t_val / 0.01))
                     if 0 <= grid_idx < len(t_grid):
-                        resampled_data['Command'][grid_idx] = str(cmd).strip()
+                        resampled_data['Command'][grid_idx] = merge_cell(resampled_data['Command'][grid_idx], str(cmd).strip())
+                if plan_has_trigger(resampled_data['Command']):  # beam trigger: same switches as the plan that wrote it
+                    resampled_data['Command'] = trg_normalise(resampled_data['Command'])
 
         df = pd.DataFrame(resampled_data)
 
@@ -2461,7 +2486,9 @@ def import_gcode_action(self, file_path=None):
                     for t_val, cmd in zip(df.loc[cmd_mask, 'time'], df.loc[cmd_mask, 'Command']):
                         grid_idx = int(round(t_val / 0.01))
                         if 0 <= grid_idx < len(t_grid):
-                            resampled_data['Command'][grid_idx] = str(cmd).strip()
+                            resampled_data['Command'][grid_idx] = merge_cell(resampled_data['Command'][grid_idx], str(cmd).strip())
+                    if plan_has_trigger(resampled_data['Command']):  # beam trigger: same switches as the plan that wrote it
+                        resampled_data['Command'] = trg_normalise(resampled_data['Command'])
 
             df = pd.DataFrame(resampled_data)
                 
@@ -3004,6 +3031,9 @@ class CropTrimDialog(QDialog):
                 df_trimmed = part1.reset_index(drop=True)
 
             parent.dfEdit = df_trimmed
+
+        if 'Command' in df.columns and plan_has_trigger(df['Command']):  # beam trigger: kept rows keep their on / off state
+            parent.dfEdit['Command'] = trg_cut_commands(df['time'].to_numpy(float), df['Command'].tolist(), t_start, t_end, self.mode)
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
         parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
