@@ -382,6 +382,8 @@ if __name__ == "__main__":
     add_console_theme_button(window)   # sun / moon switch for the Duet command console
     from fcn_create_gui.logiq_theme import apply_logiq_theme
     apply_logiq_theme(window)          # olive palette, LogIQ word mark next to the logo
+    from fcn_create_gui.logiq_shell import apply_logiq_shell
+    apply_logiq_shell(window)          # connection bar on top of every tab, tabs as icons on the left (new file)
     window.showMaximized()
     splash.finish(window)
 
