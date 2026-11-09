@@ -96,7 +96,8 @@ def initialize_software_buttons(self):
         safe_connect(self.gcodeRun, lambda: run_selected_gcode_item(self))
         self.gcodeRun.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; font-size: 16px; min-height: 50px; min-width: 100px; padding: 6px 36px; border-radius: 4px;")
     if hasattr(self, 'gcodeUpload'):
-        safe_connect(self.gcodeUpload, lambda: upload_file(self))
+        from fcn_control.upload_multi import upload_files   # several files, any type (new file)
+        safe_connect(self.gcodeUpload, lambda: upload_files(self))
         self.gcodeUpload.setStyleSheet("background-color: #2196f3; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeDownload'):
         safe_connect(self.gcodeDownload, lambda: download_selected_item(self))

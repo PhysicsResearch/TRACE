@@ -158,6 +158,8 @@ def is_axis_widget(w, css=None):
         return False
     if not isinstance(w, QAbstractButton):                    # pills / 'Show X' boxes; labels follow the theme
         return False
+    if _widget_text(w).strip()[:1] in ('-', '+', '−'):   # jog buttons ('- AP', '+ X'): homed green / red, never
+        return False                                          # an axis pill (their hover #1b5e20 is AP's plot colour)
     keys = [tok.rstrip(':') for tok in _widget_text(w).replace('&', '').split()]
     keys = [k for k in keys if k in AXIS_KEYS]
     if not keys:

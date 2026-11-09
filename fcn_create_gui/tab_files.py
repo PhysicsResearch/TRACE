@@ -55,7 +55,7 @@ def build_files_tab(self):
         }
     """)
 
-    self.gcodeUpload = QPushButton("Upload G-code", self.tab_files)
+    self.gcodeUpload = QPushButton("Upload File", self.tab_files)
     self.gcodeUpload.setMinimumHeight(50)
     self.gcodeUpload.setStyleSheet("""
         QPushButton {

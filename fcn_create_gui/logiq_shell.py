@@ -9,7 +9,8 @@ Layout only; the widgets and their logic stay the same objects:
 * Header (all tabs): logo + 'LogIQ', then the connection bar that was at the top of the Control tab
   (IP, Connect, DYNAMIQ / KINETIQ, connection state, touch screen, Emergency STOP).  The 'Duet IP:' label is hidden,
   the IP field has the tooltip 'IP'.  The bar is no longer framed in red / green (the state pill keeps its colour).
-* DYNAMIQ / KINETIQ are mutually exclusive: the one matching the IP in the field is filled, the other is an outline.
+* DYNAMIQ / KINETIQ are mutually exclusive: the CONNECTED device is filled (identified after connecting by the board
+  name or its axes, fcn_control/device_identity.py), the other is an outline; neither when not connected.
   Clicking still fills in that device's IP and connects (unchanged).
 * Left column: one icon button per tab (Control, Status, Files, Planning, Editor, Log files).  The QTabWidget is kept,
   only its tab bar is hidden, so tab indexes, lazy loading and currentChanged work as before.
@@ -204,25 +205,34 @@ def _device_buttons(window):
         """)
         b.setFixedHeight(h)
     window.device_button_group = group
+    window._device_buttons = {"DYNAMIQ": btns["btn_ip_lungphan"], "KINETIQ": btns["btn_ip_trace"]}
 
-    def sync(text=None):
-        ip = window.DuetIPAddress.currentText().strip() if text is None else str(text).strip()
-        match = next((btns[n] for n, a in DEVICE_IPS.items() if a == ip), None)
-        if match is not None:
-            match.setChecked(True)
-        else:
-            group.setExclusive(False)
-            for b in btns.values():
-                b.setChecked(False)
-            group.setExclusive(True)
-
-    ipbox = getattr(window, "DuetIPAddress", None)
-    if isinstance(ipbox, QComboBox):
-        ipbox.editTextChanged.connect(sync)
-        ipbox.currentTextChanged.connect(sync)
+    # the filled button is the CONNECTED device (fcn_control.device_identity), not the IP in the field: a click
+    # starts the connection (unchanged) but does not fill the button by itself
     for b in btns.values():
-        b.clicked.connect(lambda *_: sync())      # after the button's own handler filled in the IP
-    sync()
+        b.clicked.connect(lambda *_: show_connected_device(window))
+
+    def on_title(title):                          # update_connection_status_ui sets 'LogIQ - NOT CONNECTED'
+        if "NOT CONNECTED" in str(title).upper():
+            window.connected_device = None
+            show_connected_device(window)
+
+    window.windowTitleChanged.connect(on_title)
+    show_connected_device(window)
+
+
+def show_connected_device(window):
+    """Fill DYNAMIQ or KINETIQ for window.connected_device ('DYNAMIQ' / 'KINETIQ'); neither when not connected."""
+    buttons = getattr(window, "_device_buttons", None)
+    group = getattr(window, "device_button_group", None)
+    if not buttons or group is None:
+        return
+    device = getattr(window, "connected_device", None) if getattr(window, "duet_connected", False) else None
+    group.setExclusive(False)
+    for name, b in buttons.items():
+        b.setChecked(name == device)
+        b.setToolTip(f"{name}: connected" if name == device else f"Connect to {name}")
+    group.setExclusive(True)
 
 
 # ---------------------------------------------------------------------------------------------------- left column
@@ -339,6 +349,8 @@ def apply_logiq_shell(window):
     tw.show()
 
     _device_buttons(window)
+    from fcn_create_gui.status_smooth import install_status_smoothing
+    install_status_smoothing()                  # Status plot: measured curves through the position updates
     tw.currentChanged.connect(lambda *_: QTimer.singleShot(0, lambda: _planning_buttons(window)))
     _planning_buttons(window)
     window.logiq_shell = True

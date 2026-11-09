@@ -1,7 +1,10 @@
 {
-    "duet_ip_address": "172.18.38.125",
+    "duet_ip_address": "172.18.38.129",
     "move_folder": "",
     "platform_lat_dim": "300",
     "platform_si_dim": "500",
-    "touchscreen_mode": true
+    "touchscreen_mode": true,
+    "duet_ip_history": [
+        "172.18.38.129"
+    ]
 }

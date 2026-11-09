@@ -869,9 +869,12 @@ def send_cmd(self, cmd=None):
         response = duet_request(url, params={'gcode': cmd}, timeout=4)
         if response.status_code == 200:
             recv_txt = response.text.strip()
-            log_to_duet_console(self, f"Recv: {recv_txt if recv_txt else 'OK (200)'}")
+            from fcn_control.console_reply import after_command, is_buffer_ack   # reply text (new file)
+            if not is_buffer_ack(recv_txt):               # {"buff": n} is only the Duet's acknowledgement
+                log_to_duet_console(self, f"Recv: {recv_txt if recv_txt else 'OK (200)'}")
             self.duet_connected = True
             update_connection_status_ui(self, connected=True)
+            after_command(self)                           # the reply ('Reply: ...') follows in the console
         else:
             log_to_duet_console(self, f"Error: HTTP {response.status_code} - Command '{cmd}' failed", color="#ff3333")
     except Exception as e:
@@ -1638,14 +1641,10 @@ def setDuetIP(self, show_dialog=True):
                 except Exception:
                     pass
 
-            if machine_name:
-                log_to_duet_console(self, f"Machine name: {machine_name}")
-                if "trace" in machine_name.lower():
-                    if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab_platform') and self.tab_platform:
-                        self.tabWidget.setCurrentWidget(self.tab_platform)
-                elif "lung" in machine_name.lower() or "phan" in machine_name.lower():
-                    if hasattr(self, 'tabWidget') and self.tabWidget and hasattr(self, 'tab') and self.tab:
-                        self.tabWidget.setCurrentWidget(self.tab)
+            # DYNAMIQ or KINETIQ (name KINETIQ / TRACE / DYNAMIQ / lung..., else the axis count): Control sub-tab
+            # and the filled device button in the top bar (new file fcn_control/device_identity.py)
+            from fcn_control.device_identity import apply_connected_device
+            apply_connected_device(self, ip, machine_name)
 
             try:
                 update_duet_status_ui(self)
