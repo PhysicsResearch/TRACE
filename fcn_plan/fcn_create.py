@@ -198,6 +198,7 @@ def _gather_plan_params(self, device):
     (limits, platform geometry/offsets, max speed, min step, min speed, step overhead).
     """
     from .fcn_gcode import DEFAULT_MIN_STEP, DEFAULT_MIN_SPEED
+    from .gcode_tolerance import DEFAULT_PATH_TOL
     if device == "Lung Phantom":
         limits = (
             _widget_float(self, ['settings_max_lim_x'], 40.0),
@@ -208,6 +209,7 @@ def _gather_plan_params(self, device):
         min_step = _widget_float(self, ['settings_min_step_phantom'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_phantom'], 0.0)
         min_speed = _widget_float(self, ['settings_min_speed_phantom'], DEFAULT_MIN_SPEED)
+        path_tol = _widget_float(self, ['settings_path_tol_phantom'], DEFAULT_PATH_TOL)
         kin = {}
     elif device == "Motion Platform":
         limits = tuple(
@@ -218,6 +220,7 @@ def _gather_plan_params(self, device):
         min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
         min_speed = _widget_float(self, ['settings_min_speed_plat'], DEFAULT_MIN_SPEED)
+        path_tol = _widget_float(self, ['settings_path_tol_plat'], DEFAULT_PATH_TOL)
         lat_dim = _widget_float(self, ['input_plat_lat'], 100.0)
         si_dim = _widget_float(self, ['input_plat_si'], 100.0)
         kin = {
@@ -234,6 +237,7 @@ def _gather_plan_params(self, device):
         min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
         min_speed = _widget_float(self, ['settings_min_speed_plat'], DEFAULT_MIN_SPEED)
+        path_tol = _widget_float(self, ['settings_path_tol_plat'], DEFAULT_PATH_TOL)
         kin = {}
     if max_speed <= 0.0:
         max_speed = 20.0
@@ -243,6 +247,7 @@ def _gather_plan_params(self, device):
         'min_step': max(0.0, min_step),
         'overhead_ms': max(0.0, overhead),
         'min_speed': max(0.01, min_speed),
+        'path_tol': max(0.0, path_tol),
         'kin': kin,
     }
 
@@ -1526,7 +1531,8 @@ def generate_planned_gcode(self):
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
             speed=speed_val, acc=acc_val, jerk=jerk_val,
-            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info,
+            path_tol=plan_prm.get('path_tol')
         )
 
     elif device == "Motion Platform":
@@ -1625,7 +1631,8 @@ def generate_planned_gcode(self):
             device, t_orig, columns_data, max_limits,
             lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo,
             speed=speed_val, acc=acc_val, jerk=jerk_val,
-            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info,
+            path_tol=plan_prm.get('path_tol')
         )
 
     else: # Other
@@ -1650,7 +1657,8 @@ def generate_planned_gcode(self):
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
             speed=speed_val, acc=acc_val, jerk=jerk_val,
-            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info
+            step_overhead_ms=plan_prm['overhead_ms'], min_speed=plan_prm['min_speed'], info=gcode_info,
+            path_tol=plan_prm.get('path_tol')
         )
 
     # Moves the Duet cannot run at the planned speed (Max Speed / axis limits) make it lag

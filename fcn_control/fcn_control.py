@@ -1516,8 +1516,19 @@ def save_configuration(self):
         'touchscreen_mode': touch_mode,
         'status_advanced_mode': adv_mode
     }
+    # keep the other saved settings (Planning: speed, acceleration, min speed, step overhead, path tolerance ...):
+    # this function used to rewrite the file with only the keys above, so every Connect reset them to the defaults
+    path = get_config_path('configuration.json', for_writing=True)
     try:
-        with open(get_config_path('configuration.json', for_writing=True), 'w') as f:
+        with open(path, 'r') as f:
+            existing = json.load(f)
+        if isinstance(existing, dict):
+            existing.update(data)
+            data = existing
+    except Exception:
+        pass
+    try:
+        with open(path, 'w') as f:
             json.dump(data, f, indent=4)
     except Exception as e:
         print(f"Error saving configuration.json: {e}")

@@ -578,6 +578,14 @@ def build_planning_tab(self):
     self.settings_step_overhead_phantom = add_setting_spinbox(
         lung_layout, lung_page, "Step overhead (ms):", 0.0, 4, 0,
         vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
+    from fcn_plan.gcode_tolerance import DEFAULT_PATH_TOL, MAX_PATH_TOL      # merge into longer G1 lines
+    tip_path_tol = ("G-code: consecutive planned points are written as one move while that straight move stays within "
+                    "this distance of every planned point, at its time.\nFewer, longer moves run on time on the "
+                    "controller (dense short moves made a recorded breathing curve run ~2 % slow). The timing and "
+                    "holds stay exact; slow stepped motion is kept.\n0 = only exactly straight parts are merged.")
+    self.settings_path_tol_phantom = add_setting_spinbox(
+        lung_layout, lung_page, "Path tolerance (mm):", DEFAULT_PATH_TOL, 4, 1,
+        vmin=0.0, vmax=MAX_PATH_TOL, decimals=3, step=0.005, tooltip=tip_path_tol)
     self.settings_stack.addWidget(lung_page)
 
     # Page 1: Motion Platform settings
@@ -607,6 +615,9 @@ def build_planning_tab(self):
     self.settings_step_overhead_plat = add_setting_spinbox(     # 90: measured on KINETIQ (2026-11-10):
         platform_layout, platform_page, "Step overhead (ms):", 90.0, 5, 1,   # a G4 within motion costs ~90 ms
         vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
+    self.settings_path_tol_plat = add_setting_spinbox(
+        platform_layout, platform_page, "Path tolerance (mm):", DEFAULT_PATH_TOL, 6, 0,
+        vmin=0.0, vmax=MAX_PATH_TOL, decimals=3, step=0.005, tooltip=tip_path_tol)
     self.settings_stack.addWidget(platform_page)
 
     # Page 2: Other device settings (simple info label)
@@ -1168,6 +1179,8 @@ def setup_settings_persistence(self):
         'platform_min_step': getattr(self, 'settings_min_step_plat', None),
         'platform_min_speed': getattr(self, 'settings_min_speed_plat', None),
         'platform_step_overhead_ms': getattr(self, 'settings_step_overhead_plat', None),
+        'phantom_path_tol': getattr(self, 'settings_path_tol_phantom', None),
+        'platform_path_tol': getattr(self, 'settings_path_tol_plat', None),
     }
 
     combobox_map = {

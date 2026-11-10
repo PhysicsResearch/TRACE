@@ -466,9 +466,12 @@ def generate_gcode_string(
     jerk=None,
     step_overhead_ms=0.0,
     min_speed=DEFAULT_MIN_SPEED,
-    info=None
+    info=None,
+    path_tol=None
 ):
     """
+    ``path_tol`` (mm): merge samples into one G1 within this deviation (fcn_plan/gcode_tolerance.py); None / 0 =
+    the original rule.
     Translates the planned samples into G-code, faithfully:
     * unchanged samples -> G4 dwell, moving samples -> G1 at the planned speed,
     * a sample slower than ``min_speed`` -> dwell + quick step (the header sets the Duet
@@ -487,6 +490,8 @@ def generate_gcode_string(
         device, t_orig, columns_data, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo,
         resample=True)
     P = np.round(P_raw, POS_DECIMALS)
+    from fcn_plan.gcode_tolerance import within_tolerance
+    path_tol = max(0.0, float(path_tol or 0.0))
     rot = rotary_mask(letters)
     n = len(t)
 
@@ -631,7 +636,10 @@ def generate_gcode_string(
                 nlo = [min(x, y) for x, y in zip(vlo, vel)]
                 nhi = [max(x, y) for x, y in zip(vhi, vel)]
                 span = t[j + 1] - t[i]
-                if max((h - l for h, l in zip(nhi, nlo)), default=0.0) * span > PATH_TOL:
+                if path_tol > PATH_TOL:                  # tolerance merge (fcn_plan/gcode_tolerance.py: why)
+                    if not within_tolerance(t, P_raw, i, j + 1, path_tol):
+                        break
+                elif max((h - l for h, l in zip(nhi, nlo)), default=0.0) * span > PATH_TOL:
                     break
                 dtot = [a - b for a, b in zip(rows[j + 1], rows[i])]
                 if feed_distance(rot, dtot) / span < min_speed * SPEED_TOL:

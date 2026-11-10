@@ -219,8 +219,14 @@ class Intro:
         if idx is None:
             print("ABORT: uploaded file not in the Files list", flush=True)
             return False
+        tv.scrollTo(idx)                                   # a long file list: bring the row into view first
+        yield 500
         rect = tv.visualRect(idx)
         yield from d.click(tv.viewport(), rect.center())
+        yield 300
+        if tv.currentIndex().row() != idx.row():
+            print("ABORT: the file row was not selected", flush=True)
+            return False
         yield 700
         yield from d.click(w.gcodeRun)
         if not (yield from self.wait_for(lambda: w.tabModules.currentIndex() == 1, 10)):

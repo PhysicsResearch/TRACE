@@ -139,7 +139,7 @@ class Runs:
             print("ABORT: the run did not start", flush=True)
             return False
         t0 = time.perf_counter()
-        if not (yield from it.wait_for(lambda: getattr(w, 'run_active', False) is not True, TOTAL_S + 90)):
+        if not (yield from it.wait_for(lambda: getattr(w, 'run_active', False) is not True, plan_seconds() + 90)):
             print("ABORT: the run did not finish", flush=True)
             return False
         yield 3000
@@ -169,6 +169,18 @@ class Runs:
                 return
             yield 4000
         self.ok = True
+
+
+def plan_seconds():
+    """Length of the plan: the '; TIME:' line of a ready G-code file (GCODE_FILE), else TOTAL_S."""
+    if GCODE_FILE:
+        import re
+        with open(GCODE_FILE) as f:
+            for line in f:
+                m = re.match(r";\s*TIME:\s*([\d.]+)", line)
+                if m:
+                    return float(m.group(1))
+    return float(TOTAL_S)
 
 
 def log_folder(w):

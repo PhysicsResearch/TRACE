@@ -398,6 +398,9 @@ class ImportMotionDialog(QDialog):
         self.build_axis_checkboxes()
         self.update_preview()
 
+        from fcn_plan.import_preview import install_import_preview   # plot of the curve + Smoothing (new file)
+        install_import_preview(self)
+
     def build_axis_checkboxes(self):
         """Populates the grid with checkboxes for all available axes of the selected device."""
         while self.axes_grid.count():
