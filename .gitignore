@@ -73,3 +73,7 @@ scratch/smooth_out/
 scratch/theme_shots/
 scratch/trigger_toggle_out/
 scratch/trigger_ui_out/
+
+# --- Local documents and G-code files ---
+Trace_Docs/
+*.gcode
