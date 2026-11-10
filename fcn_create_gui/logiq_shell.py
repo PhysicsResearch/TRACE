@@ -14,7 +14,9 @@ Layout only; the widgets and their logic stay the same objects:
   Clicking still fills in that device's IP and connects (unchanged).
 * Left column: one icon button per tab (Control, Status, Files, Planning, Editor, Log files).  The QTabWidget is kept,
   only its tab bar is hidden, so tab indexes, lazy loading and currentChanged work as before.
-* Planning: Import File and Clear All get an icon (folder / bin); Clear All shows as 'Clear'.
+* Planning: Import File and Clear All get an icon (folder / bin); Clear All shows as 'Clear'.  Opening Planning while
+  a device is connected switches the plan to that device (planning_follow_device).
+* One Emergency STOP, in the header: the copies inside the Status and Files tabs are hidden.
 """
 from PySide6.QtCore import QByteArray, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPainter, QPixmap
@@ -316,6 +318,46 @@ def _planning_buttons(window):
         b.setMinimumHeight(h)
 
 
+# ---------------------------------------------------------------------------------------------------- per tab
+TAB_ESTOPS = ("emergencyButton_2", "emergencyButton_3")      # Status / Files: the header's Emergency STOP is enough
+PLANNING_INDEX = 3
+PLANNING_DEVICE = {"DYNAMIQ": "Lung Phantom", "KINETIQ": "Motion Platform"}   # connected device -> plan device
+
+
+def _hide_tab_estops(window):
+    """One Emergency STOP: the one in the header (on every tab); the copies inside Status and Files are hidden."""
+    for name in TAB_ESTOPS:
+        b = getattr(window, name, None)
+        if isinstance(b, QPushButton) and not b.isHidden():
+            b.hide()
+
+
+def planning_follow_device(window):
+    """Opening Planning while a device is connected: the plan switches to that device (each device keeps its own
+    plan, so nothing is lost).  Not connected: unchanged."""
+    if not getattr(window, "duet_connected", False):
+        return
+    target = PLANNING_DEVICE.get(getattr(window, "connected_device", None))
+    combo = getattr(window, "combo_device", None)
+    pm = getattr(window, "planning_modern", None)
+    if not target or combo is None:
+        return
+    i = combo.findText(target)
+    if i < 0 or combo.currentIndex() == i:
+        return
+    if pm is not None and hasattr(pm, "on_device_clicked"):
+        pm.on_device_clicked(i)                # same path as clicking the device segment
+    else:
+        combo.setCurrentIndex(i)
+
+
+def _on_tab(window, index):
+    _planning_buttons(window)
+    _hide_tab_estops(window)
+    if index == PLANNING_INDEX:
+        planning_follow_device(window)
+
+
 # ---------------------------------------------------------------------------------------------------- entry
 def apply_logiq_shell(window):
     if getattr(window, "logiq_shell", False):
@@ -351,7 +393,8 @@ def apply_logiq_shell(window):
     _device_buttons(window)
     from fcn_create_gui.status_smooth import install_status_smoothing
     install_status_smoothing()                  # Status plot: measured curves through the position updates
-    tw.currentChanged.connect(lambda *_: QTimer.singleShot(0, lambda: _planning_buttons(window)))
+    tw.currentChanged.connect(lambda i: QTimer.singleShot(0, lambda: _on_tab(window, i)))
     _planning_buttons(window)
+    _hide_tab_estops(window)
     window.logiq_shell = True
     return window
