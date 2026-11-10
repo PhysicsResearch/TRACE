@@ -3691,55 +3691,33 @@ def duet_status_request(self, ip, timeout=5):
             else:
                 return None, 500
 
-    # 2. Run fallback detection
+    # 2. Run fallback detection.  A failed probe is not an error by itself (RRF 3.6 no longer serves
+    # /rr_status, so the legacy probe always fails there): failures are shown only when no API answers.
     is_explicit_connecting = getattr(self, '_connecting_in_progress', False)
-    
-    # Fallback 1: Legacy Standalone
-    try:
-        data, code = try_request('legacy')
-        if code == 200:
-            self.duet_api_mode = 'legacy'
-            return data, 200
-        elif is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Legacy check failed: /rr_status?type=3 returned status {code}", color="#ff3333")
-    except Exception as e:
-        if is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Legacy check failed: {e}", color="#ff3333")
+    failures = []
+    probes = (
+        ('legacy', "Legacy check (/rr_status?type=3)", None),
+        ('model', "Modern standalone check (/rr_model?key=move.axes)",
+         "Successfully connected to standalone Duet via modern API (/rr_model)"),
+        ('sbc', "SBC check (/machine/status)", "Successfully connected to Duet via SBC API (/machine/status)"),
+    )
+    for mode, label, ok_msg in probes:
+        try:
+            data, code = try_request(mode)
+            if code == 200:
+                self.duet_api_mode = mode
+                if is_explicit_connecting and ok_msg:
+                    from fcn_control.fcn_control import log_to_duet_console
+                    log_to_duet_console(self, ok_msg)
+                return data, 200
+            failures.append(f"{label} returned status {code}")
+        except Exception as e:
+            failures.append(f"{label} failed: {e}")
 
-    # Fallback 2: Modern Standalone Object Model
-    try:
-        data, code = try_request('model')
-        if code == 200:
-            self.duet_api_mode = 'model'
-            if is_explicit_connecting:
-                from fcn_control.fcn_control import log_to_duet_console
-                log_to_duet_console(self, "Successfully connected to standalone Duet via modern API (/rr_model)")
-            return data, 200
-        elif is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Modern standalone check failed: /rr_model?key=move.axes returned status {code}", color="#ff3333")
-    except Exception as e:
-        if is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"Modern standalone check failed: {e}", color="#ff3333")
-
-    # Fallback 3: SBC Object Model
-    try:
-        data, code = try_request('sbc')
-        if code == 200:
-            self.duet_api_mode = 'sbc'
-            if is_explicit_connecting:
-                from fcn_control.fcn_control import log_to_duet_console
-                log_to_duet_console(self, "Successfully connected to Duet via SBC API (/machine/status)")
-            return data, 200
-        elif is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
-            log_to_duet_console(self, f"SBC check failed: /machine/status returned status {code}", color="#ff3333")
-    except Exception as e:
-        if is_explicit_connecting:
-            from fcn_control.fcn_control import log_to_duet_console
+    if is_explicit_connecting:
+        from fcn_control.fcn_control import log_to_duet_console
+        for msg in failures:
+            log_to_duet_console(self, msg, color="#ff3333")
     return None, 500
 
 

@@ -662,6 +662,8 @@ def generate_gcode_string(
         info["duration_s"] = float(t[-1] - t[0]) if n else 0.0
         info["residual_ms"] = state["carry"] * 1000.0 + state["pending"] * 1000.0
 
+    from fcn_plan.gcode_compact import compact_gcode_lines   # unchanged axes left out (new file: why, measured)
+    lines = compact_gcode_lines(lines)
     return "\n".join(lines), exceeds_limits
 
 

@@ -66,3 +66,10 @@ Thumbs.db
 *.tar
 *.gz
 *.7z
+# --- Demo videos / test outputs (recordings, logs, generated G-code, screenshots) ---
+demo/output/
+scratch/shell_shots/
+scratch/smooth_out/
+scratch/theme_shots/
+scratch/trigger_toggle_out/
+scratch/trigger_ui_out/

@@ -604,8 +604,8 @@ def build_planning_tab(self):
     self.settings_min_speed_plat = add_setting_spinbox(
         platform_layout, platform_page, "Min. speed (mm/s):", DEFAULT_MIN_SPEED, 5, 0,
         vmin=0.01, vmax=0.5, decimals=2, step=0.01, tooltip=tip_min_speed)
-    self.settings_step_overhead_plat = add_setting_spinbox(
-        platform_layout, platform_page, "Step overhead (ms):", 0.0, 5, 1,
+    self.settings_step_overhead_plat = add_setting_spinbox(     # 90: measured on KINETIQ (2026-11-10):
+        platform_layout, platform_page, "Step overhead (ms):", 90.0, 5, 1,   # a G4 within motion costs ~90 ms
         vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
     self.settings_stack.addWidget(platform_page)
 

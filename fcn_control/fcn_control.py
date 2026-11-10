@@ -1540,6 +1540,12 @@ def setDuetIP(self, show_dialog=True):
 
     self._connecting_in_progress = True
     self.duet_api_mode = None  # Force API mode redetection when switching IP
+    # The IP field already holds the new address: drop the previous connection now, so the GUI-thread status
+    # polls (heartbeat, Status dashboard) stop asking the new, maybe unreachable, IP while the worker tests it
+    # (they blocked the window for their timeouts, also after Cancel).  A successful test reconnects as before.
+    if getattr(self, 'duet_connected', False):
+        self.duet_connected = False
+        update_connection_status_ui(self, connected=False)
     log_to_duet_console(self, f"Connecting to Duet at http://{ip}...")
 
     progress_dialog = None

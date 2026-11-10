@@ -1029,6 +1029,9 @@ def build_platform_subtab(self):
 
     config_hlayout.addStretch()
 
+    from fcn_control.trigger_toggle import add_trigger_toggle      # Trigger ON / OFF (M42 P5), far right
+    add_trigger_toggle(self, config_hlayout, config_frame)
+
     # Save to config on editingFinished
     self.input_plat_lat.editingFinished.connect(lambda: __import__('fcn_control.fcn_control', fromlist=['save_configuration']).save_configuration(self))
     self.input_plat_si.editingFinished.connect(lambda: __import__('fcn_control.fcn_control', fromlist=['save_configuration']).save_configuration(self))
