@@ -65,6 +65,11 @@ def initialize_software_buttons(self):
         safe_connect(self.sendCommandDUET, lambda: send_cmd(self, None))
         self.sendCommandDUET.setStyleSheet("background-color: violet; color: white; font-weight: bold; font-size: 17px; padding: 6px 18px; border-radius: 4px;")
 
+    # Files tab multi-selection (GCODE folder only) and one-file actions (new file fcn_control/files_multi.py)
+    from fcn_control.files_multi import install_files_multi, single_only, delete_selected_items
+    install_files_multi(self)
+    _one = lambda name, fn: single_only(self, name, fn)
+
     if hasattr(self, 'gcodeRefresh'):
         safe_connect(self.gcodeRefresh, lambda: setup_file_explorer(self))
         self.gcodeRefresh.setStyleSheet("background-color: #ff9800; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
@@ -72,19 +77,19 @@ def initialize_software_buttons(self):
         safe_connect(self.gcodeNewFolder, lambda: mkdir(self))
         self.gcodeNewFolder.setStyleSheet("background-color: #4caf50; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeMove'):
-        safe_connect(self.gcodeMove, lambda: move_selected_item(self))
+        safe_connect(self.gcodeMove, lambda: _one('Move', move_selected_item))
         self.gcodeMove.setStyleSheet("background-color: #8e24aa; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeCopy'):
-        safe_connect(self.gcodeCopy, lambda: copy_selected_item(self))
+        safe_connect(self.gcodeCopy, lambda: _one('Copy', copy_selected_item))
         self.gcodeCopy.setStyleSheet("background-color: #00acc1; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeRename'):
-        safe_connect(self.gcodeRename, lambda: rename_selected_item(self))
+        safe_connect(self.gcodeRename, lambda: _one('Rename', rename_selected_item))
         self.gcodeRename.setStyleSheet("background-color: #00796b; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeEdit'):
-        safe_connect(self.gcodeEdit, lambda: edit_selected_file(self))
+        safe_connect(self.gcodeEdit, lambda: _one('Text Editor', edit_selected_file))
         self.gcodeEdit.setStyleSheet("background-color: #3949ab; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeDelete'):
-        safe_connect(self.gcodeDelete, lambda: delete_selected_item(self))
+        safe_connect(self.gcodeDelete, lambda: delete_selected_items(self))   # several files only in GCODE (new file)
         self.gcodeDelete.setStyleSheet("background-color: #f44336; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'fileCategoryCombo'):
         safe_connect_state_changed(self.fileCategoryCombo, lambda text: on_file_category_changed(self, text))
@@ -93,18 +98,18 @@ def initialize_software_buttons(self):
     if hasattr(self, 'btnCloseEditor'):
         safe_connect(self.btnCloseEditor, lambda: self.tabModules.setCurrentIndex(2) if hasattr(self, 'tabModules') else None)
     if hasattr(self, 'gcodeRun'):
-        safe_connect(self.gcodeRun, lambda: run_selected_gcode_item(self))
+        safe_connect(self.gcodeRun, lambda: _one('Run', run_selected_gcode_item))
         self.gcodeRun.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; font-size: 16px; min-height: 50px; min-width: 100px; padding: 6px 36px; border-radius: 4px;")
     if hasattr(self, 'gcodeUpload'):
-        from fcn_control.upload_multi import upload_files   # several files, any type (new file)
+        from fcn_control.files_multi import upload as upload_files   # several files only in GCODE (new file)
         safe_connect(self.gcodeUpload, lambda: upload_files(self))
         self.gcodeUpload.setStyleSheet("background-color: #2196f3; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeDownload'):
-        safe_connect(self.gcodeDownload, lambda: download_selected_item(self))
+        safe_connect(self.gcodeDownload, lambda: _one('Download File', download_selected_item))
         self.gcodeDownload.setStyleSheet("background-color: #0288d1; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
     if hasattr(self, 'gcodeToPlanning'):
         from fcn_control.fcn_filesystem import transfer_to_planning_action
-        safe_connect(self.gcodeToPlanning, lambda: transfer_to_planning_action(self))
+        safe_connect(self.gcodeToPlanning, lambda: _one('To Planning', transfer_to_planning_action))
         self.gcodeToPlanning.setStyleSheet("background-color: #673ab7; color: white; font-weight: bold; font-size: 16px; min-height: 50px; padding: 6px 16px; border-radius: 4px;")
 
     if hasattr(self, 'treeViewBack'):
@@ -113,7 +118,8 @@ def initialize_software_buttons(self):
     for i in range(1, 5):
         btn = getattr(self, f'emergencyButton_{i}', None)
         if btn is not None:
-            safe_connect(btn, lambda _c=False: send_cmd(self, 'M112'))
+            from fcn_control.estop import emergency_stop   # sends M112 even when LogIQ shows NOT CONNECTED
+            safe_connect(btn, lambda _c=False: emergency_stop(self))
 
     # HOME BUTTONS
     for axis in ['X', 'Y', 'Z', 'ROLL', 'PITCH', 'YAW', 'ALL']:
@@ -127,12 +133,13 @@ def initialize_software_buttons(self):
 
     # GOTO BUTTONS (Lung Phantom axes move to target position)
     from fcn_control.fcn_control import move
+    # Go buttons: only the axes whose Target differs from Current; 0 allowed; typed targets kept (goto_targets.py)
+    from fcn_control.goto_targets import install_goto_targets, go_lung_changed, go_platform_changed
+    install_goto_targets(self)
     btn_goto_lung = getattr(self, 'btn_goto_lung', None)
     if btn_goto_lung is not None:
-        def move_all_lung():
-            for a in ['XAXIS_LUNG', 'YAXIS_LUNG', 'ZAXIS_LUNG']:
-                move(self, a)
-        safe_connect(btn_goto_lung, lambda _c=False: move_all_lung())
+        safe_connect(btn_goto_lung, lambda _c=False: go_lung_changed(self))
+    safe_connect(getattr(self, 'btn_go_to', None), lambda _c=False: go_platform_changed(self))
     for axis, ax_key in [('X', 'XAXIS_LUNG'), ('Y', 'YAXIS_LUNG'), ('Z', 'ZAXIS_LUNG')]:
         btn = getattr(self, f'GOTO_{axis}', None)
         if btn is not None:

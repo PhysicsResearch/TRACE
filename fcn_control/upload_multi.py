@@ -44,14 +44,35 @@ def _rrf_path(self, filename):
     return f"{root}/{filename}" if not curr_dir else f"{root}/{curr_dir}/{filename}"
 
 
-def upload_files(self):
+def upload_files(self, multi=True):
+    """multi=False (Macros / System folders): one file per upload."""
     if not getattr(self, 'duet_connected', False):
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
         return
-    paths, _ = QFileDialog.getOpenFileNames(self, "Upload Files", "", FILE_FILTER)
+    if multi:
+        paths, _ = QFileDialog.getOpenFileNames(self, "Upload Files", "", FILE_FILTER)
+    else:
+        path, _ = QFileDialog.getOpenFileName(self, "Upload File", "", FILE_FILTER)
+        paths = [path] if path else []
     if not paths:
         return
+    upload_paths(self, paths)
 
+
+def _mtime_iso(path):
+    """The file's own last-modified time (local), sent as rr_upload 'time' so the Duet lists a date (as DWC does)."""
+    import time as _t
+    try:
+        return _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(os.path.getmtime(path)))
+    except OSError:
+        return _t.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def upload_paths(self, paths):
+    """Uploads local files to the current folder on the SD card (dialog and drag & drop)."""
+    if not getattr(self, 'duet_connected', False):
+        QMessageBox.warning(self, "Not Connected", "Please connect to Duet before uploading files.")
+        return
     from fcn_control.fcn_filesystem import get_clean_duet_ip, load_directory
     from fcn_monitor.fcn_duet import get_shared_session
     url = f"http://{get_clean_duet_ip(self)}/rr_upload"
@@ -98,7 +119,7 @@ def upload_files(self):
                 session = requests.Session()
                 session.trust_env = False
                 try:
-                    r = session.post(url, params={'name': _rrf_path(self, name)},
+                    r = session.post(url, params={'name': _rrf_path(self, name), 'time': _mtime_iso(path)},
                                      data=_ProgressReader(data, on_progress), timeout=20)
                     r.raise_for_status()
                     if r.headers.get('content-type', '').startswith('application/json') and r.json().get('err', 0):

@@ -139,12 +139,20 @@ def settings_three_columns(win, columns=SETTINGS_COLUMNS):
             cells.append((r, c, i))
         if not cells or len(cells) <= columns:
             continue
-        items = [grid.itemAt(i) for _r, _c, i in sorted(cells)]
-        for _ in range(grid.count()):
-            grid.takeAt(0)
+        # Take the items out (Python then owns and frees them) and put their CONTENTS back.  Re-adding the same
+        # QWidgetItem objects (itemAt + addItem) left PySide wrappers that Qt later freed without telling PySide;
+        # a new Qt object at such an address then crashed in shiboken (LogIQ access violation, 12 Nov 2026).
+        taken = [grid.takeAt(0) for _ in range(grid.count())]          # index order, as getItemPosition(i)
         old_cols = max(c for _r, c, _i in cells) + 1
-        for k, it in enumerate(items):
-            grid.addItem(it, k // columns, k % columns)
+        for k, (_r, _c, i) in enumerate(sorted(cells)):
+            it, row, col = taken[i], k // columns, k % columns
+            if it.layout() is not None:
+                grid.addLayout(it.layout(), row, col, alignment=it.alignment())
+            elif it.widget() is not None:
+                grid.addWidget(it.widget(), row, col, alignment=it.alignment())
+            elif it.spacerItem() is not None:
+                grid.addItem(it.spacerItem(), row, col)
+        del taken
         for c in range(max(columns, old_cols)):
             grid.setColumnStretch(c, 1 if c < columns else 0)
         done.append(stack.widget(j))

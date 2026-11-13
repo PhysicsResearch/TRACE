@@ -749,14 +749,16 @@ def update_duet_status_ui(self, data=None):
             for ax_name in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW']:
                 curr_f = getattr(self, f"POS_CURR_{ax_name}", None)
                 des_f = getattr(self, f"POS_DES_{ax_name}", None)
-                if curr_f is not None and des_f is not None and not des_f.hasFocus():
+                if curr_f is not None and des_f is not None and not des_f.hasFocus() \
+                        and not des_f.property('pendingTarget'):     # typed target kept (goto_targets.py)
                     des_f.setText(curr_f.text())
 
             for ax_name in ['XAXIS', 'YAXIS', 'ZAXIS']:
                 target_ax = f"{ax_name}_LUNG"
                 curr_f = getattr(self, f"POS_CURR_{target_ax}", None)
                 des_f = getattr(self, f"POS_DES_{target_ax}", None)
-                if curr_f is not None and des_f is not None and not des_f.hasFocus():
+                if curr_f is not None and des_f is not None and not des_f.hasFocus() \
+                        and not des_f.property('pendingTarget'):     # typed target kept (goto_targets.py)
                     des_f.setText(curr_f.text())
 
             refresh_external_axis_styles(self)
@@ -775,6 +777,9 @@ def update_connection_status_ui(self, connected=False):
     - GREEN and 'Connected' when connected.
     """
     status_text = "Connected" if connected else "NOT CONNECTED"
+    if connected:
+        from fcn_control.board_clock import sync_board_clock_once   # date for files on the SD card (new file)
+        sync_board_clock_once(self)
 
     # 1. Update Window Title
     if hasattr(self, 'setWindowTitle'):

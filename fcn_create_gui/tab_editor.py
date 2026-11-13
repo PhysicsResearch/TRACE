@@ -173,3 +173,6 @@ def build_editor_tab(self):
 
     self.btnCloseEditor.clicked.connect(back_to_files)
     self.btnSaveEditor.clicked.connect(lambda: save_and_upload_editor_file(self))
+
+    from .editor_close import add_close_file_button      # 'Close File' while a file is loaded (new file)
+    add_close_file_button(self, top_layout)

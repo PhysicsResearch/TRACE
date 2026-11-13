@@ -9,7 +9,7 @@ G1 A5 B5 C5 D5 F600                         ; back off 5 mm
 G1 H1 A-10 B-10 C-10 D-10 F120              ; second, slower approach
 
 ; 2) LAT: 'e 'f (maximum endstops, travel 0-100 mm)
-G1 H1 'e105 'f105 F600                      ; towards the max endstop, stops when it triggers; position = 100 (axis maximum, M208)
+G1 H1 'e210 'f210 F600                      ; towards the max endstop (up to 210 mm: one press from anywhere), stops when it triggers; position = 100 (axis maximum, M208)
 G1 'e-5 'f-5 F600                           ; back off 5 mm
 G1 H1 'e10 'f10 F120                        ; second, slower approach
 

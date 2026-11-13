@@ -552,9 +552,11 @@ def build_planning_tab(self):
     self.settings_max_lim_x = add_setting_spinbox(lung_layout, lung_page, "Max Lim. X (mm):", 40.0, 0, 0)
     self.settings_max_lim_y = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Y (mm):", 40.0, 0, 1)
     self.settings_max_lim_z = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Z (mm):", 40.0, 1, 0)
-    self.combo_phantom_max_speed = add_setting_combo(lung_layout, lung_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "50", 1, 1)
-    self.combo_phantom_acc = add_setting_combo(lung_layout, lung_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "1000", 2, 0)
-    self.combo_phantom_jerk = add_setting_combo(lung_layout, lung_page, "Jerk (mm/s³):", ["300", "600", "900", "1200"], "600", 2, 1)
+    # DYNAMIQ defaults = its config.g (M203 1200 mm/min, M201 500, M566 300): tested 12 Nov 2026, the higher
+    # header values (50 / 1000 / 600) made the Y home switch close early on fast descents
+    self.combo_phantom_max_speed = add_setting_combo(lung_layout, lung_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "20", 1, 1)
+    self.combo_phantom_acc = add_setting_combo(lung_layout, lung_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "500", 2, 0)
+    self.combo_phantom_jerk = add_setting_combo(lung_layout, lung_page, "Jerk (mm/min):", ["300", "600", "900", "1200"], "300", 2, 1)
     self.settings_max_speed = self.combo_phantom_max_speed
     self.settings_acc_phantom = self.combo_phantom_acc
     self.settings_jerk_phantom = self.combo_phantom_jerk
@@ -576,7 +578,7 @@ def build_planning_tab(self):
         lung_layout, lung_page, "Min. speed (mm/s):", DEFAULT_MIN_SPEED, 3, 1,
         vmin=0.01, vmax=0.5, decimals=2, step=0.01, tooltip=tip_min_speed)
     self.settings_step_overhead_phantom = add_setting_spinbox(
-        lung_layout, lung_page, "Step overhead (ms):", 0.0, 4, 0,
+        lung_layout, lung_page, "Step overhead (ms):", 60.0, 4, 0,      # measured on DYNAMIQ 12 Nov 2026: ~45-60 ms / G4
         vmin=0.0, vmax=200.0, decimals=1, step=1.0, tooltip=tip_overhead)
     from fcn_plan.gcode_tolerance import DEFAULT_PATH_TOL, MAX_PATH_TOL      # merge into longer G1 lines
     tip_path_tol = ("G-code: consecutive planned points are written as one move while that straight move stays within "
@@ -602,7 +604,7 @@ def build_planning_tab(self):
     self.settings_max_lim_yaw = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Yaw (deg):", 40.0, 2, 1)
     self.combo_platform_max_speed = add_setting_combo(platform_layout, platform_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "20", 3, 0)
     self.combo_platform_acc = add_setting_combo(platform_layout, platform_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "1000", 3, 1)
-    self.combo_platform_jerk = add_setting_combo(platform_layout, platform_page, "Jerk (mm/s³):", ["300", "600", "900", "1200"], "600", 4, 0)
+    self.combo_platform_jerk = add_setting_combo(platform_layout, platform_page, "Jerk (mm/min):", ["300", "600", "900", "1200"], "600", 4, 0)
     self.settings_max_speed_plat = self.combo_platform_max_speed
     self.settings_acc_plat = self.combo_platform_acc
     self.settings_jerk_plat = self.combo_platform_jerk
