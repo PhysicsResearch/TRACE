@@ -20,7 +20,8 @@ Conventions
 * Positions in logs are a staircase: the Duet refreshes machinePosition at most every ~200 ms,
   so consecutive rows often repeat.  Between samples a curve is linear (``np.interp``).
 * Axis names: platform DOF 'LAT','SI','AP' (mm), 'Roll','Pitch','Yaw' (deg); raw platform
-  actuators 'A','B','C','D',"'e","'f","'a","'c" (mm); lung phantom 'X','Y','Z' (mm).
+  actuators 'A','B','C','D',"'e","'f","'a","'c" ("'b" instead of "'c" on the boards that use it) (mm);
+  lung phantom 'X','Y','Z' (mm).
   Requested positions from the ``Cmd_*`` columns of the 5/6 Nov logs are 'Cmd <axis>'.
 * Logged sensor waits (sensor_wait.g): the log marks the rows of a wait with Probe -1000 and
   notes its timing ('# Wait start: ... received at T s (Duet sent it between A and T s)',
@@ -42,7 +43,7 @@ import pandas as pd
 from scipy import signal
 
 PLATFORM_DOF = ['LAT', 'SI', 'AP', 'Roll', 'Pitch', 'Yaw']
-PLATFORM_RAW = ['A', 'B', 'C', 'D', "'e", "'f", "'a", "'c"]
+PLATFORM_RAW = ['A', 'B', 'C', 'D', "'e", "'f", "'a", "'c", "'b"]     # 'b: SI's second motor on the boards using it
 PHANTOM_AXES = ['X', 'Y', 'Z']
 AXIS_ORDER = PLATFORM_DOF + PLATFORM_RAW + PHANTOM_AXES
 

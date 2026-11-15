@@ -27,6 +27,7 @@ import numpy as np
 
 from .fcn_trigger import (cell_has_output_command, cell_gcode_lines, trg_safety_lines,  # beam trigger (M42)
                           output_state_changes)
+from fcn_control.work_zero_frame import kinetiq_plan_range, kinetiq_frame_comment  # KINETIQ G-code frame is centred
 
 DUET_MIN_SPEED = 0.5       # mm/s  RRF default minimum movement speed (M203 I30) when a file sets none
 DEFAULT_MIN_SPEED = 0.1    # mm/s  minimum speed written to the G-code header (M203 I6); slower motion is stepped
@@ -40,6 +41,20 @@ POS_DECIMALS = 6           # decimals written to the G-code
 ROTARY_AXES = ("A", "B", "C", "D")
 PLATFORM_PLAN_COLS = ("LAT", "SI", "AP", "Roll", "Pitch", "Yaw")
 PHANTOM_PLAN_COLS = ("X", "Y", "Z")
+LIMIT_TOL = 1e-6           # mm  a value this close outside a KINETIQ bound counts as inside (float noise)
+
+
+def kinetiq_plan_bounds(max_limits):
+    """G-code bounds {'LAT' | 'SI' | 'AP': (lo, hi)} of a KINETIQ plan for the Settings limits
+    (lim_lat, lim_si, lim_ap, ...): centred frame (fcn_control/work_zero_frame.kinetiq_plan_range).
+    The actuators A-D use the AP bounds, 'e / 'f the LAT bounds and 'a / 'c the SI bounds."""
+    return {dof: kinetiq_plan_range(dof, max_limits[i]) for i, dof in enumerate(("LAT", "SI", "AP"))}
+
+
+def _outside(values, lo, hi):
+    """True when any value lies outside [lo, hi] by more than LIMIT_TOL."""
+    v = np.asarray(values, dtype=float)
+    return bool(v.size) and bool(np.any(v < lo - LIMIT_TOL) or np.any(v > hi + LIMIT_TOL))
 
 
 # ----------------------------------------------------------------------------
@@ -148,12 +163,14 @@ def _uniform_grid(t_orig):
     return t_new, True
 
 
-def platform_actuators(LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si):
+def platform_actuators(LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si,
+                       flags=None):
     """
     Motion Platform kinematics used for the G-code (vectorised; same formulas as before).
-    Returns (A, B, C, D, LAT_eff, SI_eff).
+    Returns (A, B, C, D, LAT_eff, SI_eff), clipped to the KINETIQ plan bounds (kinetiq_plan_bounds).
+    ``flags`` (dict, optional) receives 'outside': True when a value had to be clipped.
     """
-    lim_lat, lim_si, lim_ap = max_limits[0], max_limits[1], max_limits[2]
+    bounds = kinetiq_plan_bounds(max_limits)
     if lat_dim <= 0.0:
         lat_dim = 100.0
     if si_dim <= 0.0:
@@ -182,12 +199,18 @@ def platform_actuators(LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_di
         z3 = -x2 * sin_r + z2 * cos_r
         y3 = y2
         z4 = y3 * sin_p + z3 * cos_p
-        acts.append(np.clip(z4 + zc + AP, 0.0, lim_ap))
+        acts.append(z4 + zc + AP)
 
     roll_rad = np.radians(Roll)
     pitch_rad = np.radians(Pitch)
-    LAT_eff = np.clip(off_lat + LAT + off_ap * np.sin(roll_rad), 0.0, lim_lat)
-    SI_eff = np.clip(off_si + SI + off_ap * np.sin(pitch_rad), 0.0, lim_si)
+    LAT_eff = off_lat + LAT + off_ap * np.sin(roll_rad)
+    SI_eff = off_si + SI + off_ap * np.sin(pitch_rad)
+    if flags is not None:
+        flags['outside'] = (any(_outside(a, *bounds["AP"]) for a in acts) or _outside(LAT_eff, *bounds["LAT"])
+                            or _outside(SI_eff, *bounds["SI"]))
+    acts = [np.clip(a, *bounds["AP"]) for a in acts]
+    LAT_eff = np.clip(LAT_eff, *bounds["LAT"])
+    SI_eff = np.clip(SI_eff, *bounds["SI"])
     return acts[0], acts[1], acts[2], acts[3], LAT_eff, SI_eff
 
 
@@ -222,18 +245,23 @@ def compute_gcode_axes(device, t_orig, columns_data, max_limits, lat_dim=100.0, 
 
     elif device == "Motion Platform":
         lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw = max_limits
-        LAT = np.clip(col("LAT"), 0.0, lim_lat)
-        SI = np.clip(col("SI"), 0.0, lim_si)
-        AP = np.clip(col("AP"), 0.0, lim_ap)
+        bounds = kinetiq_plan_bounds(max_limits)          # centred frame: negative values are allowed
+        LAT_raw, SI_raw, AP_raw = col("LAT"), col("SI"), col("AP")
+        LAT = np.clip(LAT_raw, *bounds["LAT"])
+        SI = np.clip(SI_raw, *bounds["SI"])
+        AP = np.clip(AP_raw, *bounds["AP"])
         Roll = col("Roll")
         Pitch = col("Pitch")
         Yaw = col("Yaw")
-        if (np.any(np.abs(LAT) > lim_lat) or np.any(np.abs(SI) > lim_si) or
-                np.any(np.abs(AP) > lim_ap) or np.any(np.abs(Roll) > lim_roll) or
+        if (_outside(LAT_raw, *bounds["LAT"]) or _outside(SI_raw, *bounds["SI"]) or
+                _outside(AP_raw, *bounds["AP"]) or np.any(np.abs(Roll) > lim_roll) or
                 np.any(np.abs(Pitch) > lim_pitch) or np.any(np.abs(Yaw) > lim_yaw)):
             exceeds_limits = True
+        flags = {}
         A, B, C, D, LAT_eff, SI_eff = platform_actuators(
-            LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si)
+            LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si, flags=flags)
+        if flags.get('outside'):                          # a clipped actuator / 'e 'f 'a 'c value warns too
+            exceeds_limits = True
         letters = ["A", "B", "C", "D", "'e", "'f", "'a", axis_y_lo]
         P = np.column_stack([A, B, C, D, LAT_eff, LAT_eff, SI_eff, SI_eff])
 
@@ -511,12 +539,14 @@ def generate_gcode_string(
         jerk_val = int(round(float(jerk))) if jerk is not None else 300
         acc_val = int(round(float(acc))) if acc is not None else 500
         speed_val = int(round(float(speed) * 60.0)) if speed is not None else 1200
+        y = axis_y_lo                     # second SI motor: 'c, or 'b on the boards that use it
         header = [
             f"; TIME: {total_time_seconds}",
+            kinetiq_frame_comment(y),     # centred KINETIQ frame (Start checks this line); names the motor letters
             "G90",
-            f"M566 A{jerk_val} B{jerk_val} C{jerk_val} D{jerk_val} 'c{jerk_val} 'a{jerk_val}  'f{jerk_val} 'e{jerk_val}",
-            f"M201 A{acc_val} B{acc_val} C{acc_val} D{acc_val} 'c{acc_val} 'a{acc_val}  'f{acc_val} 'e{acc_val}",
-            f"M203 A{speed_val} B{speed_val} C{speed_val} D{speed_val} 'c{speed_val} 'a{speed_val}  'f{speed_val} 'e{speed_val}",
+            f"M566 A{jerk_val} B{jerk_val} C{jerk_val} D{jerk_val} {y}{jerk_val} 'a{jerk_val}  'f{jerk_val} 'e{jerk_val}",
+            f"M201 A{acc_val} B{acc_val} C{acc_val} D{acc_val} {y}{acc_val} 'a{acc_val}  'f{acc_val} 'e{acc_val}",
+            f"M203 A{speed_val} B{speed_val} C{speed_val} D{speed_val} {y}{speed_val} 'a{speed_val}  'f{speed_val} 'e{speed_val}",
         ]
     else:
         jerk_val = int(round(float(jerk))) if jerk is not None else 300

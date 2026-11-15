@@ -596,9 +596,20 @@ def build_planning_tab(self):
     platform_layout.setSpacing(10)
     platform_layout.setContentsMargins(0, 5, 0, 5)
 
-    self.settings_max_lim_lat = add_setting_spinbox(platform_layout, platform_page, "Max Lim. LAT (mm):", 40.0, 0, 0)
-    self.settings_max_lim_si = add_setting_spinbox(platform_layout, platform_page, "Max Lim. SI (mm):", 40.0, 0, 1)
-    self.settings_max_lim_ap = add_setting_spinbox(platform_layout, platform_page, "Max Lim. AP (mm):", 40.0, 1, 0)
+    from fcn_control.work_zero_frame import kinetiq_plan_range      # KINETIQ G-code frame: centre = 0
+
+    def tip_kinetiq_lim(dof):
+        lo, hi = kinetiq_plan_range(dof)
+        motors = " (also for A, B, C, D)" if dof == "AP" else ""
+        return (f"Largest distance a plan may move {dof} on either side of the KINETIQ centre (0).\n"
+                f"The KINETIQ travel itself is {dof} {lo:g} to {hi:g} mm{motors}. Values outside are cut off at "
+                f"the limit when the plan is edited.")
+    self.settings_max_lim_lat = add_setting_spinbox(platform_layout, platform_page, "Max Lim. LAT (mm):", 40.0, 0, 0,
+                                                    tooltip=tip_kinetiq_lim("LAT"))
+    self.settings_max_lim_si = add_setting_spinbox(platform_layout, platform_page, "Max Lim. SI (mm):", 40.0, 0, 1,
+                                                   tooltip=tip_kinetiq_lim("SI"))
+    self.settings_max_lim_ap = add_setting_spinbox(platform_layout, platform_page, "Max Lim. AP (mm):", 40.0, 1, 0,
+                                                   tooltip=tip_kinetiq_lim("AP"))
     self.settings_max_lim_roll = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Roll (deg):", 40.0, 1, 1)
     self.settings_max_lim_pitch = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Pitch (deg):", 40.0, 2, 0)
     self.settings_max_lim_yaw = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Yaw (deg):", 40.0, 2, 1)

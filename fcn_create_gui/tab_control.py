@@ -301,7 +301,7 @@ def build_control_tab(self):
 
     layout_main.addWidget(self.top_bar_frame)
 
-    # --- 2. SUB-TABS: LUNG PHANTOM, PLATFORM & IND. MOTORS ---
+    # --- 2. SUB-TABS: LUNG PHANTOM & PLATFORM (IND. MOTORS is still built, but not shown) ---
     self.tabWidget = QTabWidget(self.tab_2)
     self.tabWidget.setStyleSheet("""
         QTabBar::tab {
@@ -342,10 +342,16 @@ def build_control_tab(self):
     build_platform_subtab(self)
     self.tabWidget.addTab(self.tab_platform, "PLATFORM")
 
-    # Sub-Tab 2: Ind. Motors
+    # Ind. Motors: no longer a sub-tab, but still built as a hidden child of the Control page: its fields
+    # (POS_CURR_A..D, POS_CURR_'a / 'c / 'e / 'f, POS_CURR_X / Y / Z) and ext_axes_homed feed LAT / SI / AP / Roll /
+    # Pitch and other code
     self.tab_4 = QWidget()
     build_external_motors_subtab(self)
-    self.tabWidget.addTab(self.tab_4, "IND. MOTORS")
+    self.tab_4.setParent(self.tab_2)
+    self.tab_4.hide()
+
+    from fcn_create_gui.work_zero_ui import install_work_zero_ui     # actuator rows A-D, Set zero, Home LAT / SI / AP
+    install_work_zero_ui(self)
 
     layout_main.addWidget(self.tabWidget)
 
@@ -990,7 +996,7 @@ def build_platform_subtab(self):
     config_hlayout.addWidget(self.btn_go_to)
 
     # Go to center Button
-    self.btn_go_to_center = QPushButton("Go to center", config_frame)
+    self.btn_go_to_center = QPushButton("Go to zero", config_frame)
     self.btn_go_to_center.setMinimumHeight(45)
     self.btn_go_to_center.setMinimumWidth(140)
     self.btn_go_to_center.setStyleSheet("""

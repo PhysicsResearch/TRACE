@@ -34,6 +34,10 @@ def compute_motion_platform_actuators(self, df):
     lim_lat = max_lim_lat.value() if max_lim_lat else 40.0
     lim_si = max_lim_si.value() if max_lim_si else 40.0
     lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
+    # Same bounds as the G-code (fcn_gcode.platform_actuators): centred KINETIQ frame, negative values allowed
+    from .fcn_gcode import kinetiq_plan_bounds
+    bounds = kinetiq_plan_bounds((lim_lat, lim_si, lim_ap))
+    ap_lo, ap_hi = bounds["AP"]
 
     lat_vals = df["LAT"].values
     si_vals = df["SI"].values
@@ -68,8 +72,8 @@ def compute_motion_platform_actuators(self, df):
     # LAT / SI stay the nominal plan values (clipped like the G-code does); only the actuator columns 'e/'f/'a/'c
     # carry the offsets + sway compensation (set at the end, from the achievable Roll / Pitch), so repeated passes
     # do not add AP*sin(angle) again and fcn_gcode.platform_actuators applies the compensation exactly once.
-    lat_nom = np.clip(lat_vals, 0.0, lim_lat)
-    si_nom = np.clip(si_vals, 0.0, lim_si)
+    lat_nom = np.clip(lat_vals, *bounds["LAT"])
+    si_nom = np.clip(si_vals, *bounds["SI"])
     df["LAT"] = lat_nom
     df["SI"] = si_nom
     for col in ("'e", "'f", "'a", "'c"):  # keep the column order; filled at the end
@@ -130,7 +134,7 @@ def compute_motion_platform_actuators(self, df):
             y4 = y3 * cos_p - z3 * sin_p
             z4 = y3 * sin_p + z3 * cos_p
 
-            target_z[name] = max(0.0, min(lim_ap, z4 + zc + ap_vals[i]))
+            target_z[name] = max(ap_lo, min(ap_hi, z4 + zc + ap_vals[i]))
 
         A_arr[i] = target_z['A']
         B_arr[i] = target_z['B']
@@ -142,7 +146,7 @@ def compute_motion_platform_actuators(self, df):
     df["C"] = C_arr
     df["D"] = D_arr
 
-    # Recompute achievable Roll, Pitch, and AP constrained by physical actuator limits [0.0, lim_ap]
+    # Recompute achievable Roll, Pitch, and AP constrained by the actuator bounds [ap_lo, ap_hi]
     sin_p = np.clip(np.nan_to_num((D_arr - A_arr) / si_dim, nan=0.0), -1.0, 1.0)
     p_rad = np.arcsin(sin_p)
     df["Pitch"] = -np.degrees(p_rad)
@@ -162,8 +166,8 @@ def compute_motion_platform_actuators(self, df):
                 - cen_x * sin_r * cos_p + cen_y * sin_p)
 
     # Sway compensation from the achievable Roll / Pitch (the values the G-code uses)
-    lat_eff = np.clip(off_lat + lat_nom + off_ap * np.sin(np.radians(df["Roll"].values)), 0.0, lim_lat)
-    si_eff = np.clip(off_si + si_nom + off_ap * np.sin(np.radians(df["Pitch"].values)), 0.0, lim_si)
+    lat_eff = np.clip(off_lat + lat_nom + off_ap * np.sin(np.radians(df["Roll"].values)), *bounds["LAT"])
+    si_eff = np.clip(off_si + si_nom + off_ap * np.sin(np.radians(df["Pitch"].values)), *bounds["SI"])
     df["'e"] = lat_eff
     df["'f"] = lat_eff
     df["'a"] = si_eff
@@ -190,6 +194,17 @@ def _widget_float(self, names, default):
         except (ValueError, TypeError):
             continue
     return default
+
+
+def _si_second_motor(self):
+    """SI's second motor letter for KINETIQ G-code: 'c, or 'b on the boards that use it (the connected KINETIQ board,
+    else the last one seen, else 'c: fcn_control/work_zero.kinetiq_si_motors)."""
+    try:
+        from fcn_control.work_zero import kinetiq_si_motors
+        return kinetiq_si_motors(self)[1]
+    except Exception as e:
+        print(f"KINETIQ SI motors not known ({e}): 'c is used")
+        return "'c"
 
 
 def _gather_plan_params(self, device):
@@ -229,7 +244,7 @@ def _gather_plan_params(self, device):
             'off_ap': _widget_float(self, ['input_offset_ap', 'input_offset_ap_plan'], 0.0),
             'off_lat': _widget_float(self, ['input_offset_lat', 'input_offset_lat_plan'], 0.0),
             'off_si': _widget_float(self, ['input_offset_si', 'input_offset_si_plan'], 0.0),
-            'axis_y_lo': "'c",
+            'axis_y_lo': _si_second_motor(self),
         }
     else:
         limits = [_widget_float(self, ['settings_max_lim_lat'], 40.0)]
@@ -941,6 +956,7 @@ def on_table_item_changed(self, item):
         'Command': 'Command'
     }
     col_name = reverse_mapping.get(header_text, header_text)
+    device = self.combo_device.currentText()
     
     val_text = item.text()
     try:
@@ -949,7 +965,7 @@ def on_table_item_changed(self, item):
         else:
             new_val = float(val_text)
             if isinstance(new_val, (int, float)) and col_name not in ['time', 'timestamp', 'Roll', 'Pitch', 'Yaw']:
-                if new_val < 0.0:
+                if new_val < 0.0 and device != "Motion Platform":   # KINETIQ frame is centred: negative allowed
                     new_val = 0.0
     except ValueError:
         new_val = val_text
@@ -961,8 +977,6 @@ def on_table_item_changed(self, item):
 
     if col_name == 'time' and isinstance(new_val, (int, float)):
         self.dfEdit.at[bg_row, 'timestamp'] = new_val * 1000.0
-
-    device = self.combo_device.currentText()
 
     # Bake the stepped motion; refresh table/plot afterwards (not while this item's signal runs)
     if col_name != 'Command':
@@ -1159,8 +1173,8 @@ def create_curve(self):
         else:
             val_start = amplitude * np.sin(phase_rad) + amp_offset
 
-        if val_start < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
-            val_start = 0.0
+        if val_start < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"] and device != "Motion Platform":
+            val_start = 0.0                         # KINETIQ frame is centred: negative values are kept
 
         val_starts[selected_axis] = val_start
 
@@ -1239,7 +1253,7 @@ def create_curve(self):
                 if t_prev <= t_val < t_start:
                     frac = (t_val - t_prev) / (t_start - t_prev)
                     interp_val = val_prev + frac * (val_start - val_prev)
-                    if interp_val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                    if interp_val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"] and device != "Motion Platform":
                         interp_val = 0.0
                     self.dfEdit.at[idx, selected_axis] = interp_val
 
@@ -1269,7 +1283,7 @@ def create_curve(self):
                 else:
                     val = amplitude * np.sin(2.0 * np.pi * t_rel / period + phase_rad) + amp_offset
                 
-                if val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"]:
+                if val < 0.0 and selected_axis not in ["Roll", "Pitch", "Yaw"] and device != "Motion Platform":
                     val = 0.0
 
                 if selected_axis in self.dfEdit.columns:
@@ -1625,7 +1639,7 @@ def generate_planned_gcode(self):
             QMessageBox.warning(self, "Export Error", f"Invalid offset SI value: '{input_si.text()}'")
             return None, None
 
-        axis_y_lo = "'c"
+        axis_y_lo = _si_second_motor(self)       # 'c, or 'b on the boards that use it (named in the header)
 
         gcode_content, exceeds_limits = generate_gcode_string(
             device, t_orig, columns_data, max_limits,
@@ -1676,10 +1690,15 @@ def generate_planned_gcode(self):
             return None, None
 
     if exceeds_limits:
+        msg_limits = "Warning: Some curve points exceed the maximum limits defined in Settings.\nDo you still want to proceed?"
+        if device == "Motion Platform":     # centred frame: the G-code clips LAT / SI / AP and the motors to the range
+            msg_limits = ("Warning: Some curve points exceed the limits defined in Settings (Max Lim.) or the KINETIQ "
+                          "travel around the centre. LAT, SI, AP and the motors are cut off at their limit in the "
+                          "G-code.\nDo you still want to proceed?")
         res = QMessageBox.question(
             self, 
             "Limits Exceeded", 
-            "Warning: Some curve points exceed the maximum limits defined in Settings.\nDo you still want to proceed?",
+            msg_limits,
             QMessageBox.Yes | QMessageBox.No
         )
         if res == QMessageBox.No:
@@ -2096,11 +2115,14 @@ def _reverse_motion_platform_kinematics(self, df):
 
     max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
     lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
+    # Actuator bounds of the centred KINETIQ frame (the same as compute_motion_platform_actuators and the G-code)
+    from fcn_control.work_zero_frame import kinetiq_plan_range
+    ap_lo, ap_hi = kinetiq_plan_range('A', lim_ap)
 
-    A = np.clip(np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0), 0.0, lim_ap)
-    B = np.clip(np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0), 0.0, lim_ap)
-    C = np.clip(np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0), 0.0, lim_ap)
-    D = np.clip(np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0), 0.0, lim_ap)
+    A = np.clip(np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
+    B = np.clip(np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
+    C = np.clip(np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
+    D = np.clip(np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
 
     # LAT from 'e and 'f (average)
     lat_cols = [c for c in df.columns if c in ["'e", "'f", "e", "f"]]
@@ -2109,8 +2131,8 @@ def _reverse_motion_platform_kinematics(self, df):
     else:
         LAT = np.zeros(len(df))
 
-    # SI from 'a and 'c (average)
-    si_cols = [c for c in df.columns if c in ["'a", "'c", "a", "c"]]
+    # SI from 'a and 'c (average; 'b instead of 'c on the boards that use it)
+    si_cols = [c for c in df.columns if c in ["'a", "'c", "'b", "a", "c", "b"]]
     if si_cols:
         SI = np.nan_to_num(np.mean([df[c].values for c in si_cols], axis=0), nan=0.0)
     else:
@@ -2295,6 +2317,13 @@ def import_gcode_from_string(self, gcode_content, progress_dialog=None, progress
 
     exclude_cols = {'timestamp', 'time', 'Command'}
     axis_cols = sorted(col for col in df.columns if col not in exclude_cols)
+
+    # KINETIQ file without the work-zero line (old frame, 0 at home?): Convert / Keep values / Cancel (new file)
+    from .kinetiq_old_frame import check_gcode_import
+    df, go_on = check_gcode_import(self, df, axis_cols, lines)
+    if not go_on:
+        progress.close()
+        return
 
     if set(axis_cols) == {'X', 'Y', 'Z'}:
         device = "Lung Phantom"
@@ -2512,7 +2541,14 @@ def import_gcode_action(self, file_path=None):
         # Get active coordinate axes (excluding time, timestamp, Command)
         exclude_cols = {'timestamp', 'time', 'Command'}
         axis_cols = sorted(col for col in df.columns if col not in exclude_cols)
-        
+
+        # KINETIQ file without the work-zero line (old frame, 0 at home?): Convert / Keep values / Cancel (new file)
+        from .kinetiq_old_frame import check_gcode_import, file_head
+        df, go_on = check_gcode_import(self, df, axis_cols, file_head(file_path))
+        if not go_on:
+            progress.close()
+            return
+
         push_curve_state(self)
 
         # Automatically detect device type
@@ -3308,7 +3344,7 @@ class MathOperationsDialog(QDialog):
         if self.radio_invert.isChecked():
             self.input_val_k.setEnabled(False)
             self.lbl_val.setText("Offset:")
-            self.lbl_val.setToolTip("Inverts curve vertically while preserving the Y center/range so values remain non-negative.")
+            self.lbl_val.setToolTip("Flips the curve upside down inside its own range: its minimum and maximum stay the same.")
         elif self.radio_offset.isChecked():
             self.input_val_k.setEnabled(True)
             self.lbl_val.setText("Offset (mm):")
@@ -3394,12 +3430,13 @@ class MathOperationsDialog(QDialog):
                     # Flips peaks/troughs while ensuring numbers never turn negative for linear axes.
                     df.loc[t_mask, ax] = (y_max + y_min) - vals
 
-        # Ensure linear axes are never negative
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        # Ensure linear axes are never negative (not on KINETIQ: its frame is centred, the range is kept by
+        # compute_motion_platform_actuators)
         for ax in target_axes:
-            if ax not in ["Roll", "Pitch", "Yaw"] and ax in df.columns:
+            if ax not in ["Roll", "Pitch", "Yaw"] and ax in df.columns and device != "Motion Platform":
                 df.loc[t_mask, ax] = df.loc[t_mask, ax].clip(lower=0.0)
 
-        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
         parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
             parent.dfEdit_lung_phantom = parent.dfEdit
@@ -3614,6 +3651,10 @@ class SmoothAxisDialog(QDialog):
         self.cb_clip_zero = QCheckBox("Ensure non-negative coordinates (clip ≥ 0 mm for linear axes)", gb_smooth)
         self.cb_clip_zero.setChecked(True)
         self.cb_clip_zero.setToolTip("Ensures linear axes do not dip below 0 mm, staying within physical phantom boundaries.")
+        if device == "Motion Platform":     # KINETIQ frame is centred: keep LAT / SI / AP inside its range instead
+            self.cb_clip_zero.setText("Keep inside the KINETIQ range")
+            self.cb_clip_zero.setToolTip("Keeps LAT, SI and AP inside the KINETIQ range: the platform travel around "
+                                         "the centre (0), within Settings Max Lim.")
         gb_smooth_lay.addWidget(self.cb_clip_zero, 3, 0, 1, 2)
 
         layout.addWidget(gb_smooth)
@@ -3733,6 +3774,13 @@ class SmoothAxisDialog(QDialog):
         method = self.combo_method.currentText()
         clip_zero = self.cb_clip_zero.isChecked()
         rotational_axes = {"Roll", "Pitch", "Yaw"}
+        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
+        # KINETIQ: the box keeps LAT / SI / AP inside the centred range (Settings Max Lim.) instead of >= 0
+        kinetiq_bounds = None
+        if device == "Motion Platform":
+            from .fcn_gcode import kinetiq_plan_bounds
+            kinetiq_bounds = kinetiq_plan_bounds(tuple(
+                _widget_float(parent, [f'settings_max_lim_{a}'], 40.0) for a in ('lat', 'si', 'ap')))
 
         # Backup for undo
         push_curve_state(parent)
@@ -3775,7 +3823,11 @@ class SmoothAxisDialog(QDialog):
                 smoothed = scipy.ndimage.uniform_filter1d(signal, size=w, mode='nearest')
 
             if clip_zero and not is_rot:
-                smoothed = np.clip(smoothed, a_min=0.0, a_max=None)
+                if kinetiq_bounds is not None:
+                    if ax in kinetiq_bounds:
+                        smoothed = np.clip(smoothed, *kinetiq_bounds[ax])
+                else:
+                    smoothed = np.clip(smoothed, a_min=0.0, a_max=None)
 
             # 1. Apply smooth to position
             df[ax] = smoothed
@@ -3794,7 +3846,6 @@ class SmoothAxisDialog(QDialog):
             df[f"Vel. {ax}"] = np.nan_to_num(v_smooth, nan=0.0)
             df[f"Acc. {ax}"] = np.nan_to_num(a_smooth, nan=0.0)
 
-        device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
         # Bake the stepped motion (drops the stored Vel./Acc. columns if positions change)
         parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":

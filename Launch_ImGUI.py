@@ -101,7 +101,7 @@ class MyApp(QMainWindow):
 
             # Exclude motion panel jog & homing buttons (they have fixed 50px heights)
             btn_txt = btn.text().strip()
-            if any(k in btn_txt for k in ['- ', '+ ', 'Home ']) or btn_txt in ['Home ALL', 'Go to', 'Go to ...', 'Go to center']:
+            if any(k in btn_txt for k in ['- ', '+ ', 'Home ']) or btn_txt in ['Home ALL', 'Go to', 'Go to ...', 'Go to center', 'Go to zero', 'Set zero']:
                 style = btn.styleSheet().strip()
                 if style and ":pressed" not in style:
                     style += "\nQPushButton:pressed { padding-top: 3px; padding-left: 3px; }"

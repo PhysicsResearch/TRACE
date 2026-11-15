@@ -255,7 +255,8 @@ class ImportMotionDialog(QDialog):
 
         self.cb_zero_baseline = QCheckBox("Shift minimum to 0 (Zero baseline)", gb_params)
         self.cb_zero_baseline.setChecked(True)
-        self.cb_zero_baseline.setToolTip("Shifts curve so minimum amplitude starts at 0.0 mm (recommended to stay within physical phantom limits [0, 40 mm]).")
+        self.cb_zero_baseline.setToolTip("Shifts the curve up or down so its lowest point is 0 mm (the shape is kept, "
+                                         "nothing is cut). DYNAMIQ cannot move below 0; on KINETIQ, 0 is the platform centre.")
 
         self.cb_invert = QCheckBox("Invert amplitude (Flip)", gb_params)
         self.cb_invert.setChecked(False)
@@ -751,6 +752,7 @@ def match_log_axis_name(col_name):
         'roll': 'Roll', 'pitch': 'Pitch', 'yaw': 'Yaw',
         'a': 'A', 'b': 'B', 'c': 'C', 'd': 'D',
         "'e": "'e", "'f": "'f", "'a": "'a", "'c": "'c",
+        "'b": "'c",     # SI's second motor of the boards that use 'b (Pos_'b_mm): the 'c column / curve
         'e': "'e", 'f': "'f", 'w': 'Yaw', 'v': 'Pitch'
     }
     if cleaned in mapping:
@@ -949,6 +951,11 @@ def import_trace_log_action(self, file_path=None):
 
     try:
         plan_df, device, matched_axes, probe_detected, orig_count, t_max = parse_trace_log_file(file_path)
+        if device == "Motion Platform":   # KINETIQ log recorded with 0 at home? Convert / Keep values / Cancel (new file)
+            from fcn_plan.kinetiq_old_frame import check_log_import
+            plan_df, go_on = check_log_import(self, plan_df, file_path)
+            if not go_on:
+                return
 
         from fcn_plan.fcn_create import push_curve_state, bake_plan_steps, compute_motion_platform_actuators
         push_curve_state(self)

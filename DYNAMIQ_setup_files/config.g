@@ -48,6 +48,9 @@ M569 P2 S1                      ; Z motor direction
 M558 K0 P5 C"^!io4.in" H5 F120 T6000   ; K0 = probe 0, P5 = digital switch
 G31 K0 P500                            ; threshold (only used when probing)
 
+; Trigger output (LogIQ plans and the PanelDue Trigger ON / OFF switch it with M42 P5 S1 / M42 P5 S0), as on KINETIQ
+M950 P5 C"out6"                 ; GPIO port 5 = out6
+
 ; Axis mapping
 M584 X0 Y1 Z2
 

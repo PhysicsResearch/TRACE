@@ -73,8 +73,8 @@ def is_axis_homed(self, axis_key):
 
     # Motion Platform degrees of freedom (driven by platform motors 'e, 'f, 'a, 'c/'b, A, B, C, D)
     elif upper_key in ['LAT', 'LATAXIS']:
-        e_homed = bool(h.get("'e", False) or h.get("e", False) or h.get("E", False))
-        f_homed = bool(h.get("'f", False) or h.get("f", False) or h.get("F", False))
+        e_homed = bool(h.get("'e", False) or h.get("e", False))
+        f_homed = bool(h.get("'f", False) or h.get("f", False))
         return (e_homed and f_homed) or bool(h.get('LAT', False))
     elif upper_key in ['SI', 'SIAXIS']:
         a_homed = bool(h.get("'a", False) or h.get("a", False))
@@ -93,51 +93,80 @@ def is_axis_homed(self, axis_key):
         return bool(h.get('W', False) or h.get('YAW', False))
 
     else:
-        # Check exact key, unquoted key, single-quoted key, upper and lower variations
-        clean_k = raw_key.strip("'")
-        return bool(
-            h.get(raw_key, False) or
-            h.get(clean_k, False) or
-            h.get(f"'{clean_k}", False) or
-            h.get(clean_k.lower(), False) or
-            h.get(f"'{clean_k.lower()}", False) or
-            h.get(clean_k.upper(), False)
-        )
+        # One axis letter, matched exactly (the homed flags are stored under the Duet's letter, e.g. 'A' for actuator A
+        # and 'a' / "'a" for SI's motor 'a): an upper-case letter only matches the upper-case axis ('A' is not 'a);
+        # a quoted or lower-case letter ("'a", 'a'; RRF reads "'A" as 'a too) only the lower-case axis
+        if len(raw_key) == 2 and raw_key[0] == "'" and raw_key[1].isalpha():
+            low = raw_key[1].lower()
+            return bool(h.get(f"'{low}", False) or h.get(low, False))
+        if len(raw_key) == 1 and raw_key.isalpha():
+            if raw_key.islower():
+                return bool(h.get(f"'{raw_key}", False) or h.get(raw_key, False))
+            return bool(h.get(raw_key, False))
+        return bool(h.get(raw_key, False))
+
+
+# Control tab motion buttons (jog - / +, Go to, Go to ..., Go to zero, Home, Set zero): ONE green style, the LogIQ olive
+# of the buttons of the other tabs (logiq_theme.OLIVE / OLIVE_DARK, radius 6 px, bold, white text).  These are theme
+# colours (targets of logiq_theme.COLOR_MAP), so the theme leaves them as they are.
+MOTION_GREEN = "#4b6143"            # logiq_theme.OLIVE
+MOTION_GREEN_HOVER = "#354530"      # logiq_theme.OLIVE_DARK
+MOTION_GREEN_PRESSED = "#262d23"    # logiq_theme.OLIVE_TEXT
+HOMED_TINT = "#d9e3cd"              # Home buttons once their axes are homed: a light tint of the same green
+HOMED_TINT_HOVER = "#c9d7ba"
+HOMED_TINT_TEXT = "#2f3f2a"
+HOMED_TINT_BORDER = "#a9bb98"
+DISABLED_BG = "#e9ece5"             # unavailable (not connected / axis not homed): pale grey-green, grey text, no hover
+DISABLED_TEXT = "#a2aa99"
+ROW_BUTTON_EXTRA = "padding: 0px 4px;"   # the compact PLATFORM button row (Go to ... / Go to zero / Home ...), 16 px
+
+
+def motion_button_style(font_px=20, min_height=45, homed=False, extra=""):
+    """Stylesheet of a Control tab motion button: solid green, or (homed=True, Home buttons whose axes are homed) a
+    light tint of the same green; disabled: pale grey-green with grey text and no hover.  min_height None: none set
+    (fixed-height buttons); extra: more declarations for the button (e.g. 'padding: 0px 20px;')."""
+    if homed:
+        bg, fg, hover, pressed, border = (HOMED_TINT, HOMED_TINT_TEXT, HOMED_TINT_HOVER, HOMED_TINT_HOVER,
+                                          f"1px solid {HOMED_TINT_BORDER}")
+    else:
+        bg, fg, hover, pressed, border = MOTION_GREEN, "#ffffff", MOTION_GREEN_HOVER, MOTION_GREEN_PRESSED, "none"
+    mh = f" min-height: {min_height}px;" if min_height else ""
+    return (f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; font-size: {font_px}px;{mh} "
+            f"border-radius: 6px; border: {border};{(' ' + extra) if extra else ''} }}\n"
+            f"QPushButton:hover {{ background-color: {hover}; }}\n"
+            f"QPushButton:pressed {{ background-color: {pressed}; padding-top: 3px; padding-left: 3px; }}\n"
+            f"QPushButton:disabled, QPushButton:disabled:hover {{ background-color: {DISABLED_BG}; "
+            f"color: {DISABLED_TEXT}; border: none; }}")
+
+
+def set_motion_button(btn, style, enabled):
+    """Style (re-set only when it changed: a new sheet re-polishes the button) and enable / disable a button."""
+    if btn is None:
+        return
+    try:
+        if (btn.property('kq_original_css') or btn.styleSheet()) != style:
+            btn.setStyleSheet(style)
+        if btn.isEnabled() != bool(enabled):
+            btn.setEnabled(bool(enabled))
+    except RuntimeError:
+        pass                                    # widget already deleted
 
 
 def update_moving_button_styles(self):
     """
-    Dynamically sets the background color of all motion buttons:
-    - RED (#d32f2f) if the corresponding axis is NOT homed.
-    - GREEN (#2e7d32) if the corresponding axis IS homed.
+    Control tab motion buttons: one green style (motion_button_style), and UNAVAILABLE (setEnabled(False), quiet
+    disabled look) while the board is not connected, while the other device is connected (its page's homed flags
+    would be stale ones of an earlier board), or while an axis the button moves is not homed:
+      - jog - / + : its own axis (PLATFORM LAT / SI / AP / Roll / Pitch / Yaw, LUNG PHANTOM X / Y / Z);
+      - LUNG PHANTOM Go to: X, Y and Z;  PLATFORM Go to ... / Go to zero: LAT, SI, AP, Roll and Pitch.
+    Runs on every status poll; fcn_create_gui/work_zero_ui.py runs it on connection changes too and keeps the
+    actuator rows A-D and the Set zero buttons.
     """
-    style_red = """
-        QPushButton {
-            background-color: #d32f2f;
-            color: white;
-            font-weight: bold;
-            font-size: 20px;
-            min-height: 45px;
-            border-radius: 6px;
-            border: none;
-        }
-        QPushButton:hover { background-color: #b71c1c; }
-        QPushButton:pressed { background-color: #8e0000; padding-top: 3px; padding-left: 3px; }
-    """
-
-    style_green = """
-        QPushButton {
-            background-color: #2e7d32;
-            color: white;
-            font-weight: bold;
-            font-size: 20px;
-            min-height: 45px;
-            border-radius: 6px;
-            border: none;
-        }
-        QPushButton:hover { background-color: #1b5e20; }
-        QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
-    """
+    connected = bool(getattr(self, 'duet_connected', False))
+    device = getattr(self, 'connected_device', None)
+    lung_ok = connected and device != 'KINETIQ'            # the LUNG PHANTOM page drives DYNAMIQ
+    plat_ok = connected and device != 'DYNAMIQ'            # the PLATFORM page drives KINETIQ
+    jog_style = motion_button_style(20, 45)
 
     # 1. Platform jog buttons (LATAXIS=LAT, SIAXIS=SI, APAXIS=AP, ROLL, PITCH, YAW)
     plat_mapping = {
@@ -149,12 +178,9 @@ def update_moving_button_styles(self):
         'YAW': 'YAW'
     }
     for ax_key, dof_key in plat_mapping.items():
-        homed = is_axis_homed(self, dof_key)
-        target_style = style_green if homed else style_red
+        enabled = plat_ok and is_axis_homed(self, dof_key)
         for btn_prefix in ['MIN_', 'PLUS_']:
-            btn = getattr(self, f"{btn_prefix}{ax_key}", None)
-            if btn is not None:
-                btn.setStyleSheet(target_style)
+            set_motion_button(getattr(self, f"{btn_prefix}{ax_key}", None), jog_style, enabled)
 
     # 2. Lung Phantom jog buttons (strictly Cartesian X, Y, Z axes on Duet)
     lung_mapping = {
@@ -163,31 +189,60 @@ def update_moving_button_styles(self):
         'ZAXIS': 'Z'
     }
     for ax_key, cart_key in lung_mapping.items():
-        homed = is_axis_homed(self, cart_key)
-        target_style = style_green if homed else style_red
+        enabled = lung_ok and is_axis_homed(self, cart_key)
         for btn_prefix in ['MIN_', 'PLUS_']:
-            btn = getattr(self, f"{btn_prefix}{ax_key}_LUNG", None)
-            if btn is not None:
-                btn.setStyleSheet(target_style)
+            set_motion_button(getattr(self, f"{btn_prefix}{ax_key}_LUNG", None), jog_style, enabled)
 
-    # 2. Ind. Motors tab shared jog & move buttons
+    # 2. Ind. Motors shared jog & move buttons (the page is built but not shown)
     selected_ext = getattr(self, 'selected_ext_axis', 'A')
-    ext_homed = is_axis_homed(self, selected_ext)
-    ext_style = style_green if ext_homed else style_red
+    ext_enabled = connected and is_axis_homed(self, selected_ext)
+    for name in ('btn_ext_jog_min', 'btn_ext_jog_plus', 'btn_move_ext'):
+        set_motion_button(getattr(self, name, None), jog_style, ext_enabled)
 
-    if hasattr(self, 'btn_ext_jog_min') and self.btn_ext_jog_min:
-        self.btn_ext_jog_min.setStyleSheet(ext_style)
-    if hasattr(self, 'btn_ext_jog_plus') and self.btn_ext_jog_plus:
-        self.btn_ext_jog_plus.setStyleSheet(ext_style)
-    if hasattr(self, 'btn_move_ext') and self.btn_move_ext:
-        self.btn_move_ext.setStyleSheet(ext_style)
-
-    # 3. Go to ... and Go to center buttons (ignoring YAW which is not implemented yet)
+    # 3. Go to (LUNG PHANTOM: X, Y and Z), Go to ... and Go to zero (PLATFORM; YAW is not implemented yet)
+    lung_homed = is_axis_homed(self, 'X') and is_axis_homed(self, 'Y') and is_axis_homed(self, 'Z')
+    set_motion_button(getattr(self, 'btn_goto_lung', None),
+                      motion_button_style(16, None, extra="padding: 0px 20px;"), lung_ok and lung_homed)
     all_plat_homed = (is_axis_homed(self, 'LAT') and is_axis_homed(self, 'SI') and is_axis_homed(self, 'AP') and is_axis_homed(self, 'ROLL') and is_axis_homed(self, 'PITCH'))
-    if hasattr(self, 'btn_go_to') and self.btn_go_to:
-        self.btn_go_to.setStyleSheet(style_green if all_plat_homed else style_red)
-    if hasattr(self, 'btn_go_to_center') and self.btn_go_to_center:
-        self.btn_go_to_center.setStyleSheet(style_green if all_plat_homed else style_red)
+    row_style = motion_button_style(16, 45, extra=ROW_BUTTON_EXTRA)         # the compact PLATFORM button row
+    for name in ('btn_go_to', 'btn_go_to_center'):
+        set_motion_button(getattr(self, name, None), row_style, plat_ok and all_plat_homed)
+
+    # 4. PLATFORM actuator rows A-D (fcn_create_gui/work_zero_ui.py): also after the poll's homed flags
+    try:
+        from fcn_create_gui.work_zero_ui import refresh_actuator_buttons
+        refresh_actuator_buttons(self)
+    except Exception as e:
+        print(f"Work zero UI: A-D jog buttons not refreshed: {e}")
+
+
+def update_home_button_styles(self):
+    """
+    Control tab Home buttons: available whenever the board is connected and is the page's device (disabled, quiet
+    look, when not: PLATFORM ones while DYNAMIQ is connected, LUNG PHANTOM ones while KINETIQ is connected, both when
+    the device is not known); solid green while their axes are not homed, a light tint of the same green once homed
+    (motion_button_style).
+      LUNG PHANTOM: Home X / Y / Z (that axis), Home ALL (X, Y and Z);
+      PLATFORM: Home ALL (LAT, SI and AP), Home LAT / SI / AP (that group; fcn_create_gui/work_zero_ui.py).
+    Runs on every status poll; work_zero_ui runs it on connection changes too.
+    """
+    connected = bool(getattr(self, 'duet_connected', False))
+    device = getattr(self, 'connected_device', None)
+    for name, keys, font_px, min_h in (('HOME_X', ('X',), 20, 45), ('HOME_Y', ('Y',), 20, 45),
+                                       ('HOME_Z', ('Z',), 20, 45), ('HOME_ALL', ('X', 'Y', 'Z'), 20, None),
+                                       ('HOME_ALL_PLATFORM', ('LAT', 'SI', 'AP'), 16, 45),
+                                       ('HOME_LAT_PLATFORM', ('LAT',), 16, 45), ('HOME_SI_PLATFORM', ('SI',), 16, 45),
+                                       ('HOME_AP_PLATFORM', ('AP',), 16, 45)):
+        btn = getattr(self, name, None)
+        if btn is None:
+            continue
+        homed = all(is_axis_homed(self, k) for k in keys)
+        row = name.endswith('_PLATFORM')                    # the compact PLATFORM button row
+        own = device != ('DYNAMIQ' if row else 'KINETIQ')   # PLATFORM homes KINETIQ, LUNG PHANTOM homes DYNAMIQ
+        set_motion_button(btn, motion_button_style(font_px, min_h, homed=homed,
+                                                   extra=ROW_BUTTON_EXTRA if row else ""), connected and own)
+        if row:
+            btn.setMinimumHeight(45)
 
 
 def refresh_external_axis_styles(self):
@@ -426,6 +481,12 @@ def update_duet_status_ui(self, data=None):
             update_connection_status_ui(self, connected=False)
             return
 
+    try:                     # work zero: record from the Duet, limits in G-code coordinates (work_zero.py)
+        from fcn_control.work_zero import sync_from_status
+        sync_from_status(self, data)
+    except Exception as e:
+        print(f"Work zero sync failed: {e}")
+
     try:
         if data is not None:
             coords = data.get('coords', {})
@@ -515,113 +576,9 @@ def update_duet_status_ui(self, data=None):
             # Refresh individual motor selector buttons and motion direction buttons
             refresh_external_axis_styles(self)
 
-            # Update Cartesian / Motion Home button colors based on freshly updated is_axis_homed (Green=Not Homed, Blue=Homed)
-            axis_map = [('X', 'X'), ('Y', 'Y'), ('Z', 'Z')]
-            all_homed = True
-            for name, ax_key in axis_map:
-                btn = getattr(self, f'HOME_{name}', None)
-                is_homed = is_axis_homed(self, ax_key)
-                if not is_homed:
-                    all_homed = False
-                if btn is not None:
-                    if is_homed:
-                        btn.setStyleSheet("""
-                            QPushButton {
-                                background-color: blue;
-                                color: white;
-                                font-weight: bold;
-                                font-size: 20px;
-                                min-height: 45px;
-                                border-radius: 6px;
-                                border: none;
-                            }
-                            QPushButton:hover {
-                                background-color: #1565c0;
-                            }
-                        """)
-                    else:
-                        btn.setStyleSheet("""
-                            QPushButton {
-                                background-color: #2e7d32;
-                                color: white;
-                                font-weight: bold;
-                                font-size: 20px;
-                                min-height: 45px;
-                                border-radius: 6px;
-                                border: none;
-                            }
-                            QPushButton:hover {
-                                background-color: #1b5e20;
-                            }
-                        """)
-
-            # Update Home ALL button colors
-            btn_all = getattr(self, 'HOME_ALL', None)
-            if btn_all is not None:
-                if all_homed:
-                    btn_all.setStyleSheet("""
-                        QPushButton {
-                            background-color: blue;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 20px;
-                            border-radius: 6px;
-                            border: none;
-                        }
-                        QPushButton:hover {
-                            background-color: #1565c0;
-                        }
-                    """)
-                else:
-                    btn_all.setStyleSheet("""
-                        QPushButton {
-                            background-color: #2e7d32;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 20px;
-                            border-radius: 6px;
-                            border: none;
-                        }
-                        QPushButton:hover {
-                            background-color: #1b5e20;
-                        }
-                    """)
-
-            btn_plat_all = getattr(self, 'HOME_ALL_PLATFORM', None)
-            if btn_plat_all is not None:
-                btn_plat_all.setMinimumHeight(45)
-                btn_plat_all.setMinimumWidth(140)
-                all_plat_homed = (is_axis_homed(self, 'LAT') and is_axis_homed(self, 'SI') and is_axis_homed(self, 'AP'))
-                if all_plat_homed:
-                    btn_plat_all.setStyleSheet("""
-                        QPushButton {
-                            background-color: blue;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 16px;
-                            min-height: 45px;
-                            min-width: 140px;
-                            border-radius: 6px;
-                            border: none;
-                        }
-                        QPushButton:hover { background-color: #1a73e8; }
-                        QPushButton:pressed { background-color: #0d47a1; padding-top: 3px; padding-left: 3px; }
-                    """)
-                else:
-                    btn_plat_all.setStyleSheet("""
-                        QPushButton {
-                            background-color: #2e7d32;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 16px;
-                            min-height: 45px;
-                            min-width: 140px;
-                            border-radius: 6px;
-                            border: none;
-                        }
-                        QPushButton:hover { background-color: #1b5e20; }
-                        QPushButton:pressed { background-color: #0d3c12; padding-top: 3px; padding-left: 3px; }
-                    """)
+            # Home buttons (LUNG PHANTOM X / Y / Z / ALL, PLATFORM ALL / LAT / SI / AP) from the freshly updated
+            # is_axis_homed: solid green while not homed, a light tint of the same green once homed
+            update_home_button_styles(self)
 
             # Update current position displays for Cartesian Lung Phantom axes
             if len(xyz) >= 3:
@@ -726,7 +683,7 @@ def update_duet_status_ui(self, data=None):
             if hasattr(self, 'POS_CURR_LATAXIS') and self.POS_CURR_LATAXIS:
                 self.POS_CURR_LATAXIS.setText(f"{h_lat:.3f}")
 
-            # Calculate current SI (average of 'a and 'c)
+            # Calculate current SI (average of 'a and 'c, or 'b on the boards that use it: work_zero.kinetiq_si_motors)
             curr_a_lo = 0.0
             curr_c_lo = 0.0
             f_a_lo = getattr(self, "POS_CURR_a", getattr(self, "POS_CURR_'a", None))
@@ -735,7 +692,12 @@ def update_duet_status_ui(self, data=None):
                     curr_a_lo = float(f_a_lo.text())
                 except ValueError:
                     pass
-            f_c_lo = getattr(self, "POS_CURR_c", getattr(self, "POS_CURR_'c", None))
+            try:
+                from fcn_control.work_zero import kinetiq_si_motors
+                si_lo = kinetiq_si_motors(self)[1]
+            except Exception:
+                si_lo = "'c"
+            f_c_lo = getattr(self, f"POS_CURR_{si_lo[1:]}", getattr(self, f"POS_CURR_{si_lo}", None))
             if f_c_lo is not None:
                 try:
                     curr_c_lo = float(f_c_lo.text())
@@ -746,7 +708,8 @@ def update_duet_status_ui(self, data=None):
                 self.POS_CURR_SIAXIS.setText(f"{h_si:.3f}")
 
             # Synchronize target fields (POS_DES) with current fields (POS_CURR) for each tab when not being edited
-            for ax_name in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW']:
+            # (A-D: the PLATFORM table's actuator Targets POS_DES_A..D, Current = POS_CURR_A..D)
+            for ax_name in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'YAW', 'A', 'B', 'C', 'D']:
                 curr_f = getattr(self, f"POS_CURR_{ax_name}", None)
                 des_f = getattr(self, f"POS_DES_{ax_name}", None)
                 if curr_f is not None and des_f is not None and not des_f.hasFocus() \
@@ -857,6 +820,7 @@ def send_cmd(self, cmd=None):
 
     ip = get_clean_duet_ip(self)
 
+    typed = cmd is None
     if cmd is None:
         if hasattr(self, 'duet_command') and self.duet_command:
             cmd = self.duet_command.text().strip()
@@ -866,6 +830,13 @@ def send_cmd(self, cmd=None):
 
     if not cmd:
         return
+
+    if typed:                # a G28 / home macro typed in the console sets the standard work zero first (work_zero.py)
+        try:
+            from fcn_control.work_zero import before_typed_command
+            before_typed_command(self, cmd)
+        except Exception as e:
+            print(f"Work zero: not set before the typed command: {e}")
 
     log_to_duet_console(self, f"Sent: {cmd}")
     url = f'http://{ip}/rr_gcode'
@@ -896,9 +867,29 @@ def home(self, ax):
     Function to call standard homing commands (G28) for cartesian & platform axes.
     Executes RRF macros (homex.g, homey.g, homez.g, homeall.g) on the Duet board.
     Supports single quote prefixed lower case axes ('a, 'c, 'e, 'f).
+    KINETIQ groups (PLATFORM Home LAT / SI / AP): 'LAT' -> G28 'e 'f, 'SI' -> G28 'a 'c ('b on boards that use it),
+    'AP' -> G28 A B C D.  A group whose motors the connected board does not have is refused before anything is sent
+    (work_zero.home_refused: RRF would home every axis on a G28 without a known axis letter).
     """
+    try:                     # homing sets the standard work zero (KINETIQ: platform centre, DYNAMIQ: 0; work_zero.py);
+        from fcn_control.work_zero import before_homing, home_refused       # a group the board lacks: refused
+        if home_refused(self, ax):
+            return
+        before_homing(self, ax)
+    except Exception as e:
+        print(f"Work zero: not set before homing: {e}")
+
     if ax in ['X', 'Y', 'Z']:
         send_cmd(self, f'G28 {ax}')
+    elif ax == 'LAT':
+        send_cmd(self, "G28 'e 'f")
+    elif ax == 'SI':
+        axis_y_lo = "'c"
+        if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
+            axis_y_lo = "'b"
+        send_cmd(self, f"G28 'a {axis_y_lo}")
+    elif ax == 'AP':
+        send_cmd(self, 'G28 A B C D')
     elif ax in ['ROLL', 'Roll']:
         send_cmd(self, 'G28 U')
     elif ax in ['PITCH', 'Pitch']:
@@ -966,6 +957,14 @@ def check_relative_move_limits(self, ax, delta):
 
     def check_motor(m, d, default_max=70.0, default_min=0.2):
         c = get_curr(m)
+        if m in ('A', 'B', 'C', 'D'):     # actuator range 0.2-70 mm machine + M208, in G-code coordinates (work_zero.py)
+            from fcn_control.work_zero import actuator_envelope, actuator_range_text
+            mins, maxs = actuator_envelope(self, (m,))
+            if c + d > maxs[m]: return False, (f"Actuator {m} would exceed its max limit ({maxs[m]:.3f} mm in G-code "
+                                               f"coordinates; actuator range {actuator_range_text()}).")
+            if c + d < mins[m]: return False, (f"Actuator {m} would drop below its min limit ({mins[m]:.3f} mm in "
+                                               f"G-code coordinates; actuator range {actuator_range_text()}).")
+            return True, ""
         mx = get_limit(m, True, default_max)
         mn = get_limit(m, False, default_min)
         if c + d > mx: return False, f"Actuator {m} would exceed max limit ({mx:.1f} mm)."
@@ -993,7 +992,9 @@ def check_relative_move_limits(self, ax, delta):
         for m in ['A', 'B', 'C', 'D']:
             ok, err = check_motor(m, delta)
             if not ok: return ok, err
-            
+    elif ax in ('A', 'B', 'C', 'D'):      # one actuator (PLATFORM table rows A-D)
+        return check_motor(ax, delta)
+
     return True, ""
 
 
@@ -1101,18 +1102,9 @@ def step(self, ax, plus=True):
             except ValueError:
                 pass
 
-        # Get limits for A, B, C, D dynamically from Duet limits (enforcing min 0.2 mm, max 70.0 mm)
-        limits_max = {}
-        limits_min = {}
-        for ax_name in ['A', 'B', 'C', 'D']:
-            max_val = 70.0
-            min_val = 0.2
-            if hasattr(self, 'axis_max_limits') and self.axis_max_limits:
-                max_val = min(self.axis_max_limits.get(ax_name, 70.0), 70.0)
-            if hasattr(self, 'axis_min_limits') and self.axis_min_limits:
-                min_val = max(self.axis_min_limits.get(ax_name, 0.2), 0.2)
-            limits_max[ax_name] = max_val
-            limits_min[ax_name] = min_val
+        # A, B, C, D limits: actuator range 0.2-70 mm machine and the Duet's M208 limits, in G-code coordinates
+        from fcn_control.work_zero import actuator_envelope, actuator_range_text, envelope_text
+        limits_min, limits_max = actuator_envelope(self)
 
         delta_A = delta_z
         delta_B = -delta_z
@@ -1132,7 +1124,7 @@ def step(self, ax, plus=True):
 
         if s_min > s_max:
             # Over-travel in both directions is impossible to resolve by shifting
-            log_to_duet_console(self, f"Error: Roll rotation would exceed physical limits (Min: {min(limits_min.values()):.1f}, Max: {max(limits_max.values()):.1f} mm). Command blocked.", color="#ff3333")
+            log_to_duet_console(self, f"Error: Roll rotation would exceed physical limits (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates). Command blocked.", color="#ff3333")
             return
 
         # Determine the best shift
@@ -1198,17 +1190,9 @@ def step(self, ax, plus=True):
         delta_C = -delta_z
         delta_D = -delta_z
 
-        limits_max = {}
-        limits_min = {}
-        for ax_name in ['A', 'B', 'C', 'D']:
-            max_val = 70.0
-            min_val = 0.2
-            if hasattr(self, 'axis_max_limits') and self.axis_max_limits:
-                max_val = min(self.axis_max_limits.get(ax_name, 70.0), 70.0)
-            if hasattr(self, 'axis_min_limits') and self.axis_min_limits:
-                min_val = max(self.axis_min_limits.get(ax_name, 0.2), 0.2)
-            limits_max[ax_name] = max_val
-            limits_min[ax_name] = min_val
+        # A, B, C, D limits: actuator range 0.2-70 mm machine and the Duet's M208 limits, in G-code coordinates
+        from fcn_control.work_zero import actuator_envelope, actuator_range_text, envelope_text
+        limits_min, limits_max = actuator_envelope(self)
 
         p_no_shift = {
             'A': curr_a + delta_A,
@@ -1222,7 +1206,7 @@ def step(self, ax, plus=True):
         s_max = min(limits_max[ax_name] - p_no_shift[ax_name] for ax_name in ['A', 'B', 'C', 'D'])
 
         if s_min > s_max:
-            log_to_duet_console(self, f"Error: Pitch rotation would exceed physical limits (Min: {min(limits_min.values()):.1f}, Max: {max(limits_max.values()):.1f} mm). Command blocked.", color="#ff3333")
+            log_to_duet_console(self, f"Error: Pitch rotation would exceed physical limits (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates). Command blocked.", color="#ff3333")
             return
 
         # Determine the best shift
@@ -1326,17 +1310,9 @@ def move(self, ax):
         except ValueError:
             pass
 
-    limits_max = {}
-    limits_min = {}
-    for ax_name in ['A', 'B', 'C', 'D']:
-        max_val = 70.0
-        min_val = 0.2
-        if hasattr(self, 'axis_max_limits') and self.axis_max_limits:
-            max_val = min(self.axis_max_limits.get(ax_name, 70.0), 70.0)
-        if hasattr(self, 'axis_min_limits') and self.axis_min_limits:
-            min_val = max(self.axis_min_limits.get(ax_name, 0.2), 0.2)
-        limits_max[ax_name] = max_val
-        limits_min[ax_name] = min_val
+    # A, B, C, D limits: actuator range 0.2-70 mm machine and the Duet's M208 limits, in G-code coordinates
+    from fcn_control.work_zero import actuator_envelope, actuator_range_text, envelope_text
+    limits_min, limits_max = actuator_envelope(self)
 
     if ax in ['XAXIS_LUNG', 'LUNG_XAXIS', 'LUNG_X', 'X']:
         cmd = f"G1 X{delta:.4f} F600"
@@ -1363,14 +1339,15 @@ def move(self, ax):
         new_C = curr_c + delta
         new_D = curr_d + delta
 
-        min_new = min(new_A, new_B, new_C, new_D)
-        max_new = max(new_A, new_B, new_C, new_D)
+        new_pos = {'A': new_A, 'B': new_B, 'C': new_C, 'D': new_D}       # per motor: their offsets may differ
+        low = [m for m in new_pos if new_pos[m] < limits_min[m]]
+        high = [m for m in new_pos if new_pos[m] > limits_max[m]]
 
-        if min_new < 0.2:
-            log_to_duet_console(self, f"Error: AP movement blocked. Actuator would drop below minimum limit of 0.2 mm.", color="#ff3333")
+        if low:
+            log_to_duet_console(self, f"Error: AP movement blocked. Actuator {', '.join(low)} would drop below its minimum limit (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates).", color="#ff3333")
             return
-        if max_new > 70.0:
-            log_to_duet_console(self, f"Error: AP movement blocked. Actuator would exceed maximum limit of 70.0 mm.", color="#ff3333")
+        if high:
+            log_to_duet_console(self, f"Error: AP movement blocked. Actuator {', '.join(high)} would exceed its maximum limit (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates).", color="#ff3333")
             return
 
         cmd = f"G1 A{delta:.4f} B{delta:.4f} C{delta:.4f} D{delta:.4f} F600"
@@ -1406,7 +1383,7 @@ def move(self, ax):
         s_max = min(limits_max[ax_name] - p_no_shift[ax_name] for ax_name in ['A', 'B', 'C', 'D'])
 
         if s_min > s_max:
-            log_to_duet_console(self, f"Error: Roll rotation would exceed physical limits (Min: {min(limits_min.values()):.1f}, Max: {max(limits_max.values()):.1f} mm). Command blocked.", color="#ff3333")
+            log_to_duet_console(self, f"Error: Roll rotation would exceed physical limits (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates). Command blocked.", color="#ff3333")
             return
 
         # Determine the best shift
@@ -1457,7 +1434,7 @@ def move(self, ax):
         s_max = min(limits_max[ax_name] - p_no_shift[ax_name] for ax_name in ['A', 'B', 'C', 'D'])
 
         if s_min > s_max:
-            log_to_duet_console(self, f"Error: Pitch rotation would exceed physical limits (Min: {min(limits_min.values()):.1f}, Max: {max(limits_max.values()):.1f} mm). Command blocked.", color="#ff3333")
+            log_to_duet_console(self, f"Error: Pitch rotation would exceed physical limits (actuator range {actuator_range_text()} = {envelope_text(limits_min, limits_max)} in G-code coordinates). Command blocked.", color="#ff3333")
             return
 
         # Determine the best shift
@@ -1704,7 +1681,8 @@ def go_to_desired_positions(self):
     """
     Retrieves all target positions and offsets from the UI,
     calculates full 3D rotation and translation kinematics for the actuators,
-    checks if the resulting actuator positions are physically possible ([0.2, 70.0] mm),
+    checks if the resulting actuator positions are physically possible (0.2-70 mm machine, i.e. minus the work-zero
+    offset in G-code coordinates, and the M208 limits),
     and sends the absolute moves to Duet.
     """
     if not getattr(self, 'duet_connected', False):
@@ -1818,18 +1796,9 @@ def go_to_desired_positions(self):
         # Target absolute Z height
         target_z[name] = z4 + zc + t_ap
 
-    # 5. Check physical limit violations for all actuators
-    limits_max = {}
-    limits_min = {}
-    for ax_name in ['A', 'B', 'C', 'D']:
-        max_val = 70.0
-        min_val = 0.2
-        if hasattr(self, 'axis_max_limits') and self.axis_max_limits:
-            max_val = min(self.axis_max_limits.get(ax_name, 70.0), 70.0)
-        if hasattr(self, 'axis_min_limits') and self.axis_min_limits:
-            min_val = max(self.axis_min_limits.get(ax_name, 0.2), 0.2)
-        limits_max[ax_name] = max_val
-        limits_min[ax_name] = min_val
+    # 5. Check physical limit violations for all actuators (0.2-70 mm machine and M208, in G-code coordinates)
+    from fcn_control.work_zero import actuator_envelope, actuator_range_text
+    limits_min, limits_max = actuator_envelope(self)
 
     out_of_bounds = []
     for name, val in target_z.items():
@@ -1838,7 +1807,7 @@ def go_to_desired_positions(self):
 
     if out_of_bounds:
         for name, val, mn, mx in out_of_bounds:
-            log_to_duet_console(self, f"Error: Actuator {name} target position {val:.3f} mm is out of bounds [{mn:.1f}, {mx:.1f}] mm.", color="#ff3333")
+            log_to_duet_console(self, f"Error: Actuator {name} target position {val:.3f} mm is out of bounds [{mn:.3f}, {mx:.3f}] mm (G-code coordinates; actuator range {actuator_range_text()}).", color="#ff3333")
         log_to_duet_console(self, "Error: Move command blocked.", color="#ff3333")
         return
 
@@ -1860,40 +1829,35 @@ def go_to_desired_positions(self):
 
 def go_to_center(self):
     """
-    Moves the platform to the physical center:
-    Roll = 0, Pitch = 0, Yaw = 0
-    Actuators A, B, C, D = 35.0 mm
-    Horizontal axes ('e, 'f, 'a, 'c/'b) = 25.0 mm
+    Go to zero (PLATFORM button "Go to zero"; the function keeps its old name): every KINETIQ motor to G-code 0, i.e.
+    to the work zero (work_zero.py): the platform centre with the standard zero (LAT 'e 'f 50, SI 'a 'c/'b 25, A B C D
+    45 mm machine, work_zero_frame.KINETIQ_CENTRE), the user's own zero after Set zero.
+    The Targets LAT / SI / AP / Roll / Pitch and A-D become 0.000 (Yaw keeps its current value) and the normal Go path
+    plans the move (goto_targets.go_platform_changed): only the motors that are not at 0 move, with its homing, M208
+    and actuator-range (0.2-70 mm machine) checks; a zero whose 0 lies outside them is refused with its message.
     """
+    from fcn_control.goto_targets import go_platform_changed, wrong_device
     if not getattr(self, 'duet_connected', False):
         log_to_duet_console(self, "Error: Not connected to Duet.", color="#ff3333")
         QMessageBox.warning(self, "Not Connected", "Please connect to Duet before moving axes.")
         return
+    if wrong_device(self, 'KINETIQ'):
+        return
 
-    # Check homing state of platform axes (ignoring YAW which is not implemented yet)
-    for ax_check in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH']:
-        if not is_axis_homed(self, ax_check):
-            log_to_duet_console(self, f"Error: Cannot move platform to center. Axis {ax_check} is not homed! Please home first.", color="#ff3333")
-            QMessageBox.warning(self, "Axis Not Homed", f"Cannot move to center.\nAxis {ax_check} is not homed.\nPlease home the axis first!")
-            return
-
-    # 1. Update target position input fields in UI to center values (LAT = 50.000 mm, SI = 25.000 mm, AP = 35.000 mm)
-    for ax, val in [('LATAXIS', '50.000'), ('SIAXIS', '25.000'), ('APAXIS', '35.000'), ('ROLL', '0.000'), ('PITCH', '0.000'), ('YAW', '0.000')]:
+    # Target fields: 0 (Yaw is not implemented: it keeps its current value)
+    for ax in ['LATAXIS', 'SIAXIS', 'APAXIS', 'ROLL', 'PITCH', 'A', 'B', 'C', 'D']:
         field = getattr(self, f"POS_DES_{ax}", None)
         if field is not None:
-            field.setText(val)
+            field.setText("0.000")
+    yaw_des, yaw_cur = getattr(self, 'POS_DES_YAW', None), getattr(self, 'POS_CURR_YAW', None)
+    if yaw_des is not None and yaw_cur is not None:
+        yaw_des.setText(yaw_cur.text())
 
-    # 2. Send G-Code absolute center moves
-    send_cmd(self, "G90")  # Absolute positioning mode
-
-    # Determine y lower axis name
-    axis_y_lo = "'c"
-    if hasattr(self, 'axis_max_limits') and ("b" in self.axis_max_limits or "'b" in self.axis_max_limits):
-        axis_y_lo = "'b"
-
-    cmd_horiz = f"G1 'e50.0000 'f50.0000 'a25.0000 {axis_y_lo}25.0000 F600"
-    cmd_vert = f"G1 A35.0000 B35.0000 C35.0000 D35.0000 F600"
-
-    send_cmd(self, cmd_horiz)
-    send_cmd(self, cmd_vert)
-    log_to_duet_console(self, "Moving platform to center position: A, B, C, D = 35.0 mm; 'e, 'f = 50.0 mm; 'a, 'c/'b = 25.0 mm; Roll/Pitch/Yaw = 0 deg.")
+    try:
+        from fcn_control.work_zero import zero_summary
+        zero_txt = zero_summary(self, 'KINETIQ').get('text', '')
+    except Exception:
+        zero_txt = ''
+    log_to_duet_console(self, "Go to zero: every KINETIQ motor to G-code 0 (LAT, SI, AP, Roll and Pitch 0)"
+                              + (f"; {zero_txt}." if zero_txt else "."))
+    go_platform_changed(self)               # plans, checks and sends it like Go to ... (or says why not)

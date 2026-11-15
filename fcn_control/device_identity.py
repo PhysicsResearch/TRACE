@@ -58,7 +58,7 @@ def apply_connected_device(window, ip, machine_name=None):
                             "Device: not recognised (name and axes say neither DYNAMIQ nor KINETIQ)")
     except Exception:
         pass
-    tw = getattr(window, 'tabWidget', None)                       # Control tab: DYNAMIQ / KINETIQ / IND. MOTORS
+    tw = getattr(window, 'tabWidget', None)                       # Control tab: DYNAMIQ / KINETIQ
     page = {KINETIQ: getattr(window, 'tab_platform', None), DYNAMIQ: getattr(window, 'tab', None)}.get(device)
     if tw is not None and page is not None:
         try:

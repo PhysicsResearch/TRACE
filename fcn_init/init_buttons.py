@@ -68,6 +68,8 @@ def initialize_software_buttons(self):
     # Files tab multi-selection (GCODE folder only) and one-file actions (new file fcn_control/files_multi.py)
     from fcn_control.files_multi import install_files_multi, single_only, delete_selected_items
     install_files_multi(self)
+    from fcn_control.macro_new import install_new_macro      # Files > Macros: New Macro, Blank / Wi-Fi (new file)
+    install_new_macro(self)
     _one = lambda name, fn: single_only(self, name, fn)
 
     if hasattr(self, 'gcodeRefresh'):

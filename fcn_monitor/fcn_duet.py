@@ -175,7 +175,7 @@ def render_status_plot(self):
         ('status_check_e', "'e", "'e (mm)", '#795548'),
         ('status_check_f', "'f", "'f (mm)", '#607d8b'),
         ('status_check_a', "'a", "'a (mm)", '#009688'),
-        ('status_check_c', "'c", "'c (mm)", '#ffb300'),
+        ('status_check_c', "'c", f"{_si_second_name(self)} (mm)", '#ffb300'),     # SI's 2nd motor: 'c or 'b
         ('status_check_Roll', 'Roll', 'Roll (deg)', '#3f51b5'),
         ('status_check_Pitch', 'Pitch', 'Pitch (deg)', '#9e9d24'),
         ('status_check_Yaw', 'Yaw', 'Yaw (deg)', '#673ab7'),
@@ -759,6 +759,8 @@ def load_and_parse_gcode_reference(self, fpath_or_content, progress_dialog=None)
             clean_c = col.strip("'")
             ref_dict[clean_c] = df[col].values
             ref_dict[f"'{clean_c}"] = df[col].values
+    if "'b" in ref_dict and "'c" not in ref_dict:      # a file for a board with 'b for SI: the plot's 'c curve is SI's
+        ref_dict["'c"] = ref_dict["'b"]                # second motor ('b there)
 
     return ref_dict
 
@@ -1054,13 +1056,18 @@ def _start_selected_gcode_execution_impl(self):
         if not lines and os.path.exists(fpath):
             with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
+        import re as _re
         for l in lines:
             l_clean = l.split(';')[0].strip()
-            if l_clean.startswith('G1') and len(l_clean) > 3:
+            if _re.match(r"[Gg]0*1(?![\d.])", l_clean) and len(l_clean) > 3:   # G1/G01 only, not G10/G11
                 first_g1 = l_clean
                 break
     except Exception as e:
         print(f"Could not read first G1 line from {fname}: {e}")
+
+    from fcn_control.work_zero import confirm_start             # work zero not standard / file checks: confirm first
+    if not confirm_start(self, fname, lines):
+        return
 
     # A previous run that is still open ends here
     if getattr(self, 'run_active', False) is True or getattr(self, 'active_log_file', None) is not None:
@@ -1083,7 +1090,8 @@ def _start_selected_gcode_execution_impl(self):
             t_sent = time.perf_counter()
             duet_request(url, params={'gcode': f'G90\n{first_g1}\nM400'}, timeout=5)
             # Wait until the live samples show the platform at the start position
-            _wait_for_preposition(self, snapshot, t_sent)
+            from fcn_control.work_zero import preposition_targets       # work zero: a clamped first move
+            _wait_for_preposition(self, preposition_targets(self, snapshot), t_sent)
         except Exception as e:
             print(f"Pre-positioning move failed: {e}")
 
@@ -1148,7 +1156,7 @@ def _start_selected_gcode_execution_impl(self):
         QMessageBox.warning(self, "Duet Error", f"Failed to start execution of {fpath}: {e}")
 
 
-_PLATFORM_LETTERS = {"A", "B", "C", "D", "'a", "'c", "'e", "'f"}
+_PLATFORM_LETTERS = {"A", "B", "C", "D", "'a", "'c", "'b", "'e", "'f"}     # 'b: SI on the boards that use it
 _PHANTOM_LETTERS = {"X", "Y", "Z"}
 
 
@@ -1173,7 +1181,7 @@ def _parse_g1_targets(g1_line):
 def _device_from_gcode_lines(lines):
     """
     Device of a G-code job from the axis letters of its G0/G1 moves:
-    any of A B C D 'a 'c 'e 'f -> "Motion Platform"; only X/Y/Z -> "Lung Phantom"; else None.
+    any of A B C D 'a 'c 'b 'e 'f -> "Motion Platform"; only X/Y/Z -> "Lung Phantom"; else None.
     """
     import re
     word = re.compile(r"('[a-zA-Z]|[A-Za-z])\s*[-+]?(?:\d+\.\d*|\.\d+|\d+)")
@@ -1231,6 +1239,22 @@ _PLATFORM_LOG_AXES = [("LAT", "mm"), ("SI", "mm"), ("AP", "mm"), ("Roll", "deg")
 # Raw actuator axes of the platform (the Status plot can show them too). Never W or V: the log
 # readers map those letters to Yaw / Pitch.
 _PLATFORM_RAW_AXES = ["A", "B", "C", "D", "'e", "'f", "'a", "'c"]
+
+
+def _platform_raw_axes(self):
+    """_PLATFORM_RAW_AXES with SI's second motor as the board names it ('c, or 'b on the boards that use it)."""
+    y_lo = _platform_dims(self)[2]
+    return [y_lo if a == "'c" else a for a in _PLATFORM_RAW_AXES]
+
+
+def _si_second_name(self):
+    """Name of SI's second motor for the Status curve / legend of data key "'c": 'c, or 'b on the boards that use it
+    (work_zero.kinetiq_si_motors: the connected KINETIQ board, else the last one seen)."""
+    try:
+        from fcn_control.work_zero import kinetiq_si_motors
+        return kinetiq_si_motors(self)[1]
+    except Exception:
+        return "'c"
 _PHANTOM_LOG_AXES = [("X", "mm"), ("Y", "mm"), ("Z", "mm")]
 PROBE_RELEASE_MARK = 2000          # Probe value written while the Release button marker is active
 PROBE_RELEASE_HOLD_S = 0.5
@@ -1321,7 +1345,8 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
 
     Columns follow the running job's device (G-code letters), not the Planning tab:
       Motion Platform: Time_s, Pos_LAT/SI/AP_mm, Pos_Roll/Pitch/Yaw_deg,
-                       Pos_A/B/C/D_mm, Pos_'e/'f/'a/'c_mm (raw actuators), Probe
+                       Pos_A/B/C/D_mm, Pos_'e/'f/'a/'c_mm (raw actuators; Pos_'b_mm instead of
+                       Pos_'c_mm on the boards that use 'b for SI), Probe
       Lung Phantom:    Time_s, Pos_X/Y/Z_mm, Probe
     """
     if not hasattr(self, 'active_log_file') or self.active_log_file is None:
@@ -1336,6 +1361,7 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
         letters = getattr(self, '_axis_letters_used', None)
         letters_txt = ",".join(str(l) for l in letters if l) if isinstance(letters, (list, tuple)) and letters else "unknown"
         t_rec = float(t) if in_run and isinstance(t, (int, float)) else 0.0
+        from fcn_control.work_zero import positions_header
 
         # Fixed 10-line header (format v2, every line starts with '#'), then the column names
         header = [
@@ -1343,7 +1369,8 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
             _note_text(f"# G-code: {gcode if isinstance(gcode, str) and gcode else 'none'}"),
             f"# Device: {_product_device_label(device)}",          # DYNAMIQ / KINETIQ (readers accept old names)
             f"# Axes (Duet order): {letters_txt}",
-            "# Positions: actual (Duet machinePosition, refreshed at most every 200 ms, CAN expansion-board axes about every 100 ms)",
+            positions_header(self, "# Positions: actual (Duet machinePosition, refreshed at most every 200 ms, "
+                                   "CAN expansion-board axes about every 100 ms)"),     # names the work-zero offset
             f"# Probe: 0 none | 1-1499 detector | {PROBE_RELEASE_MARK} Release button | {PROBE_WAIT_MARK} waiting for sensor (sensor_wait)",
             f"# Wait timing: start = when LogIQ received the Duet message (read as soon as a position sample shows a new "
             f"message, else every {_dc(REPLY_POLL_PERIOD_S, 'g')}-{_dc(REPLY_POLL_SLOW_S, 'g')} s), so the real start is "
@@ -1356,9 +1383,10 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
             f"# Recording from: {_dc(t_rec, '.3f')} s of the run",
             "# Format: columns separated by semicolons, decimal comma",
         ]
+        raw_names = _platform_raw_axes(self)            # SI's second motor: 'c, or 'b on the boards that use it
         if is_platform:
             columns = (["Time_s"] + [f"Pos_{n}_{u}" for n, u in _PLATFORM_LOG_AXES]
-                       + [f"Pos_{a}_mm" for a in _PLATFORM_RAW_AXES] + ["Probe"])
+                       + [f"Pos_{a}_mm" for a in raw_names] + ["Probe"])
         else:
             columns = ["Time_s"] + [f"Pos_{n}_{u}" for n, u in _PHANTOM_LOG_AXES] + ["Probe"]
 
@@ -1393,6 +1421,7 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
             self.active_log_file = f
             self.active_log_filepath = filepath
             self.active_log_is_platform = is_platform
+            self.active_log_raw_axes = raw_names
             w = getattr(self, '_sensor_wait', None)
             if in_run and isinstance(w, dict) and w.get('started'):
                 _note_wait_start(self, w)     # opened during a marked wait (Record off and on again)
@@ -1406,8 +1435,9 @@ def log_data_point(self, t, x, y, z, probe=0, extra_axes=None, raw_axes=None):
         if getattr(self, 'active_log_is_platform', False):
             pos = extra_axes if extra_axes is not None else {}
             raw = raw_axes if raw_axes is not None else {}
+            raw_names = getattr(self, 'active_log_raw_axes', None) or _PLATFORM_RAW_AXES    # the header's columns
             fields = ([f"{t:.4f}"] + [f"{float(pos.get(n, 0.0)):.3f}" for n, _ in _PLATFORM_LOG_AXES]
-                      + [f"{float(raw.get(a, 0.0)):.3f}" for a in _PLATFORM_RAW_AXES] + [f"{p_val}"])
+                      + [f"{float(raw.get(a, 0.0)):.3f}" for a in raw_names] + [f"{p_val}"])
         else:
             fields = [f"{t:.4f}", f"{float(x):.3f}", f"{float(y):.3f}", f"{float(z):.3f}", f"{p_val}"]
         # format v2: ';' between the columns, decimal comma (the fields are numbers only)
@@ -3000,6 +3030,8 @@ def handle_position_sample(self, s):
 
         # Ensure we have defaults for all required axes
         axis_positions = dict(s.get('real') or {})
+        from fcn_control.work_zero import to_gcode_frame          # work zero: G-code coordinates
+        to_gcode_frame(self, axis_positions)
         for ax in _LIVE_AXES:
             if ax not in axis_positions:
                 axis_positions[ax] = 0.0
@@ -3020,13 +3052,15 @@ def handle_position_sample(self, s):
             if lbl is not None:
                 lbl.setText(f"{axis_name} {axis_positions[axis_name]:.2f}")
 
-        for axis_name, raw_name in [('e', "'e"), ('f', "'f"), ('a', "'a"), ('c', "'c")]:
+        # SI's second motor ('c, or 'b on the boards that use it) is shown in the 'c label / curve under its own name
+        lat_dim, si_dim, y_lo_name = _platform_dims(self)
+        si_lo_val = axis_positions.get(y_lo_name, axis_positions["'c"])
+        for axis_name, raw_name in [('e', "'e"), ('f', "'f"), ('a', "'a"), ('c', y_lo_name)]:
             lbl = getattr(self, f'statusPos_{axis_name}', None)
             if lbl is not None:
-                lbl.setText(f"{raw_name} {axis_positions[raw_name]:.2f}")
+                lbl.setText(f"{raw_name} {axis_positions.get(raw_name, 0.0):.2f}")
 
         # Platform DOF from the actual actuator positions
-        lat_dim, si_dim, y_lo_name = _platform_dims(self)
         dof = _platform_dof(axis_positions, lat_dim, si_dim, y_lo_name)
         current_roll, current_pitch, current_yaw = dof['Roll'], dof['Pitch'], dof['Yaw']
         current_lat, current_ap, current_si = dof['LAT'], dof['AP'], dof['SI']
@@ -3081,6 +3115,7 @@ def handle_position_sample(self, s):
                                       pos=s.get('real'), latency=s.get('latency'), probe_t=s.get('probe_t'))
             if hasattr(self, 'check_record_log') and self.check_record_log and self.check_record_log.isChecked():
                 raw = {a: axis_positions[a] for a in _PLATFORM_RAW_AXES}
+                raw[y_lo_name] = si_lo_val                  # 'b on the boards that use it (column named so)
                 log_data_point(self, t_now - run_t0, x_val, y_val, z_val, curr_p, extra_axes=dof, raw_axes=raw)
             elif getattr(self, 'active_log_file', None) is not None:
                 close_data_log_file(self, "record off")
@@ -3167,7 +3202,7 @@ def handle_position_sample(self, s):
             self.status_plot_data["'e"].append(axis_positions["'e"])
             self.status_plot_data["'f"].append(axis_positions["'f"])
             self.status_plot_data["'a"].append(axis_positions["'a"])
-            self.status_plot_data["'c"].append(axis_positions["'c"])
+            self.status_plot_data["'c"].append(si_lo_val)       # SI's second motor ('b on the boards that use it)
             self.status_plot_data['Roll'].append(current_roll)
             self.status_plot_data['Pitch'].append(current_pitch)
             self.status_plot_data['Yaw'].append(current_yaw)
@@ -3525,7 +3560,8 @@ def translate_machine_status_to_legacy(om_data):
                 "homed": is_axis_homed(ax),
                 "userPosition": ax.get("userPosition", 0.0),
                 "min": ax.get("min", 0.0),
-                "max": ax.get("max", 200.0)
+                "max": ax.get("max", 200.0),
+                "workplaceOffsets": ax.get("workplaceOffsets")      # work zero (work_zero.sync_from_status)
             })
     legacy["move"] = {
         "axes": legacy_axes
