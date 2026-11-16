@@ -8,6 +8,8 @@ an Off at a later window's start joins touching windows as in time order; all 2-
 interleavings, touching windows; Undo per press; table / plot / G-code agree; the round trip), no dialog.
 Screenshots (1600x900 and 1366x768) go to scratch/trigger_ui_out/ (or the folder given as the first argument).
 Run:  C:\\Users\\gabri\\anaconda3\\envs\\TRACE\\python.exe scratch\\test_trigger_ui.py
+The user's configuration.json (the window loads and saves settings there) is backed up and restored in a finally
+block: the test runs in a child process of this script.
 """
 import io
 import os
@@ -15,6 +17,28 @@ import shutil
 import sys
 import time
 import traceback
+
+# configuration.json guard: the test body runs in a child process; this parent backs the user's file up first and
+# restores it byte-identically in a finally block (also when the child crashes or ends with os._exit)
+if os.environ.get("TRACE_TEST_CFG_GUARD") != "1":
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
+    from fcn_init.app_config import get_config_path
+    _cfg = get_config_path('configuration.json', for_writing=True)
+    _bak = os.path.join(tempfile.mkdtemp(prefix="cfg_guard_"), "configuration.json") if os.path.exists(_cfg) else None
+    if _bak:
+        shutil.copyfile(_cfg, _bak)
+    _cmd = [sys.executable] + (["-X", "utf8"] if sys.flags.utf8_mode else []) + [os.path.abspath(__file__)] + sys.argv[1:]
+    try:
+        _rc = subprocess.call(_cmd, env=dict(os.environ, TRACE_TEST_CFG_GUARD="1"))
+    finally:
+        if _bak:
+            shutil.copyfile(_bak, _cfg)
+        elif os.path.exists(_cfg):
+            os.remove(_cfg)
+    print(f"configuration.json restored ({_cfg})")
+    sys.exit(_rc)
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'))
@@ -59,6 +83,8 @@ BOX, ERRS, RES = [], [], []
 for _k in ('warning', 'information', 'critical', 'question'):
     setattr(QMessageBox, _k, staticmethod(lambda *a, _k=_k, **kw: (BOX.append((_k, a[1] if len(a) > 1 else '')),
                                                                      QMessageBox.Yes)[1]))
+from fcn_plan import kinetiq_old_frame as _OFI      # old-frame question of the KINETIQ imports: recorded in BOX, never
+_OFI.ask_old_frame = lambda parent, kind="file": (BOX.append(('old_frame', kind)), _OFI.KEEP)[1]   # blocks (not expected)
 EXPORT = os.path.join(OUT, "trigger_plan.gcode")
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (EXPORT, ''))
 sys.excepthook = lambda t, v, tb: (ERRS.append("".join(traceback.format_exception(t, v, tb))),

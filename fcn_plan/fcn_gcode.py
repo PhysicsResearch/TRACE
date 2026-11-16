@@ -167,10 +167,10 @@ def platform_actuators(LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_di
                        flags=None):
     """
     Motion Platform kinematics used for the G-code (vectorised; same formulas as before).
-    Returns (A, B, C, D, LAT_eff, SI_eff), clipped to the KINETIQ plan bounds (kinetiq_plan_bounds).
-    ``flags`` (dict, optional) receives 'outside': True when a value had to be clipped.
+    Returns (A, B, C, D, LAT_eff, SI_eff), not cut off at any limit (2026-11-15: Planning no longer crops; export
+    warns instead, fcn_plan/plan_limits.py). ``max_limits`` and ``flags`` are kept for the callers; flags['outside']
+    is always False.
     """
-    bounds = kinetiq_plan_bounds(max_limits)
     if lat_dim <= 0.0:
         lat_dim = 100.0
     if si_dim <= 0.0:
@@ -206,11 +206,7 @@ def platform_actuators(LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_di
     LAT_eff = off_lat + LAT + off_ap * np.sin(roll_rad)
     SI_eff = off_si + SI + off_ap * np.sin(pitch_rad)
     if flags is not None:
-        flags['outside'] = (any(_outside(a, *bounds["AP"]) for a in acts) or _outside(LAT_eff, *bounds["LAT"])
-                            or _outside(SI_eff, *bounds["SI"]))
-    acts = [np.clip(a, *bounds["AP"]) for a in acts]
-    LAT_eff = np.clip(LAT_eff, *bounds["LAT"])
-    SI_eff = np.clip(SI_eff, *bounds["SI"])
+        flags['outside'] = False
     return acts[0], acts[1], acts[2], acts[3], LAT_eff, SI_eff
 
 
@@ -220,6 +216,9 @@ def compute_gcode_axes(device, t_orig, columns_data, max_limits, lat_dim=100.0, 
     Returns (t, letters, P, exceeds_limits) where P[n x k] holds the (unrounded) positions of
     the G-code axes ``letters``. With ``resample`` the data is put on a uniform grid starting
     at 0 (identity when it already is one); without it the original samples are used.
+    Lung Phantom / Motion Platform: the positions are not cut off at any limit and exceeds_limits is False; the limits
+    are checked at export (fcn_plan/plan_limits.py, from the extents generate_gcode_string reports). 'Other' keeps
+    its symmetric check against max_limits[0].
     """
     t_orig = np.asarray(t_orig, dtype=float)
     if resample:
@@ -234,34 +233,17 @@ def compute_gcode_axes(device, t_orig, columns_data, max_limits, lat_dim=100.0, 
     exceeds_limits = False
 
     if device == "Lung Phantom":
-        X = np.clip(col("X"), 0.0, None)
-        Y = np.clip(col("Y"), 0.0, None)
-        Z = np.clip(col("Z"), 0.0, None)
-        lim_x, lim_y, lim_z = max_limits
-        if np.any(np.abs(X) > lim_x) or np.any(np.abs(Y) > lim_y) or np.any(np.abs(Z) > lim_z):
-            exceeds_limits = True
+        X, Y, Z = col("X"), col("Y"), col("Z")         # not cut off at 0 / the limits: export warns (plan_limits)
         letters = ["X", "Y", "Z"]
         P = np.column_stack([X, Y, Z])
 
     elif device == "Motion Platform":
-        lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw = max_limits
-        bounds = kinetiq_plan_bounds(max_limits)          # centred frame: negative values are allowed
-        LAT_raw, SI_raw, AP_raw = col("LAT"), col("SI"), col("AP")
-        LAT = np.clip(LAT_raw, *bounds["LAT"])
-        SI = np.clip(SI_raw, *bounds["SI"])
-        AP = np.clip(AP_raw, *bounds["AP"])
+        LAT, SI, AP = col("LAT"), col("SI"), col("AP")  # centred frame; not cut off: export warns (plan_limits)
         Roll = col("Roll")
         Pitch = col("Pitch")
         Yaw = col("Yaw")
-        if (_outside(LAT_raw, *bounds["LAT"]) or _outside(SI_raw, *bounds["SI"]) or
-                _outside(AP_raw, *bounds["AP"]) or np.any(np.abs(Roll) > lim_roll) or
-                np.any(np.abs(Pitch) > lim_pitch) or np.any(np.abs(Yaw) > lim_yaw)):
-            exceeds_limits = True
-        flags = {}
         A, B, C, D, LAT_eff, SI_eff = platform_actuators(
-            LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si, flags=flags)
-        if flags.get('outside'):                          # a clipped actuator / 'e 'f 'a 'c value warns too
-            exceeds_limits = True
+            LAT, SI, AP, Roll, Pitch, Yaw, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si)
         letters = ["A", "B", "C", "D", "'e", "'f", "'a", axis_y_lo]
         P = np.column_stack([A, B, C, D, LAT_eff, LAT_eff, SI_eff, SI_eff])
 
@@ -518,6 +500,8 @@ def generate_gcode_string(
         device, t_orig, columns_data, max_limits, lat_dim, si_dim, off_ap, off_lat, off_si, axis_y_lo,
         resample=True)
     P = np.round(P_raw, POS_DECIMALS)
+    if isinstance(info, dict) and P.size:            # lowest / highest value of every G-code axis (plan_limits check)
+        info['axis_extent'] = {l: (float(np.min(P[:, i])), float(np.max(P[:, i]))) for i, l in enumerate(letters)}
     from fcn_plan.gcode_tolerance import within_tolerance
     path_tol = max(0.0, float(path_tol or 0.0))
     rot = rotary_mask(letters)

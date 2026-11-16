@@ -26,18 +26,8 @@ def compute_motion_platform_actuators(self, df):
         if col not in df.columns:
             df[col] = 0.0
 
-    # Retrieve max limits from settings (or fallback to default 40.0)
-    max_lim_lat = getattr(self, 'settings_max_lim_lat', None)
-    max_lim_si = getattr(self, 'settings_max_lim_si', None)
-    max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
-
-    lim_lat = max_lim_lat.value() if max_lim_lat else 40.0
-    lim_si = max_lim_si.value() if max_lim_si else 40.0
-    lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
-    # Same bounds as the G-code (fcn_gcode.platform_actuators): centred KINETIQ frame, negative values allowed
-    from .fcn_gcode import kinetiq_plan_bounds
-    bounds = kinetiq_plan_bounds((lim_lat, lim_si, lim_ap))
-    ap_lo, ap_hi = bounds["AP"]
+    # 2026-11-15: no limits here any more. The plan keeps its values (centred KINETIQ frame, negative values allowed);
+    # export / upload warns when the G-code leaves the Settings limits (fcn_plan/plan_limits.py).
 
     lat_vals = df["LAT"].values
     si_vals = df["SI"].values
@@ -69,11 +59,11 @@ def compute_motion_platform_actuators(self, df):
     roll_rad = np.radians(roll_vals)
     pitch_rad = np.radians(pitch_vals)
 
-    # LAT / SI stay the nominal plan values (clipped like the G-code does); only the actuator columns 'e/'f/'a/'c
-    # carry the offsets + sway compensation (set at the end, from the achievable Roll / Pitch), so repeated passes
-    # do not add AP*sin(angle) again and fcn_gcode.platform_actuators applies the compensation exactly once.
-    lat_nom = np.clip(lat_vals, *bounds["LAT"])
-    si_nom = np.clip(si_vals, *bounds["SI"])
+    # LAT / SI stay the nominal plan values; only the actuator columns 'e/'f/'a/'c carry the offsets + sway
+    # compensation (set at the end, from Roll / Pitch), so repeated passes do not add AP*sin(angle) again and
+    # fcn_gcode.platform_actuators applies the compensation exactly once.
+    lat_nom = np.asarray(lat_vals, dtype=float)
+    si_nom = np.asarray(si_vals, dtype=float)
     df["LAT"] = lat_nom
     df["SI"] = si_nom
     for col in ("'e", "'f", "'a", "'c"):  # keep the column order; filled at the end
@@ -134,7 +124,7 @@ def compute_motion_platform_actuators(self, df):
             y4 = y3 * cos_p - z3 * sin_p
             z4 = y3 * sin_p + z3 * cos_p
 
-            target_z[name] = max(ap_lo, min(ap_hi, z4 + zc + ap_vals[i]))
+            target_z[name] = z4 + zc + ap_vals[i]
 
         A_arr[i] = target_z['A']
         B_arr[i] = target_z['B']
@@ -146,7 +136,7 @@ def compute_motion_platform_actuators(self, df):
     df["C"] = C_arr
     df["D"] = D_arr
 
-    # Recompute achievable Roll, Pitch, and AP constrained by the actuator bounds [ap_lo, ap_hi]
+    # Recompute Roll, Pitch, and AP from the actuators (the values the G-code uses)
     sin_p = np.clip(np.nan_to_num((D_arr - A_arr) / si_dim, nan=0.0), -1.0, 1.0)
     p_rad = np.arcsin(sin_p)
     df["Pitch"] = -np.degrees(p_rad)
@@ -166,8 +156,8 @@ def compute_motion_platform_actuators(self, df):
                 - cen_x * sin_r * cos_p + cen_y * sin_p)
 
     # Sway compensation from the achievable Roll / Pitch (the values the G-code uses)
-    lat_eff = np.clip(off_lat + lat_nom + off_ap * np.sin(np.radians(df["Roll"].values)), *bounds["LAT"])
-    si_eff = np.clip(off_si + si_nom + off_ap * np.sin(np.radians(df["Pitch"].values)), *bounds["SI"])
+    lat_eff = off_lat + lat_nom + off_ap * np.sin(np.radians(df["Roll"].values))
+    si_eff = off_si + si_nom + off_ap * np.sin(np.radians(df["Pitch"].values))
     df["'e"] = lat_eff
     df["'f"] = lat_eff
     df["'a"] = si_eff
@@ -214,12 +204,9 @@ def _gather_plan_params(self, device):
     """
     from .fcn_gcode import DEFAULT_MIN_STEP, DEFAULT_MIN_SPEED
     from .gcode_tolerance import DEFAULT_PATH_TOL
+    from .plan_limits import other_limit
     if device == "Lung Phantom":
-        limits = (
-            _widget_float(self, ['settings_max_lim_x'], 40.0),
-            _widget_float(self, ['settings_max_lim_y'], 40.0),
-            _widget_float(self, ['settings_max_lim_z'], 40.0),
-        )
+        limits = None               # no cut-off at the limits (export warns: plan_limits.confirm_plan_limits)
         max_speed = _widget_float(self, ['combo_phantom_max_speed', 'settings_max_speed'], 50.0)
         min_step = _widget_float(self, ['settings_min_step_phantom'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_phantom'], 0.0)
@@ -227,10 +214,7 @@ def _gather_plan_params(self, device):
         path_tol = _widget_float(self, ['settings_path_tol_phantom'], DEFAULT_PATH_TOL)
         kin = {}
     elif device == "Motion Platform":
-        limits = tuple(
-            _widget_float(self, [f'settings_max_lim_{ax}'], 40.0)
-            for ax in ('lat', 'si', 'ap', 'roll', 'pitch', 'yaw')
-        )
+        limits = None               # no cut-off at the limits (export warns: plan_limits.confirm_plan_limits)
         max_speed = _widget_float(self, ['combo_platform_max_speed', 'settings_max_speed_plat'], 20.0)
         min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
@@ -247,7 +231,7 @@ def _gather_plan_params(self, device):
             'axis_y_lo': _si_second_motor(self),
         }
     else:
-        limits = [_widget_float(self, ['settings_max_lim_lat'], 40.0)]
+        limits = [other_limit(self)]
         max_speed = _widget_float(self, ['combo_platform_max_speed', 'combo_phantom_max_speed'], 20.0)
         min_step = _widget_float(self, ['settings_min_step_plat'], DEFAULT_MIN_STEP)
         overhead = _widget_float(self, ['settings_step_overhead_plat'], 0.0)
@@ -1522,15 +1506,7 @@ def generate_planned_gcode(self):
                 return None, None
             columns_data[col] = self.dfEdit[col].values
 
-        # Retrieve settings limits
-        max_lim_x = getattr(self, 'settings_max_lim_x', None)
-        max_lim_y = getattr(self, 'settings_max_lim_y', None)
-        max_lim_z = getattr(self, 'settings_max_lim_z', None)
-
-        lim_x = max_lim_x.value() if max_lim_x else 40.0
-        lim_y = max_lim_y.value() if max_lim_y else 40.0
-        lim_z = max_lim_z.value() if max_lim_z else 40.0
-        max_limits = (lim_x, lim_y, lim_z)
+        max_limits = None          # the limits are checked after the G-code is made (plan_limits), not cut off
 
         # Retrieve speed, acc, jerk settings for Lung Phantom
         sb_speed = getattr(self, 'combo_phantom_max_speed', None) or getattr(self, 'settings_max_speed', None)
@@ -1556,21 +1532,7 @@ def generate_planned_gcode(self):
                 return None, None
             columns_data[col] = self.dfEdit[col].values
 
-        # Retrieve settings limits
-        max_lim_lat = getattr(self, 'settings_max_lim_lat', None)
-        max_lim_si = getattr(self, 'settings_max_lim_si', None)
-        max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
-        max_lim_roll = getattr(self, 'settings_max_lim_roll', None)
-        max_lim_pitch = getattr(self, 'settings_max_lim_pitch', None)
-        max_lim_yaw = getattr(self, 'settings_max_lim_yaw', None)
-
-        lim_lat = max_lim_lat.value() if max_lim_lat else 40.0
-        lim_si = max_lim_si.value() if max_lim_si else 40.0
-        lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
-        lim_roll = max_lim_roll.value() if max_lim_roll else 40.0
-        lim_pitch = max_lim_pitch.value() if max_lim_pitch else 40.0
-        lim_yaw = max_lim_yaw.value() if max_lim_yaw else 40.0
-        max_limits = (lim_lat, lim_si, lim_ap, lim_roll, lim_pitch, lim_yaw)
+        max_limits = None          # the limits are checked after the G-code is made (plan_limits), not cut off
 
         # Retrieve speed, acc, jerk settings for Motion Platform
         sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'settings_max_speed_plat', None)
@@ -1655,9 +1617,8 @@ def generate_planned_gcode(self):
         for col in axes_list:
             columns_data[col] = self.dfEdit[col].values
 
-        max_lim_lat = getattr(self, 'settings_max_lim_lat', None)
-        lim = max_lim_lat.value() if max_lim_lat else 40.0
-        max_limits = [lim]
+        from .plan_limits import other_limit
+        max_limits = [other_limit(self)]
 
         sb_speed = getattr(self, 'combo_platform_max_speed', None) or getattr(self, 'combo_phantom_max_speed', None)
         speed_val = sb_speed.value() if (sb_speed and hasattr(sb_speed, 'value')) else (float(sb_speed.currentText()) if (sb_speed and hasattr(sb_speed, 'currentText')) else 20.0)
@@ -1689,12 +1650,13 @@ def generate_planned_gcode(self):
         if res == QMessageBox.No:
             return None, None
 
-    if exceeds_limits:
+    # Lung Phantom / Motion Platform: every G-code axis against Settings > limits (from the board); nothing is cut off
+    from .plan_limits import confirm_plan_limits
+    if not confirm_plan_limits(self, device, gcode_info, columns_data):
+        return None, None
+
+    if exceeds_limits:              # 'Other' only (symmetric limit)
         msg_limits = "Warning: Some curve points exceed the maximum limits defined in Settings.\nDo you still want to proceed?"
-        if device == "Motion Platform":     # centred frame: the G-code clips LAT / SI / AP and the motors to the range
-            msg_limits = ("Warning: Some curve points exceed the limits defined in Settings (Max Lim.) or the KINETIQ "
-                          "travel around the centre. LAT, SI, AP and the motors are cut off at their limit in the "
-                          "G-code.\nDo you still want to proceed?")
         res = QMessageBox.question(
             self, 
             "Limits Exceeded", 
@@ -2113,16 +2075,11 @@ def _reverse_motion_platform_kinematics(self, df):
     """
     import numpy as np
 
-    max_lim_ap = getattr(self, 'settings_max_lim_ap', None)
-    lim_ap = max_lim_ap.value() if max_lim_ap else 40.0
-    # Actuator bounds of the centred KINETIQ frame (the same as compute_motion_platform_actuators and the G-code)
-    from fcn_control.work_zero_frame import kinetiq_plan_range
-    ap_lo, ap_hi = kinetiq_plan_range('A', lim_ap)
-
-    A = np.clip(np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
-    B = np.clip(np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
-    C = np.clip(np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
-    D = np.clip(np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0), ap_lo, ap_hi)
+    # Actuators as they are (centred KINETIQ frame); no cut-off at the limits (export warns: plan_limits)
+    A = np.nan_to_num(np.asarray(df['A'].values, dtype=float), nan=0.0)
+    B = np.nan_to_num(np.asarray(df['B'].values, dtype=float), nan=0.0)
+    C = np.nan_to_num(np.asarray(df['C'].values, dtype=float), nan=0.0)
+    D = np.nan_to_num(np.asarray(df['D'].values, dtype=float), nan=0.0)
 
     # LAT from 'e and 'f (average)
     lat_cols = [c for c in df.columns if c in ["'e", "'f", "e", "f"]]
@@ -3431,11 +3388,7 @@ class MathOperationsDialog(QDialog):
                     df.loc[t_mask, ax] = (y_max + y_min) - vals
 
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
-        # Ensure linear axes are never negative (not on KINETIQ: its frame is centred, the range is kept by
-        # compute_motion_platform_actuators)
-        for ax in target_axes:
-            if ax not in ["Roll", "Pitch", "Yaw"] and ax in df.columns and device != "Motion Platform":
-                df.loc[t_mask, ax] = df.loc[t_mask, ax].clip(lower=0.0)
+        # 2026-11-15: no cut-off at 0 / the limits any more; export warns (fcn_plan/plan_limits.py)
 
         parent.dfEdit = bake_plan_steps(parent, parent.dfEdit, device)
         if device == "Lung Phantom":
@@ -3648,13 +3601,13 @@ class SmoothAxisDialog(QDialog):
         gb_smooth_lay.addWidget(self.lbl_window_info, 2, 0, 1, 2)
 
         # Boundary Option
-        self.cb_clip_zero = QCheckBox("Ensure non-negative coordinates (clip ≥ 0 mm for linear axes)", gb_smooth)
-        self.cb_clip_zero.setChecked(True)
-        self.cb_clip_zero.setToolTip("Ensures linear axes do not dip below 0 mm, staying within physical phantom boundaries.")
-        if device == "Motion Platform":     # KINETIQ frame is centred: keep LAT / SI / AP inside its range instead
-            self.cb_clip_zero.setText("Keep inside the KINETIQ range")
-            self.cb_clip_zero.setToolTip("Keeps LAT, SI and AP inside the KINETIQ range: the platform travel around "
-                                         "the centre (0), within Settings Max Lim.")
+        # 2026-11-15: off by default (Planning no longer cuts values off; export warns). Ticked, the smoothed linear
+        # axes are cut off at Settings > limits (X Y Z; KINETIQ LAT SI AP), as the user chose.
+        self.cb_clip_zero = QCheckBox("Cut off at the limits in Settings", gb_smooth)
+        self.cb_clip_zero.setChecked(False)
+        self.cb_clip_zero.setToolTip("Ticked: the smoothed linear axes are cut off at the limits in Planning > "
+                                     "Settings. Not ticked: the values are kept; exporting G-code that leaves the "
+                                     "limits asks you to confirm.")
         gb_smooth_lay.addWidget(self.cb_clip_zero, 3, 0, 1, 2)
 
         layout.addWidget(gb_smooth)
@@ -3775,12 +3728,9 @@ class SmoothAxisDialog(QDialog):
         clip_zero = self.cb_clip_zero.isChecked()
         rotational_axes = {"Roll", "Pitch", "Yaw"}
         device = parent.combo_device.currentText() if hasattr(parent, 'combo_device') else "Lung Phantom"
-        # KINETIQ: the box keeps LAT / SI / AP inside the centred range (Settings Max Lim.) instead of >= 0
-        kinetiq_bounds = None
-        if device == "Motion Platform":
-            from .fcn_gcode import kinetiq_plan_bounds
-            kinetiq_bounds = kinetiq_plan_bounds(tuple(
-                _widget_float(parent, [f'settings_max_lim_{a}'], 40.0) for a in ('lat', 'si', 'ap')))
+        # The box (off by default) cuts the smoothed linear axes off at Settings > limits (fcn_plan/plan_limits.py)
+        from .plan_limits import plan_ranges
+        limit_ranges = plan_ranges(parent, device)
 
         # Backup for undo
         push_curve_state(parent)
@@ -3822,12 +3772,8 @@ class SmoothAxisDialog(QDialog):
             else:  # Moving Average
                 smoothed = scipy.ndimage.uniform_filter1d(signal, size=w, mode='nearest')
 
-            if clip_zero and not is_rot:
-                if kinetiq_bounds is not None:
-                    if ax in kinetiq_bounds:
-                        smoothed = np.clip(smoothed, *kinetiq_bounds[ax])
-                else:
-                    smoothed = np.clip(smoothed, a_min=0.0, a_max=None)
+            if clip_zero and not is_rot and ax in limit_ranges:
+                smoothed = np.clip(smoothed, *limit_ranges[ax])
 
             # 1. Apply smooth to position
             df[ax] = smoothed

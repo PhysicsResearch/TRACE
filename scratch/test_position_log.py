@@ -35,11 +35,39 @@ Planning tabs, real timers):
   - position sampling with and without the ReplyPoller (median / max interval, samples per s),
     reading on seqs.reply changes and on its timer, with 1, 2 and 3 requests served at once, and
     the GUI-thread dashboard tick time
+  - KINETIQ positions are centred G-code values (2026-11-14: 0 = platform centre, negative values
+    allowed); the simulated jobs carry the frame line Planning writes
+The user's configuration.json (the Planning tab saves its settings there) is backed up and restored
+in a finally block: the test runs in a child process of this script.
 Run:  set QT_QPA_PLATFORM=offscreen  &  C:\\Users\\gabri\\anaconda3\\envs\\TRACE\\python.exe scratch\\test_position_log.py
 """
 import os
 import re
 import sys
+
+# configuration.json guard: the test body runs in a child process; this parent backs the user's file up first and
+# restores it byte-identically in a finally block (also when the child crashes)
+if os.environ.get("TRACE_TEST_CFG_GUARD") != "1":
+    import shutil
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
+    from fcn_init.app_config import get_config_path
+    _cfg = get_config_path('configuration.json', for_writing=True)
+    _bak = os.path.join(tempfile.mkdtemp(prefix="cfg_guard_"), "configuration.json") if os.path.exists(_cfg) else None
+    if _bak:
+        shutil.copyfile(_cfg, _bak)
+    _cmd = [sys.executable] + (["-X", "utf8"] if sys.flags.utf8_mode else []) + [os.path.abspath(__file__)] + sys.argv[1:]
+    try:
+        _rc = subprocess.call(_cmd, env=dict(os.environ, TRACE_TEST_CFG_GUARD="1"))
+    finally:
+        if _bak:
+            shutil.copyfile(_bak, _cfg)
+        elif os.path.exists(_cfg):
+            os.remove(_cfg)
+    print(f"configuration.json restored ({_cfg})")
+    sys.exit(_rc)
+
 import json
 import math
 import time
@@ -71,6 +99,11 @@ from fcn_monitor.fcn_duet import (start_selected_gcode_execution, release_sensor
                                   pause_continue_GCODE, render_status_plot, handle_duet_reply,
                                   handle_position_sample, end_run, ReplyPoller)
 from fcn_plan.fcn_import import parse_trace_log_file, import_trace_log_action
+from fcn_plan import kinetiq_old_frame as _OFI
+# The Planning import asks Convert / Keep values / Cancel for a KINETIQ log whose header names no work-zero offset
+# (fcn_plan/kinetiq_old_frame.py).  The simulated KINETIQ positions here are centred values without offsets: Keep.
+OLD_FRAME_ASKED = []
+_OFI.ask_old_frame = lambda parent, kind="file": (OLD_FRAME_ASKED.append(kind), _OFI.KEEP)[1]
 from fcn_create_gui.tab_status import build_status_tab
 from fcn_create_gui.tab_planning import build_planning_tab
 
@@ -101,25 +134,28 @@ fcn_duet.duet_request = _counting_duet_request
 # ============================================================== simulated Duet
 LETTERS = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', 'a', 'c', 'e', 'f']
 NAMES = ['X', 'Y', 'Z', 'A', 'B', 'C', 'D', "'a", "'c", "'e", "'f"]
-PLATFORM_JOB = """; TIME: 12
+# KINETIQ positions are centred G-code values (0 = platform centre, fcn_control/work_zero_frame.py): A-D -10 = machine
+# 35, 'a 0 = machine 25; LAT stays at -12 (not 0) so the "real values, not zeros" check keeps its meaning
+from fcn_control.work_zero_frame import kinetiq_frame_comment
+PLATFORM_JOB = "; TIME: 12\n" + kinetiq_frame_comment() + """
 G90
 M203 I6
-G1 F1000 A35 B35 C35 D35 'e50 'f50 'a25 'c25
-G1 F37.5 A37.5 B37.5 C37.5 D37.5 'e50 'f50 'a25 'c25
+G1 F1000 A-10 B-10 C-10 D-10 'e-12 'f-12 'a0 'c0
+G1 F37.5 A-7.5 B-7.5 C-7.5 D-7.5 'e-12 'f-12 'a0 'c0
 M98 P"0:macros/sensor_wait.g"
-G1 F42.43 A37.5 B37.5 C37.5 D37.5 'e50 'f50 'a26 'c26
+G1 F42.43 A-7.5 B-7.5 C-7.5 D-7.5 'e-12 'f-12 'a1 'c1
 """
-WAITS_JOB = """; TIME: 9
+WAITS_JOB = "; TIME: 9\n" + kinetiq_frame_comment() + """
 G90
 M203 I6
-G1 F1000 A35 B35 C35 D35 'e50 'f50 'a25 'c25
-G1 F50 A36 B36 C36 D36 'e50 'f50 'a25 'c25
+G1 F1000 A-10 B-10 C-10 D-10 'e-12 'f-12 'a0 'c0
+G1 F50 A-9 B-9 C-9 D-9 'e-12 'f-12 'a0 'c0
 M98 P"0:macros/sensor_wait.g"
-G1 F60 A36 B36 C36 D36 'e50 'f50 'a26 'c26
+G1 F60 A-9 B-9 C-9 D-9 'e-12 'f-12 'a1 'c1
 M98 P"0:macros/sensor_wait.g"
-G1 F75 A36 B36 C36 D36 'e50 'f50 'a27 'c27
+G1 F75 A-9 B-9 C-9 D-9 'e-12 'f-12 'a2 'c2
 M98 P"0:macros/sensor_wait.g"
-G1 F75 A36 B36 C36 D36 'e50 'f50 'a28 'c28
+G1 F75 A-9 B-9 C-9 D-9 'e-12 'f-12 'a3 'c3
 """
 PHANTOM_JOB = """; TIME: 4
 G90
@@ -141,23 +177,23 @@ def _plat4(v):
 SCRIPTS = {
     'platform': [
         {'do': 'delay', 'dt': 0.3},
-        {'do': 'move', 'dt': 4.0, 'to': _plat4(37.5), 'det': [(1.7, 1.0, 1000)]},
+        {'do': 'move', 'dt': 4.0, 'to': _plat4(-7.5), 'det': [(1.7, 1.0, 1000)]},
         {'do': 'delay', 'dt': 0.5},
         {'do': 'wait'},                                            # ended by the Release button
-        {'do': 'move', 'dt': 2.0, 'to': {"'a": 26.0, "'c": 26.0}},
+        {'do': 'move', 'dt': 2.0, 'to': {"'a": 1.0, "'c": 1.0}},
         {'do': 'delay', 'dt': 0.5}],
     'waits': [
         {'do': 'delay', 'dt': 0.3},
-        {'do': 'move', 'dt': 1.2, 'to': _plat4(36.0)},
+        {'do': 'move', 'dt': 1.2, 'to': _plat4(-9.0)},
         {'do': 'delay', 'dt': 0.3},
         {'do': 'wait', 'det': [(1.0, 0.3, 300), (1.63, 0.6, 1000)]},   # A: probe 300 inside, detector at +1.63 s
-        {'do': 'move', 'dt': 1.0, 'to': {"'a": 26.0, "'c": 26.0}},
+        {'do': 'move', 'dt': 1.0, 'to': {"'a": 1.0, "'c": 1.0}},
         {'do': 'delay', 'dt': 0.3},
         {'do': 'wait', 'det': [(0.87, 0.5, 1000)]},                    # B: detector at +0.87 s
-        {'do': 'move', 'dt': 0.8, 'to': {"'a": 27.0, "'c": 27.0}},
+        {'do': 'move', 'dt': 0.8, 'to': {"'a": 2.0, "'c": 2.0}},
         {'do': 'delay', 'dt': 0.2},
         {'do': 'wait', 'det': [(0.012, 0.6, 1000)]},                   # C: race, detector 12 ms after the echo
-        {'do': 'move', 'dt': 0.8, 'to': {"'a": 28.0, "'c": 28.0}},
+        {'do': 'move', 'dt': 0.8, 'to': {"'a": 3.0, "'c": 3.0}},
         {'do': 'delay', 'dt': 0.5}],
     'phantom': [
         {'do': 'delay', 'dt': 0.3},
@@ -170,7 +206,7 @@ class Sim:
     def __init__(self):
         self.lock = threading.Lock()
         self.pos = {n: 0.0 for n in NAMES}
-        self.pos.update({'A': 30.0, 'B': 30.0, 'C': 30.0, 'D': 30.0, "'e": 45.0, "'f": 45.0, "'a": 20.0, "'c": 20.0})
+        self.pos.update({'A': -15.0, 'B': -15.0, 'C': -15.0, 'D': -15.0, "'e": -5.0, "'f": -5.0, "'a": -5.0, "'c": -5.0})
         self.target = dict(self.pos)
         self.segments = []            # (t0, t1, {axis: (from, to)})
         self.status = 'idle'
@@ -797,17 +833,17 @@ cols = list(df.columns)
 check(cols == ['Time_s', 'Pos_LAT_mm', 'Pos_SI_mm', 'Pos_AP_mm', 'Pos_Roll_deg', 'Pos_Pitch_deg', 'Pos_Yaw_deg',
                'Pos_A_mm', 'Pos_B_mm', 'Pos_C_mm', 'Pos_D_mm', "Pos_'e_mm", "Pos_'f_mm", "Pos_'a_mm", "Pos_'c_mm", 'Probe'],
       "platform columns: DOF + raw actuators + Probe, no Cmd_*")
-check(df['Pos_AP_mm'].abs().max() > 30 and df['Pos_LAT_mm'].abs().max() > 40 and df['Pos_SI_mm'].abs().max() > 20,
-      "positions are real values, not zeros")
+check(df['Pos_AP_mm'].abs().max() > 8 and df['Pos_LAT_mm'].abs().max() > 10 and df['Pos_SI_mm'].abs().max() > 0.8,
+      "positions are real values, not zeros (centred: AP -10..-7.5, LAT -12, SI 0..1)")
 
 t = df['Time_s'].values
 dt = np.diff(t)
 check(len(df) > 50 and dt.max() <= 0.15, f"{len(df)} rows, largest gap {dt.max() * 1000:.0f} ms at {t[int(np.argmax(dt))]:.2f} s "
       f"(<= 150) with the GUI blocked")
 check(t[0] >= 0 and t[0] < 0.2, f"first row at {t[0]:.3f} s of the run (pre-position not logged)")
-check(abs(df['Pos_AP_mm'].values[0] - 35.0) < 0.01, f"run starts at the pre-positioned AP 35 ({df['Pos_AP_mm'].values[0]:.3f})")
-check(abs(df['Pos_AP_mm'].values[-1] - 37.5) < 0.01 and abs(df['Pos_SI_mm'].values[-1] - 26.0) < 0.01,
-      "run ends at AP 37.5 / SI 26")
+check(abs(df['Pos_AP_mm'].values[0] + 10.0) < 0.01, f"run starts at the pre-positioned AP -10 ({df['Pos_AP_mm'].values[0]:.3f})")
+check(abs(df['Pos_AP_mm'].values[-1] + 7.5) < 0.01 and abs(df['Pos_SI_mm'].values[-1] - 1.0) < 0.01,
+      "run ends at AP -7.5 / SI 1")
 
 # Same samples in the log and in the plot
 spd = ui.status_plot_data
@@ -869,7 +905,10 @@ check(ui.status_fast_timer.mode == 'combined', f"poller stayed in combined mode 
 print("\n=== Readers ===")
 plan_df, device, matched, probe_seen, n_orig, dur = parse_trace_log_file(path)
 check(device == "Motion Platform" and {'LAT', 'SI', 'AP', 'A', "'e", "'a"} <= set(matched), f"Planning parse: {device}, {sorted(matched)}")
+OLD_FRAME_ASKED.clear()
 import_trace_log_action(ui, path)
+check(OLD_FRAME_ASKED == ['log'], f"Planning import of a KINETIQ log without a work-zero offset in its header asks the "
+                                  f"old-frame question once (answered Keep values here): {OLD_FRAME_ASKED}")
 d = ui.dfEdit
 si_imp = np.interp(t, d['time'].values, d['SI'].values)
 ap_imp = np.interp(t, d['time'].values, d['AP'].values)
@@ -877,9 +916,10 @@ e_si = np.abs(si_imp - df['Pos_SI_mm'].values); e_ap = np.abs(ap_imp - df['Pos_A
 print(f"  import diff: SI max {e_si.max():.4f} at t={t[int(np.argmax(e_si))]:.2f}, AP max {e_ap.max():.4f} at t={t[int(np.argmax(e_ap))]:.2f}")
 # The logged ramp is a staircase (Duet machinePosition cache, ~0.125 mm per 200 ms here); the Planning
 # bake may move its corners by about one stair. The point is that the logged DOF are kept, not zeros.
-check(e_si.max() < 0.2 and e_ap.max() < 0.2 and abs(d['SI'].max() - 26.0) < 0.01 and abs(d['SI'].min() - 25.0) < 0.01
-      and abs(d['AP'].max() - 37.5) < 0.01 and abs(d['AP'].min() - 35.0) < 0.01,
-      f"Planning import keeps the logged DOF (SI {d['SI'].min():.2f}..{d['SI'].max():.2f}, not 0)")
+check(e_si.max() < 0.2 and e_ap.max() < 0.2 and abs(d['SI'].max() - 1.0) < 0.01 and abs(d['SI'].min() - 0.0) < 0.01
+      and abs(d['AP'].max() + 7.5) < 0.01 and abs(d['AP'].min() + 10.0) < 0.01,
+      f"Planning import keeps the logged DOF (SI {d['SI'].min():.2f}..{d['SI'].max():.2f}, AP {d['AP'].min():.2f}.."
+      f"{d['AP'].max():.2f}: negative values kept, not cut to 0)")
 
 
 def new_loader_ui():
@@ -1154,8 +1194,8 @@ check(len(ui3.status_plot_data['t']) == len(df_w) and AMBER in span_colors(ui3._
 plan_w, dev_w, matched_w, probe_w, n_w, dur_w = parse_trace_log_file(path_w)
 import_trace_log_action(ui, path_w)
 dw = ui.dfEdit
-check(dev_w == "Motion Platform" and n_w == len(df_w) and abs(dw['SI'].max() - 28.0) < 0.01 and abs(dw['SI'].min() - 25.0) < 0.01
-      and abs(dw['AP'].max() - 36.0) < 0.01, f"Planning import of the waits log ({n_w} rows, SI {dw['SI'].min():.2f}..{dw['SI'].max():.2f})")
+check(dev_w == "Motion Platform" and n_w == len(df_w) and abs(dw['SI'].max() - 3.0) < 0.01 and abs(dw['SI'].min() - 0.0) < 0.01
+      and abs(dw['AP'].max() + 9.0) < 0.01, f"Planning import of the waits log ({n_w} rows, SI {dw['SI'].min():.2f}..{dw['SI'].max():.2f})")
 
 # Dashboard and pause/resume: no rr_reply of their own while the ReplyPoller runs
 print("\n=== One rr_reply reader ===")
@@ -1285,7 +1325,7 @@ check(ui.status_fast_timer.mode == 'split' and getattr(ui, 'run_active', False) 
 # contain the true start; q9f issue 3: a split-mode end note says when the probe was read, and is true
 saved_s = (SCRIPTS['waits'], SIM.latency, SIM.parallel)
 SCRIPTS['waits'] = ([{'do': 'delay', 'dt': 0.3}]
-                    + [it_ for k_ in range(4) for it_ in ({'do': 'move', 'dt': 1.2, 'to': {"'a": 22.0 + 2 * k_, "'c": 22.0 + 2 * k_}},
+                    + [it_ for k_ in range(4) for it_ in ({'do': 'move', 'dt': 1.2, 'to': {"'a": -3.0 + 2 * k_, "'c": -3.0 + 2 * k_}},
                                                          {'do': 'wait', 'det': [(2.5, 0.9, 1000)]})]
                     + [{'do': 'delay', 'dt': 0.5}])
 SIM.latency = 0.15
@@ -1371,7 +1411,7 @@ if new_logs:
           f"the gap notes are in the notes block after the last row ({t_last3:.3f} s), not between the rows: {g_t}")
     check(head3[-1].startswith("# End: job finished"), f"run ends normally after the reconnect: {head3[-1]}")
     t3 = df3['Time_s'].values
-    check(np.all(np.diff(t3) > 0) and abs(df3['Pos_SI_mm'].values[-1] - 26.0) < 0.01,
+    check(np.all(np.diff(t3) > 0) and abs(df3['Pos_SI_mm'].values[-1] - 1.0) < 0.01,
           f"same time base before/after the gap, job logged to the end (SI {df3['Pos_SI_mm'].values[-1]:.3f})")
 
 # ============================================================== 3b. a new Start while a run is logged

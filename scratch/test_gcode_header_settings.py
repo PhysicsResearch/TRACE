@@ -1,5 +1,31 @@
 import sys
 import os
+
+# configuration.json guard: the test changes Planning settings, which are saved to the user's configuration.json.
+# The test body runs in a child process; this parent backs the file up first and restores it byte-identically in a
+# finally block (also when the child crashes).
+if os.environ.get("TRACE_TEST_CFG_GUARD") != "1":
+    import shutil
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
+    from fcn_init.app_config import get_config_path
+    _cfg = get_config_path('configuration.json', for_writing=True)
+    _bak = os.path.join(tempfile.mkdtemp(prefix="cfg_guard_"), "configuration.json") if os.path.exists(_cfg) else None
+    if _bak:
+        shutil.copyfile(_cfg, _bak)
+    _cmd = [sys.executable] + (["-X", "utf8"] if sys.flags.utf8_mode else []) + [os.path.abspath(__file__)] + sys.argv[1:]
+    try:
+        _rc = subprocess.call(_cmd, env=dict(os.environ, TRACE_TEST_CFG_GUARD="1"))
+    finally:
+        if _bak:
+            shutil.copyfile(_bak, _cfg)
+        elif os.path.exists(_cfg):
+            os.remove(_cfg)
+    print(f"configuration.json restored ({_cfg})")
+    sys.exit(_rc)
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import numpy as np
 import pandas as pd
@@ -61,6 +87,8 @@ def test_gcode_header_settings():
             build_planning_tab(self)
 
     ui = MockUI()
+    from fcn_control import work_zero as WZ           # no board here: the KINETIQ SI letters of the last board seen are
+    WZ.remember_kinetiq_si_motors(ui, ("'a", "'c"))   # read from configuration.json: pinned to 'c (the file is restored)
     # Test Lung Phantom via UI
     ui.combo_device.setCurrentText("Lung Phantom")
     ui.combo_phantom_max_speed.setCurrentText("50")  # 50 * 60 = 3000

@@ -743,6 +743,9 @@ def update_connection_status_ui(self, connected=False):
     if connected:
         from fcn_control.board_clock import sync_board_clock_once   # date for files on the SD card (new file)
         sync_board_clock_once(self)
+    else:
+        from fcn_plan.plan_limits import connection_changed       # next connection: Planning limits from the board
+        connection_changed(self, connected)
 
     # 1. Update Window Title
     if hasattr(self, 'setWindowTitle'):

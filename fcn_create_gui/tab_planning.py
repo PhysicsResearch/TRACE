@@ -549,9 +549,11 @@ def build_planning_tab(self):
         layout.addLayout(sub_v, row, col)
         return combo
 
-    self.settings_max_lim_x = add_setting_spinbox(lung_layout, lung_page, "Max Lim. X (mm):", 40.0, 0, 0)
-    self.settings_max_lim_y = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Y (mm):", 40.0, 0, 1)
-    self.settings_max_lim_z = add_setting_spinbox(lung_layout, lung_page, "Max Lim. Z (mm):", 40.0, 1, 0)
+    # X Y Z limits (min to max, mm): read from the connected DYNAMIQ board; no cut-off, export warns (plan_limits.py)
+    from fcn_plan.plan_limits import add_limit_setting, PHANTOM, PLATFORM
+    add_limit_setting(self, lung_layout, lung_page, PHANTOM, "X", 0, 0)
+    add_limit_setting(self, lung_layout, lung_page, PHANTOM, "Y", 0, 1)
+    add_limit_setting(self, lung_layout, lung_page, PHANTOM, "Z", 1, 0)
     # DYNAMIQ defaults = its config.g (M203 1200 mm/min, M201 500, M566 300): tested 12 Nov 2026, the higher
     # header values (50 / 1000 / 600) made the Y home switch close early on fast descents
     self.combo_phantom_max_speed = add_setting_combo(lung_layout, lung_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "20", 1, 1)
@@ -596,23 +598,19 @@ def build_planning_tab(self):
     platform_layout.setSpacing(10)
     platform_layout.setContentsMargins(0, 5, 0, 5)
 
-    from fcn_control.work_zero_frame import kinetiq_plan_range      # KINETIQ G-code frame: centre = 0
-
-    def tip_kinetiq_lim(dof):
-        lo, hi = kinetiq_plan_range(dof)
-        motors = " (also for A, B, C, D)" if dof == "AP" else ""
-        return (f"Largest distance a plan may move {dof} on either side of the KINETIQ centre (0).\n"
-                f"The KINETIQ travel itself is {dof} {lo:g} to {hi:g} mm{motors}. Values outside are cut off at "
-                f"the limit when the plan is edited.")
-    self.settings_max_lim_lat = add_setting_spinbox(platform_layout, platform_page, "Max Lim. LAT (mm):", 40.0, 0, 0,
-                                                    tooltip=tip_kinetiq_lim("LAT"))
-    self.settings_max_lim_si = add_setting_spinbox(platform_layout, platform_page, "Max Lim. SI (mm):", 40.0, 0, 1,
-                                                   tooltip=tip_kinetiq_lim("SI"))
-    self.settings_max_lim_ap = add_setting_spinbox(platform_layout, platform_page, "Max Lim. AP (mm):", 40.0, 1, 0,
-                                                   tooltip=tip_kinetiq_lim("AP"))
-    self.settings_max_lim_roll = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Roll (deg):", 40.0, 1, 1)
-    self.settings_max_lim_pitch = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Pitch (deg):", 40.0, 2, 0)
-    self.settings_max_lim_yaw = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Yaw (deg):", 40.0, 2, 1)
+    # LAT SI AP limits (min to max around the KINETIQ centre, mm): read from the connected KINETIQ board (M208 minus
+    # the centre); the actuators A-D use the AP limits. No cut-off: export warns (fcn_plan/plan_limits.py)
+    add_limit_setting(self, platform_layout, platform_page, PLATFORM, "LAT", 0, 0)
+    add_limit_setting(self, platform_layout, platform_page, PLATFORM, "SI", 0, 1)
+    add_limit_setting(self, platform_layout, platform_page, PLATFORM, "AP", 1, 0)
+    tip_rot = ("Largest angle a plan may use on either side of 0. Not cut off: exporting or uploading G-code beyond it "
+               "asks you to confirm.")
+    self.settings_max_lim_roll = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Roll (deg):", 40.0, 1, 1,
+                                                     tooltip=tip_rot)
+    self.settings_max_lim_pitch = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Pitch (deg):", 40.0, 2, 0,
+                                                      tooltip=tip_rot)
+    self.settings_max_lim_yaw = add_setting_spinbox(platform_layout, platform_page, "Max Lim. Yaw (deg):", 40.0, 2, 1,
+                                                    tooltip=tip_rot)
     self.combo_platform_max_speed = add_setting_combo(platform_layout, platform_page, "Max Speed (mm/s):", ["10", "20", "30", "50"], "20", 3, 0)
     self.combo_platform_acc = add_setting_combo(platform_layout, platform_page, "Acc (mm/s²):", ["500", "1000", "1500", "3000"], "1000", 3, 1)
     self.combo_platform_jerk = add_setting_combo(platform_layout, platform_page, "Jerk (mm/min):", ["300", "600", "900", "1200"], "600", 4, 0)
@@ -1170,22 +1168,22 @@ def build_planning_tab(self):
     # Automatic settings persistence across sessions
     setup_settings_persistence(self)
 
+    # Limits: from the connected board on every status poll (fcn_plan/plan_limits.py)
+    from fcn_plan.plan_limits import install as install_plan_limits
+    install_plan_limits(self)
+
 
 def setup_settings_persistence(self):
     """Loads saved settings from configuration.json and connects change listeners for automatic persistence."""
     import json
     from fcn_init.app_config import get_config_path
 
+    from fcn_plan.plan_limits import persistence_map
     spinbox_map = {
-        'max_lim_lat': getattr(self, 'settings_max_lim_lat', None),
-        'max_lim_si': getattr(self, 'settings_max_lim_si', None),
-        'max_lim_ap': getattr(self, 'settings_max_lim_ap', None),
+        **persistence_map(self),                            # plan_lim_<axis>_min / _max (fcn_plan/plan_limits.py)
         'max_lim_roll': getattr(self, 'settings_max_lim_roll', None),
         'max_lim_pitch': getattr(self, 'settings_max_lim_pitch', None),
         'max_lim_yaw': getattr(self, 'settings_max_lim_yaw', None),
-        'max_lim_x': getattr(self, 'settings_max_lim_x', None),
-        'max_lim_y': getattr(self, 'settings_max_lim_y', None),
-        'max_lim_z': getattr(self, 'settings_max_lim_z', None),
         'phantom_min_step': getattr(self, 'settings_min_step_phantom', None),
         'phantom_min_speed': getattr(self, 'settings_min_speed_phantom', None),
         'phantom_step_overhead_ms': getattr(self, 'settings_step_overhead_phantom', None),

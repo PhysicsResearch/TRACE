@@ -2,9 +2,34 @@
 End-to-end check through the Planning tab (offscreen): Add Curve bakes the stepped motion,
 the exported G-code reproduces the stored (plotted) curve, and a G-code re-import keeps timing.
 Run:  set QT_QPA_PLATFORM=offscreen  &  C:\\Users\\gabri\\anaconda3\\envs\\TRACE\\python.exe scratch\\test_stepped_plan_ui.py
+The user's configuration.json (the Planning tab saves its settings there) is backed up and restored in a finally
+block: the test runs in a child process of this script.
 """
 import os
 import sys
+
+# configuration.json guard: the test body runs in a child process; this parent backs the user's file up first and
+# restores it byte-identically in a finally block (also when the child crashes)
+if os.environ.get("TRACE_TEST_CFG_GUARD") != "1":
+    import shutil
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
+    from fcn_init.app_config import get_config_path
+    _cfg = get_config_path('configuration.json', for_writing=True)
+    _bak = os.path.join(tempfile.mkdtemp(prefix="cfg_guard_"), "configuration.json") if os.path.exists(_cfg) else None
+    if _bak:
+        shutil.copyfile(_cfg, _bak)
+    _cmd = [sys.executable] + (["-X", "utf8"] if sys.flags.utf8_mode else []) + [os.path.abspath(__file__)] + sys.argv[1:]
+    try:
+        _rc = subprocess.call(_cmd, env=dict(os.environ, TRACE_TEST_CFG_GUARD="1"))
+    finally:
+        if _bak:
+            shutil.copyfile(_bak, _cfg)
+        elif os.path.exists(_cfg):
+            os.remove(_cfg)
+    print(f"configuration.json restored ({_cfg})")
+    sys.exit(_rc)
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -17,6 +42,9 @@ app = QApplication.instance() or QApplication(sys.argv)
 QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
 QMessageBox.warning = staticmethod(lambda *a, **k: print("  [warning]", a[1] if len(a) > 1 else ""))
 QMessageBox.information = staticmethod(lambda *a, **k: None)
+from fcn_plan import kinetiq_old_frame as _OFI     # old-frame question of the KINETIQ imports: never blocks here
+OLD_FRAME_ASKED = []                               # (the imported files are Planning-made: no question expected)
+_OFI.ask_old_frame = lambda parent, kind="file": (OLD_FRAME_ASKED.append(kind), _OFI.KEEP)[1]
 
 from fcn_create_gui.tab_planning import build_planning_tab
 from fcn_plan.fcn_create import create_curve, generate_planned_gcode, bake_plan_steps, import_gcode_from_string
@@ -139,6 +167,8 @@ try:
     check(abs(t_imp - t_plan) <= 0.011, f"imported duration {t_imp:.2f} s == {t_plan:.2f} s")
     si_imp = ui.dfEdit['SI'].values
     check(abs(si_imp.max() - 0.5) < 1e-3, f"imported SI reaches 0.5 mm ({si_imp.max():.4f})")
+    check(not OLD_FRAME_ASKED, f"the Planning-made KINETIQ G-code imports without the old-frame question "
+                               f"({OLD_FRAME_ASKED})")
 except Exception as e:
     check(False, f"import failed: {e!r}")
 

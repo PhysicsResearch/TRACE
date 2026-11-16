@@ -52,6 +52,9 @@ app = QApplication.instance() or QApplication(sys.argv)
 for _k in ('warning', 'information', 'critical'):
     setattr(QMessageBox, _k, staticmethod(lambda *a, **k: QMessageBox.Ok))
 QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+from fcn_plan import kinetiq_old_frame as _OFI     # old-frame question of the KINETIQ imports: never blocks here
+OLD_FRAME_ASKED = []                               # (the imported files are Planning-made: no question expected)
+_OFI.ask_old_frame = lambda parent, kind="file": (OLD_FRAME_ASKED.append(kind), _OFI.KEEP)[1]
 
 from fcn_init.app_config import get_config_path
 
@@ -191,11 +194,10 @@ def gc_axis_max(txt, letter):
 
 
 def expected_lat_eff(win, ap=160.0, lat=0.0):
-    """the single sway compensation: clip(off_lat + nominal LAT + AP*sin(Roll), 0, lim)."""
+    """the single sway compensation: off_lat + nominal LAT + AP*sin(Roll). 2026-11-15: not clipped any more (Planning
+    keeps the values; export warns, fcn_plan/plan_limits.py)."""
     d = win.dfEdit
-    lim = win.settings_max_lim_lat.value()
-    return float(np.max(np.clip(lat + d['LAT'].to_numpy(float) + ap * np.sin(np.radians(d['Roll'].to_numpy(float))),
-                                0.0, lim)))
+    return float(np.max(lat + d['LAT'].to_numpy(float) + ap * np.sin(np.radians(d['Roll'].to_numpy(float)))))
 
 
 def check_rotation_centre_idempotent(win, g_r160, e_r160):
@@ -263,11 +265,12 @@ def check_rotation_centre_idempotent(win, g_r160, e_r160):
     win.input_offset_lat_plan.setText("0.0")
     win.input_offset_si_plan.setText("0.0")
     pump()
-    # G-code round trip on a plan the rails can follow without clipping (LAT / AP around 15 mm, Roll +-):
+    # G-code round trip on a plan the rails can follow without clipping (LAT around 15 mm, AP around 10 mm, Roll +-;
+    # centred KINETIQ frame: A-D stay below their top of 25 mm with LAT 300 mm):
     # import -> nominal LAT recovered (AP*sin(Roll) removed once), export again -> the same axis moves
     click(win.button_clear_all)
     modern_curve(win, 'LAT', 'cos', 4.0, 15.0, 6.0, 0.0, 20.0)
-    modern_curve(win, 'AP', 'sin', 4.0, 15.0, 4.0, 0.0, 20.0)
+    modern_curve(win, 'AP', 'sin', 4.0, 10.0, 4.0, 0.0, 20.0)
     modern_curve(win, 'Roll', 'sin', 3.0, 0.0, 5.0, 0.0, 20.0)
     lat_plan = (float(win.dfEdit['LAT'].min()), float(win.dfEdit['LAT'].max()))
     e_plan = float(win.dfEdit[q].max())
@@ -286,6 +289,8 @@ def check_rotation_centre_idempotent(win, g_r160, e_r160):
     check("G fix: import of that G-code -> nominal LAT recovered, export again gives the same axis maxima",
           abs(lat_rt[0] - lat_plan[0]) < 0.02 and abs(lat_rt[1] - lat_plan[1]) < 0.02
           and max(ax_dev.values()) < 0.02, f"LAT plan {lat_plan}, imported {lat_rt}, axis max deviation {ax_dev}")
+    check("the Planning-made KINETIQ G-code imports without the old-frame question", not OLD_FRAME_ASKED,
+          str(OLD_FRAME_ASKED))
     click(win.button_clear_all)
 
 # ---------------------------------------------------------------- legacy-window helpers (the old controls)
