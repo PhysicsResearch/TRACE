@@ -48,10 +48,10 @@ STEPS_1 = [
     ("Step 6 - Choose the axis and add the curve", "the part below zero is cut off",
      "Select the axis, X, and press Add Curve. Notice that only the upper half of the sine is there: "
      "the part below zero is cut off."),
-    ("Step 7 - Negative values need an offset", "DYNAMIQ cannot move below zero",
-     "DYNAMIQ cannot move to negative positions, so values below zero are not accepted. "
-     "Undo the curve with the circular arrow, set an amplitude offset of ten millimetres, and add it again. "
-     "Now the full sine runs from zero to twenty millimetres."),
+    ("Step 7 - Negative values need an offset", "DYNAMIQ's zero is its home, at the bottom of each axis",
+     "The zero of DYNAMIQ is its home position, at the bottom of each axis, so it cannot move below zero, and "
+     "values below zero are not accepted. Undo the curve with the circular arrow, set an amplitude offset of ten "
+     "millimetres, and add it again. Now the full sine runs from zero to twenty millimetres."),
     ("Step 8 - Avoid abrupt changes", "jumps can displace the device or move it on the build plate",
      "But look at the start and the end of the sine: the position jumps between zero and ten millimetres. "
      "Abrupt changes like these are undesired. They can displace the device, or make DYNAMIQ move on the "
@@ -65,10 +65,10 @@ STEPS_1 = [
     ("Step 11 - Segment 3: a linear ramp down", "from 10 mm back to 0 mm",
      "And a ramp from ten millimetres back to zero after the sine. Pay attention to the gaps: each segment "
      "should start where the previous one ends. The final curve has no abrupt changes."),
-    ("Step 12 - The limits in Settings", "they depend on the hardware",
-     "The allowed range is set in the Settings tab: here the maximum X, Y and Z positions of DYNAMIQ. "
-     "These limits depend on the hardware. Values below zero or above the maximum are not accepted, "
-     "they are cut off in the plan."),
+    ("Step 12 - The limits in Settings", "read from the controller when LogIQ connects",
+     "The limits are in the Settings tab: from zero to forty millimetres for X, Y and Z of DYNAMIQ. When LogIQ "
+     "connects to the controller, it reads them from the controller and fills them in. A plan that goes above the "
+     "maximum is kept as it is, and LogIQ warns when you export or upload it."),
     ("Step 13 - A second axis", "cos squared with a 180 degree phase: starts and ends at 0",
      "A second axis: a cosine squared on Y with a starting phase of one hundred and eighty degrees. "
      "It starts and ends at zero, so it needs no ramps."),
@@ -132,46 +132,56 @@ STEPS_3 = [
     ("Step 3 - Yaw", "not available yet: it depends on the KINETIQ version",
      "Yaw is currently not available. It will be included depending on the version of KINETIQ."),
     ("Step 4 - The individual axes", "A, B, C, D, 'a, 'c, 'e, 'f: computed in the background",
-     "A, B, C and D, and the primed axes a, c, e and f, are the individual axes of KINETIQ. They are usually "
-     "not set up manually: LogIQ computes them in the background from the KINETIQ position. The buttons on the "
-     "right show them in the plot."),
-    ("Step 5 - The rotation centre", "the reference point for Roll and Pitch",
+     "A, B, C and D are the four vertical actuators, labelled with their letters and colour coded on the platform. "
+     "The primed axes a and c move SI, and e and f move LAT. They are usually not set up manually: LogIQ computes "
+     "them in the background from the KINETIQ position. The buttons on the right show them in the plot."),
+    ("Step 5 - Zero is the centre", "LAT -50 to 50, SI -25 to 35, AP -45 to 45 mm",
+     "For KINETIQ, zero is the centre of the platform: Home all sets it on the controller. So a plan can go below "
+     "zero as well as above: LAT from minus fifty to plus fifty millimetres, SI from minus twenty-five to plus "
+     "thirty-five, and AP from minus forty-five to plus forty-five."),
+    ("Step 6 - The rotation centre", "the reference point for Roll and Pitch",
      "The rotation centre is the point KINETIQ turns about for Roll and Pitch. We keep it at zero."),
-    ("Step 6 - A Roll at the zero position", "Roll: sine, 3 degrees, period 4 s, 2 to 18 s",
-     "Let us try a Roll with KINETIQ at its zero position: a sine of three degrees, with a period of four "
-     "seconds, from two to eighteen seconds. We show only Roll and the individual axes A and B."),
-    ("Step 7 - Roll cannot be done at zero", "one side goes down, the other goes up",
-     "A roll lifts one side of KINETIQ and lowers the other. At the zero position the lower side cannot go "
-     "below zero, so it is cut off: only half of the roll is reached, and KINETIQ is pushed up. Roll must be "
-     "defined around a central position that keeps every individual axis above zero. So we undo the roll."),
-    ("Step 8 - A central position with AP", "linear: amplitude = start value, offset = end value, period = duration",
-     "First we raise KINETIQ with AP. As for DYNAMIQ, avoid abrupt changes and build the motion from "
-     "segments that connect. A linear segment goes from its amplitude, the start value, to its offset, the end "
-     "value, over its period: here from zero to fifteen millimetres in the first three seconds."),
-    ("Step 9 - Hold, then ramp down", "constant 15 mm from 3 to 27 s, then 15 mm back to 0",
-     "Then a constant fifteen millimetres from three to twenty-seven seconds, and a ramp back to zero from "
-     "twenty-seven to thirty seconds. Each segment starts where the previous one ends."),
-    ("Step 10 - Roll around the central position", "every individual axis stays above zero",
-     "Now the same roll, from five to twenty-five seconds, while KINETIQ is held at fifteen millimetres. "
-     "The full three degrees are reached, and A, B, C and D stay above zero. A whole number of periods starts and "
-     "ends at zero, so the roll connects smoothly."),
-    ("Step 11 - A curve on SI", "cos squared with a 180 degree phase: starts and ends at 0",
-     "We add a motion on SI as well: a cosine squared of ten millimetres, with a period of six seconds and a "
-     "starting phase of one hundred and eighty degrees, from six to twenty-four seconds. SI cannot go below zero "
-     "either; this curve stays between zero and ten millimetres, and starts and ends at zero. The individual axes "
-     "a and c follow it in the background."),
-    ("Step 12 - The limits in Settings", "they depend on the hardware",
-     "The Settings tab holds the KINETIQ limits: the maximum LAT, SI and AP positions, and the maximum Roll, "
-     "Pitch and Yaw angles. These limits depend on the hardware. Values outside them are not accepted."),
-    ("Step 13 - What the plot shows", "the buttons on the right show or hide each curve",
+    ("Step 7 - A Roll at zero", "Roll: sine, 3 degrees, period 4 s, 3 to 27 s",
+     "Now a Roll: a sine of three degrees, with a period of four seconds, from three to twenty-seven seconds. "
+     "We show only Roll and the four actuators."),
+    ("Step 8 - The full roll", "A and D go up while B and C go down",
+     "A roll lifts one side of the platform and lowers the other: A and D go up while B and C go down, around "
+     "zero. Because zero is the centre, the full three degrees are reached without lifting the platform first. "
+     "A whole number of periods starts and ends at zero, so the roll connects smoothly."),
+    ("Step 9 - A curve on SI", "sine, 10 mm, period 6 s: from -10 to +10 mm",
+     "We add a motion on SI as well: a sine of ten millimetres with a period of six seconds, from six to "
+     "twenty-four seconds. It goes ten millimetres below zero and ten above. The axes a and c follow it in the "
+     "background."),
+    ("Step 10 - The limits in Settings", "read from the controller when LogIQ connects",
+     "The Settings tab holds the limits of KINETIQ: from minus fifty to fifty millimetres for LAT, minus "
+     "twenty-five to thirty-five for SI, and minus forty-five to forty-five for AP, and the largest Roll, Pitch "
+     "and Yaw. When LogIQ connects, it reads the limits from the controller and fills them in."),
+    ("Step 11 - Beyond the limits", "the plan is kept; export and upload warn",
+     "What happens when a plan goes too far? We make the SI sine thirty millimetres, with a period of twelve "
+     "seconds: now it reaches minus thirty, beyond the limit of minus twenty-five. LogIQ keeps the plan, but Export "
+     "G-code warns, with the motors and how far they go. We answer No, and undo the change."),
+    ("Step 12 - What the plot shows", "the buttons on the right show or hide each curve",
      "On the right, the buttons show or hide each curve; a group title, like Individual axes, selects or clears "
      "the whole group."),
-    ("Step 14 - Export the G-code", "to the hard drive, or upload it to the Duet directly",
-     "Finally, the plan is turned into G-code, which drives the individual axes. Export G-code saves it as a file "
-     "on the hard drive, and Upload to Duet sends it to the Duet directly."),
+    ("Step 13 - Export the G-code", "to the hard drive, or upload it to the controller",
+     "Finally, the plan is turned into G-code, which drives the individual axes. The file notes that its zero is "
+     "the centre of the platform. Export G-code saves it on the hard drive, and Upload to Duet sends it to the "
+     "controller directly."),
     ("Done", "Part 2: pauses and triggers",
-     "That is a smooth motion plan for KINETIQ. Part two shows pauses and triggers."),
+     "That is a motion plan for KINETIQ around its centre. Part two shows pauses and triggers."),
 ]
+
+
+def _renumber(steps):
+    """Captions 'Step N - ...' numbered by their place in the list (the intro is 0)."""
+    import re
+    for i, (c, sub, n) in enumerate(steps):
+        if c.startswith("Step "):
+            steps[i] = (re.sub(r"^Step \d+", f"Step {i}", c), sub, n)
+
+
+for _steps in (STEPS_1, STEPS_2, STEPS_3):
+    _renumber(_steps)
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -387,6 +397,7 @@ class Demo:
         yield 1300
         yield from self.point_plot(5.0, 0.3)             # the cut-off half
         yield from d.step(*S[7])
+        yield from d.until_left(9.0)                      # undo on "Undo the curve"
         yield from d.click(p.btn_undo, pause_ms=500)
         yield 1000
         yield from self.type_value(w.input_amp_offset, 10)
@@ -414,11 +425,7 @@ class Demo:
         yield from self.point_plot(20.0, 0.0, hold=1200)
         yield from d.step(*S[12])
         yield from self.sub_tab("Settings")
-        for attr in ('settings_max_lim_x', 'settings_max_lim_y', 'settings_max_lim_z'):
-            box = getattr(w, attr, None)
-            if box is not None and box.isVisible():
-                yield from d.point_at(box, ms=700)
-                yield 900
+        yield from self.point_limits("Lung Phantom", ("X", "Y", "Z"))
         yield 600
         yield from self.sub_tab("Curve")
         yield from d.step(*S[13])
@@ -468,6 +475,45 @@ class Demo:
         self.ov.caption = ""
         self.ov.big_text, self.ov.big_sub = "Done", "Part 2: pauses and triggers"
         yield 600
+
+    # ---- limits (2026-11-16: Planning keeps the plan, the export warns; the limits come from the controller)
+    def export_warning(self):
+        """Clicks Export G-code on a plan beyond the limits: the 'Limits Exceeded' question is read, then No (nothing
+        is saved).  Other questions before it (if any) are answered with their default."""
+        yield from self.d.click(self.p.btn_export, pause_ms=500)
+        for _k in range(3):
+            yield from self.d.wait_popup(5000)
+            dlg = self.d.popup
+            if dlg is None:
+                print("  (no limits warning appeared)", flush=True)
+                return
+            title = dlg.windowTitle() if hasattr(dlg, 'windowTitle') else ''
+            if 'Limit' in title:
+                yield 4500                                 # let it be read
+                no = next((b for b in dlg.findChildren(QPushButton)
+                           if b.isVisible() and b.text().replace('&', '') == 'No'), None)
+                if no is not None:
+                    yield from self.d.click(no, pause_ms=500)
+                else:
+                    dlg.reject() if isinstance(dlg, QDialog) else dlg.close()
+                yield 900
+                return
+            print(f"  (answering '{title}' first)", flush=True)
+            yield from self.answer_modal(timeout_ms=500)
+            yield 600
+
+    def point_limits(self, device, dofs):
+        """Points at the min / max boxes of the limits in Planning > Settings (fcn_plan/plan_limits.py)."""
+        spins = getattr(self.w, '_plan_limit_spins', {}) or {}
+        for dof in dofs:
+            lo_hi = spins.get((device, dof))
+            if lo_hi is None:
+                continue
+            lo, hi, lbl = lo_hi
+            for box in (lo, hi):
+                if box.isVisible():
+                    yield from self.d.point_at(box, ms=550)
+                    yield 450
 
     # ---- video 3: part 1 for the Motion Platform
     def show_only(self, keys):
@@ -520,66 +566,57 @@ class Demo:
                 yield from d.point_at(p.pills[k], ms=350)
                 yield 250
         yield from d.step(*S[5])
+        yield from self.point_plot(15.0, 0.0, hold=1500)  # the zero line: the centre of the platform
+        yield from d.step(*S[6])
         rc = getattr(p, 'rot_card', None)
         if rc is not None and rc.isVisible():
             yield from d.point_at(rc, ms=800)
             yield 1500
-        yield from d.step(*S[6])
+        yield from d.step(*S[7])
         yield from self.set_axis('Roll')
-        yield from self.segment('sin', 3, None, 4, start=2, end=18)
+        yield from self.segment('sin', 3, None, 4, start=3, end=27)
         yield from d.click(w.button_create_curve, pause_ms=500)
         yield 1000
-        yield from self.show_only(['Roll', 'A', 'B'])
+        yield from self.show_only(['Roll', 'A', 'B', 'C', 'D'])
         yield 800
-        yield from d.step(*S[7])
-        yield from self.point_plot(5.0, 0.3, hold=1800)   # the cut-off side at 0
-        yield from self.point_plot(3.0, 1.5, hold=1500)   # only half of the roll
-        yield from self.point_plot(3.0, 7.8, hold=1500)   # the other side pushed up
-        yield from d.until_left(3.0)                      # undo on "So we undo the roll"
-        yield from d.click(p.btn_undo, pause_ms=500)
-        yield 1200
         yield from d.step(*S[8])
-        yield from self.show_only(['AP', 'Roll', 'A', 'B', 'C', 'D'])
-        yield from self.set_axis('AP')
-        yield from self.segment('linear', 0, 15, 3, start=0)
-        yield from d.click(w.button_create_curve, pause_ms=500)
-        yield 1500
+        ymax = self.series_max(('A', 'B', 'C', 'D'))
+        yield from self.point_plot(4.0, ymax, hold=1500)   # A and D up at the first peak
+        yield from self.point_plot(4.0, -ymax, hold=1500)  # B and C down
+        yield from self.point_plot(27.0, 0.0, hold=1200)   # ends at zero
         yield from d.step(*S[9])
-        yield from self.segment('constant', 15, 0, 4, start=3, end=27)
-        yield from d.click(w.button_create_curve, pause_ms=500)
-        yield 1200
-        yield from self.segment('linear', 15, 0, 3, start=27)
-        yield from d.click(w.button_create_curve, pause_ms=500)
-        yield 1500
-        yield from self.point_plot(3.0, 15.0, hold=900)
-        yield from self.point_plot(27.0, 15.0, hold=1000)
-        yield from d.step(*S[10])
-        yield from self.set_axis('Roll')
-        yield from self.segment('sin', 3, None, 4, start=5, end=25)
-        yield from d.click(w.button_create_curve, pause_ms=500)
-        yield 1500
-        yield from self.point_plot(12.0, 7.5, hold=1500)  # lowest individual axis, above 0
-        yield from self.point_plot(5.0, 15.0, hold=1000)  # the roll starts at the central position
-        yield from d.step(*S[11])
         yield from self.set_axis('SI')
-        yield from self.segment('cos^2', 10, 0, 6, phase=180, start=6, end=24)
+        yield from self.segment('sin', 10, 0, 6, start=6, end=24)
         yield from d.click(w.button_create_curve, pause_ms=500)
         yield 1200
-        yield from self.type_value(w.input_phase, 0)
         for k in ('SI', "'a", "'c"):
             yield from self.show_pill(k)
-        yield 900
-        yield from d.step(*S[12])
+        yield 600
+        yield from self.point_plot(7.5, 10.0, hold=1000)
+        yield from self.point_plot(10.5, -10.0, hold=1300)
+        yield from d.step(*S[10])
         yield from self.sub_tab("Settings")
-        for attr in ('settings_max_lim_lat', 'settings_max_lim_si', 'settings_max_lim_ap', 'settings_max_lim_roll',
-                     'settings_max_lim_pitch', 'settings_max_lim_yaw'):
+        yield from self.point_limits("Motion Platform", ("LAT", "SI", "AP"))
+        for attr in ('settings_max_lim_roll', 'settings_max_lim_pitch', 'settings_max_lim_yaw'):
             box = getattr(w, attr, None)
             if box is not None and box.isVisible():
-                yield from d.point_at(box, ms=600)
-                yield 600
+                yield from d.point_at(box, ms=500)
+                yield 450
         yield 500
         yield from self.sub_tab("Curve")
-        yield from d.step(*S[13])
+        yield from d.step(*S[11])
+        yield from self.type_value(w.input_amplitude, 30)
+        yield from self.type_value(w.input_period, 12)    # 16 mm/s: below Max Speed, so only the limits warn
+        yield from d.click(w.button_create_curve, pause_ms=500)
+        yield 1200
+        yield from self.point_plot(15.0, -30.0, hold=1300)
+        yield from d.until_left(8.0)                      # export on "Export G-code warns"
+        yield from self.export_warning()
+        yield from d.click(p.btn_undo, pause_ms=500)      # back to the 10 mm sine
+        yield 1200
+        yield from self.type_value(w.input_amplitude, 10)
+        yield from self.type_value(w.input_period, 6)
+        yield from d.step(*S[12])
         ind = p.sections['individual'][0]
         yield from d.click(ind)
         yield 1500
@@ -590,17 +627,25 @@ class Demo:
             yield 1200
             yield from d.click(p.pills['Roll'])
         yield 600
-        yield from d.step(*S[14])
+        yield from d.step(*S[13])
         yield from d.point_at(p.btn_export, ms=800)       # shown, not clicked
         yield 1800
         up = getattr(p, 'btn_upload', None)
         if up is not None:
             yield from d.point_at(up, ms=700)
             yield 1800
-        yield from d.step(*S[15])
+        yield from d.step(*S[14])
         self.ov.caption = ""
         self.ov.big_text, self.ov.big_sub = "Done", "Part 2: pauses and triggers"
         yield 600
+
+    def series_max(self, cols):
+        """Largest value of the plan columns (the individual axes), for pointing at a peak in the plot."""
+        df = getattr(self.w, 'dfEdit', None)
+        try:
+            return max(float(abs(df[c]).max()) for c in cols if c in df.columns)
+        except Exception:
+            return 7.5
 
     # ---- video 2
     def prepare2(self):
@@ -694,6 +739,11 @@ def main():
     cfg_bak = os.path.join(tempfile.gettempdir(), "trace_demo_configuration.json")
     if os.path.isfile(cfg):
         shutil.copy2(cfg, cfg_bak)
+    # LogIQ's own settings file (the one it reads and writes): restored after the video as well
+    cfg2 = os.path.join(os.environ.get("LOCALAPPDATA", ""), "TRACE", "configuration.json")
+    cfg2_bak = os.path.join(tempfile.gettempdir(), "trace_demo_configuration_appdata.json")
+    if os.path.isfile(cfg2):
+        shutil.copy2(cfg2, cfg2_bak)
     steps = {1: STEPS_1, 2: STEPS_2, 3: STEPS_3}[VIDEO]
     tag = {1: "planning_1_dynamiq", 2: "planning_2", 3: "planning_1_kinetiq"}[VIDEO]
     if DRY:
@@ -717,11 +767,29 @@ def main():
     demo = Demo(w, d, ov)
     rec = K.Recorder(os.path.join(OUT, f"{tag}_silent.mp4"), None)
 
+    # dialogs put the always-on-top window above the overlay (captions and the pointer halo vanished): keep raising it
+    from PySide6.QtCore import QTimer
+
+    def overlay_on_top():
+        ov.raise_()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.SetWindowPos(int(ov.winId()), -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+            except Exception:
+                pass
+
+    keep_top = QTimer()
+    keep_top.timeout.connect(overlay_on_top)
+    keep_top.start(250)
+
     def run():
         yield 1500
         if VIDEO == 2:
             demo.prepare2()
             yield 1200
+        K.bring_to_front(w, ov)                          # also for --dry: LogIQ opened behind the other windows
+        yield 600
         if not DRY:
             # the recorder captures a screen area: never start while another program covers the app
             front = False
@@ -786,6 +854,8 @@ def main():
         w.close()
         if os.path.isfile(cfg_bak):
             shutil.copy2(cfg_bak, cfg)
+        if os.path.isfile(cfg2_bak):
+            shutil.copy2(cfg2_bak, cfg2)
         app.quit()
 
     d.run(run(), on_finish=finish)

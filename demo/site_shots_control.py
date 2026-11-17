@@ -21,6 +21,10 @@ from PySide6.QtWidgets import QApplication
 cfg = os.path.join(r"C:\TRACE", "configuration.json")
 bak = os.path.join(tempfile.gettempdir(), "logiq_shots_control_cfg.json")
 shutil.copy2(cfg, bak)
+cfg2 = os.path.join(os.environ.get("LOCALAPPDATA", ""), "TRACE", "configuration.json")   # LogIQ's own settings
+bak2 = os.path.join(tempfile.gettempdir(), "logiq_shots_control_cfg_appdata.json")
+if os.path.isfile(cfg2):
+    shutil.copy2(cfg2, bak2)
 app = QApplication.instance() or QApplication(sys.argv)
 from demo_planning import build_window
 
@@ -67,6 +71,8 @@ try:
 finally:
     w.close()
     shutil.copy2(bak, cfg)
+    if os.path.isfile(bak2):
+        shutil.copy2(bak2, cfg2)
 
 from PIL import Image
 for n in saved:

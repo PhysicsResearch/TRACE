@@ -13,7 +13,8 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, r"C:\TRACE")
 sys.path.insert(0, r"C:\TRACE\demo")
-SITE = sys.argv[1] if len(sys.argv) > 1 else r"C:\LogIQ_site"
+_dirs = [a for a in sys.argv[1:] if os.path.isdir(a)]      # [site_dir] [video ids ...]
+SITE = _dirs[0] if _dirs else r"C:\LogIQ_site"
 SRC = r"C:\TRACE\demo\output"
 FF = os.environ.get("TRACE_DEMO_FFMPEG", "ffmpeg")
 VID = os.path.join(SITE, "public", "videos")
@@ -31,10 +32,10 @@ DL_STEPS = [(c, sub, DL.narration(i)) for i, (c, sub, _n) in enumerate(DL.STEPS)
 VIDEOS = [
     # id, source tag, steps, title, poster time (s)
     ("planning-dynamiq", "planning_1_dynamiq", DP.STEPS_1, "Planning part 1 - DYNAMIQ: a smooth motion plan", 150.0),
-    ("planning-kinetiq", "planning_1_kinetiq", DP.STEPS_3, "Planning part 1 - KINETIQ: Roll around a central position", 185.0),
+    ("planning-kinetiq", "planning_1_kinetiq", DP.STEPS_3, "Planning part 1 - KINETIQ: a plan around the centre", 122.0),
     ("planning-events", "planning_2", DP.STEPS_2, "Planning part 2 - Pauses and triggers", 75.0),
-    ("intro-workflow", "intro_workflow", DI.STEPS, "Overview - The workflow, end to end with KINETIQ", 222.0),
-    ("control-kinetiq", "control_kinetiq", DC.STEPS, "Control tab - KINETIQ: connect, home and move", 168.0),
+    ("intro-workflow", "intro_workflow", DI.STEPS, "Overview - The workflow, end to end with KINETIQ", 195.0),
+    ("control-kinetiq", "control_kinetiq", DC.STEPS, "Control tab - KINETIQ: connect, home, set the zero and move", 180.0),
     ("logs-analysis", "logs_analysis", DL_STEPS, "Log files tab - three runs compared with the plan", 236.0),
 ]
 
@@ -73,8 +74,20 @@ def sentences(text):
     return out
 
 
+ONLY = [a for a in sys.argv[1:] if not a.startswith("-") and a not in _dirs]   # ids to export; others kept as they are
+_old = {}
+_old_path = os.path.join(DATA, "videos.generated.json")
+if os.path.isfile(_old_path):                  # also read on a full run: entries made elsewhere are kept (below)
+    with open(_old_path, encoding="utf-8") as f:
+        _old = {e["id"]: e for e in json.load(f)}
+
 catalog = []
 for vid, tag, steps, title, poster_t in VIDEOS:
+    if ONLY and vid not in ONLY:
+        if vid in _old:
+            catalog.append(_old[vid])
+            print(vid, "kept as it was", flush=True)
+        continue
     src = os.path.join(SRC, tag + ".mp4")
     dst = os.path.join(VID, vid + ".mp4")
     subprocess.run([FF, "-loglevel", "error", "-y", "-i", src, "-c", "copy", "-movflags", "+faststart", dst], check=True)
@@ -105,6 +118,12 @@ for vid, tag, steps, title, poster_t in VIDEOS:
                     "captions": f"/videos/{vid}.vtt", "duration": round(total, 1), "chapters": chapters,
                     "size_mb": round(os.path.getsize(dst) / 1e6, 1)})
     print(vid, round(total, 1), "s", len(chapters), "chapters", catalog[-1]["size_mb"], "MB", flush=True)
+
+_ours = {v[0] for v in VIDEOS}                  # videos not made by this script (e.g. the drawn KINETIQ setup video)
+for vid, entry in _old.items():
+    if vid not in _ours:
+        catalog.append(entry)
+        print(vid, "kept (not made here)", flush=True)
 
 with open(os.path.join(DATA, "videos.generated.json"), "w", encoding="utf-8") as f:
     json.dump(catalog, f, indent=2, ensure_ascii=False)

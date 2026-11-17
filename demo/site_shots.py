@@ -24,6 +24,10 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 cfg = os.path.join(r"C:\TRACE", "configuration.json")
 cfg_bak = os.path.join(tempfile.gettempdir(), "logiq_site_shots_cfg.json")
 shutil.copy2(cfg, cfg_bak)
+cfg2 = os.path.join(os.environ.get("LOCALAPPDATA", ""), "TRACE", "configuration.json")   # LogIQ's own settings
+cfg2_bak = os.path.join(tempfile.gettempdir(), "logiq_site_shots_cfg_appdata.json")
+if os.path.isfile(cfg2):
+    shutil.copy2(cfg2, cfg2_bak)
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: ("", ""))
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -179,7 +183,7 @@ def run():
     p.mode_buttons['once'].click()
     settle()
 
-    # ---- KINETIQ: AP central position, Roll around it, SI cos^2
+    # ---- KINETIQ (zero = platform centre): Roll at zero, SI from -10 to +10 mm (as the planning-kinetiq video)
     p.device_buttons[1].click()
     settle()
     try:
@@ -191,15 +195,10 @@ def run():
     for b in QApplication.topLevelWidgets():
         if b.isVisible() and b.inherits("QMessageBox"):
             b.accept()
-    axis(p, 'AP')
-    seg('linear', 0, 15, 3, 0)
-    seg('constant', 15, 0, 4, 3, 27)
-    seg('linear', 15, 0, 3, 27)
     axis(p, 'Roll')
-    seg('sin', 3, 0, 4, 5, 25)
+    seg('sin', 3, 0, 4, 3, 27)
     axis(p, 'SI')
-    seg('cos^2', 10, 0, 6, 6, 24, ph=180)
-    w.input_phase.setValue(0.0)
+    seg('sin', 10, 0, 6, 6, 24)
     settle()
     grab(w, "planning-kinetiq")
     grab(getattr(p, 'plot_frame', None), "planning-plot-kinetiq")
@@ -216,6 +215,8 @@ def run():
     postprocess()
     w.close()
     shutil.copy2(cfg_bak, cfg)
+    if os.path.isfile(cfg2_bak):
+        shutil.copy2(cfg2_bak, cfg2)
     app.quit()
 
 

@@ -40,17 +40,17 @@ STEPS = [
     ("Step 1 - Connect", "Control tab",
      "In the Control tab, type the address of the platform and press the connect button. LogIQ recognises the "
      "platform and fills the KINETIQ button."),
-    ("Step 2 - Home all", "the buttons turn green",
-     "The motion buttons are red: the platform is not homed. Press Home ALL. Each motor moves to its switch, and "
-     "the buttons turn green."),
+    ("Step 2 - Home all", "the buttons turn green; the zero is the centre",
+     "The motion buttons are grey: the platform is not homed. Press Home ALL. Each motor moves to its switch, and "
+     "the buttons turn green. Home ALL also sets the zero of KINETIQ: the centre of the platform."),
     ("Step 3 - Plan the motion", "Planning tab - KINETIQ, 40 s",
      "Now open the Planning tab, choose KINETIQ, and set the total duration to forty seconds."),
-    ("Step 4 - Lift AP to 30 mm", "ramp up, hold, ramp down",
-     "First AP: a linear ramp up to thirty millimetres in five seconds, a constant thirty, and a ramp back down at "
-     "the end."),
-    ("Step 5 - Roll around it", "a sine of 3 degrees",
-     "Then a rotation around this central position: Roll, a sine of three degrees. LogIQ computes the four vertical "
-     "axes for you."),
+    ("Step 4 - AP around zero", "sine, 8 mm, period 5 s",
+     "First AP: a sine of eight millimetres with a period of five seconds, from five to thirty-five seconds. Zero is "
+     "the centre of the platform, so the motion goes below zero as well as above."),
+    ("Step 5 - Roll", "a sine of 3 degrees, period 10 s",
+     "Then a rotation: Roll, a sine of three degrees with a period of ten seconds. LogIQ computes the four vertical "
+     "actuators for you."),
     ("Step 6 - Upload to the controller", "Upload to Duet",
      "Upload to Duet turns the plan into G-code and stores it on the controller. Give the file a name and confirm."),
     ("Step 7 - Select the file", "Files tab - Run",
@@ -162,18 +162,12 @@ class Intro:
         yield 600
         yield from d.step(*STEPS[4])
         yield from pd.set_axis('AP')
-        yield from pd.segment('linear', 0, 30, 5, start=0)
-        yield from d.click(w.button_create_curve, pause_ms=400)
-        yield 900
-        yield from pd.segment('constant', 30, 0, 4, start=5, end=TOTAL_S - 5)
-        yield from d.click(w.button_create_curve, pause_ms=400)
-        yield 900
-        yield from pd.segment('linear', 30, 0, 5, start=TOTAL_S - 5)
+        yield from pd.segment('sin', 8, 0, 5, start=5, end=TOTAL_S - 5)    # 6 whole periods: starts and ends at 0
         yield from d.click(w.button_create_curve, pause_ms=400)
         yield 1200
         yield from d.step(*STEPS[5])
         yield from pd.set_axis('Roll')
-        yield from pd.segment('sin', 3, None, 6, start=9, end=33)
+        yield from pd.segment('sin', 3, None, 10, start=5, end=TOTAL_S - 5)  # 3 whole periods
         yield from d.click(w.button_create_curve, pause_ms=400)
         yield 1200
         yield from pd.show_only(['AP', 'Roll', 'A', 'B', 'C', 'D'])
@@ -335,6 +329,10 @@ def main():
     cfg = os.path.join(r"C:\TRACE", "configuration.json")
     cfg_bak = os.path.join(tempfile.gettempdir(), "logiq_demo_intro_cfg.json")
     shutil.copy2(cfg, cfg_bak)
+    cfg2 = os.path.join(os.environ.get("LOCALAPPDATA", ""), "TRACE", "configuration.json")   # LogIQ's own settings
+    cfg2_bak = os.path.join(tempfile.gettempdir(), "logiq_demo_intro_cfg_appdata.json")
+    if os.path.isfile(cfg2):
+        shutil.copy2(cfg2, cfg2_bak)
     if PLAN_ONLY:
         clips, durs = [], [0.2] * len(STEPS)
     else:
@@ -369,6 +367,8 @@ def main():
     def run():
         yield 1500
         if PLAN_ONLY:
+            K.bring_to_front(w, ov)                      # LogIQ opened behind the other windows
+            yield 600
             yield from demo.plan()
             return
         front = False
@@ -421,6 +421,8 @@ def main():
         ov.close()
         w.close()
         shutil.copy2(cfg_bak, cfg)
+        if os.path.isfile(cfg2_bak):
+            shutil.copy2(cfg2_bak, cfg2)
         app.quit()
 
     d.run(run(), on_finish=finish)

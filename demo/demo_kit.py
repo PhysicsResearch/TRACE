@@ -18,6 +18,7 @@ Nothing here talks to the Duet.
 import math
 import os
 import subprocess
+import sys
 import time
 import wave
 
@@ -519,6 +520,26 @@ def bring_to_front(window, overlay=None):
     window.activateWindow()
     if overlay is not None:
         overlay.raise_()
+    # Windows: a program started from a terminal may not take the foreground (focus-stealing prevention), so LogIQ
+    # opened behind the other windows.  Attach to the foreground thread for the switch, and make the window topmost.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+            hwnd = int(window.winId())
+            fg = user32.GetForegroundWindow()
+            fg_tid = user32.GetWindowThreadProcessId(fg, None)
+            my_tid = kernel32.GetCurrentThreadId()
+            attached = bool(fg_tid and fg_tid != my_tid and user32.AttachThreadInput(my_tid, fg_tid, True))
+            user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)     # HWND_TOPMOST, no size / move
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            if attached:
+                user32.AttachThreadInput(my_tid, fg_tid, False)
+            if overlay is not None:
+                user32.SetWindowPos(int(overlay.winId()), -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
+        except Exception:
+            pass
 
 
 def window_on_screen(window, min_match=0.85):
