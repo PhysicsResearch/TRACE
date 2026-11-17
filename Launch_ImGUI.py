@@ -384,6 +384,10 @@ if __name__ == "__main__":
     apply_logiq_theme(window)          # olive palette, LogIQ word mark next to the logo
     from fcn_create_gui.logiq_shell import apply_logiq_shell
     apply_logiq_shell(window)          # connection bar on top of every tab, tabs as icons on the left (new file)
+    from fcn_create_gui.advanced_mode import apply_advanced_mode
+    apply_advanced_mode(window)        # Advanced mode buttons (KINETIQ, Status), Basic at every start (new file)
+    from fcn_create_gui.small_screen import apply_small_screen_layout
+    apply_small_screen_layout(window)  # 14" / zoomed screens: pages scroll, Control console splitter (new file)
     window.showMaximized()
     splash.finish(window)
 
