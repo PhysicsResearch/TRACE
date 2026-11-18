@@ -20,7 +20,7 @@ sys.path.insert(0, r"C:\TRACE")
 os.chdir(r"C:\TRACE")
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QMenu,
-                               QMessageBox, QPushButton)
+                               QMessageBox, QPushButton, QToolButton)
 
 import demo_kit as K
 
@@ -200,6 +200,10 @@ def build_window():
     apply_logiq_theme(w)
     from fcn_create_gui.logiq_shell import apply_logiq_shell
     apply_logiq_shell(w)              # connection bar on top, tabs as icons on the left
+    from fcn_create_gui.advanced_mode import apply_advanced_mode
+    apply_advanced_mode(w)            # as Launch_ImGUI: Advanced mode buttons (Basic at start)
+    from fcn_create_gui.small_screen import apply_small_screen_layout
+    apply_small_screen_layout(w)      # as Launch_ImGUI: compact header / left column, Planning sub-tab icons
     return w
 
 
@@ -336,10 +340,25 @@ class Demo:
     # ---- video 1
     def sub_tab(self, name):
         tw = self.w.create_settings_tab_widget
-        bar = tw.tabBar()
         i = next(k for k in range(tw.count()) if tw.tabText(k) == name)
-        yield from self.d.click(bar, bar.tabRect(i).center())
+        btn = next((b for b in self.w.findChildren(QToolButton, "pmSubNavButton")
+                    if b.isVisible() and b.accessibleName() == name), None)
+        if btn is not None:                              # small-screen layout: icon column on the right
+            yield from self.d.click(btn)
+        else:
+            bar = tw.tabBar()
+            yield from self.d.click(bar, bar.tabRect(i).center())
         yield 700
+
+    def show_page(self, widget):
+        """Opens the Planning sub-tab that holds this widget (if it is not the current one)."""
+        tw = self.w.create_settings_tab_widget
+        for k in range(tw.count()):
+            page = tw.widget(k)
+            if page is not None and (page is widget or page.isAncestorOf(widget)):
+                if k != tw.currentIndex():
+                    yield from self.sub_tab(tw.tabText(k))
+                return
 
     def point_plot(self, t, value, ms=900, hold=1200):
         """Moves the pointer to (t, value) in the plot."""
@@ -678,6 +697,7 @@ class Demo:
         yield 2500
         self.ov.big_text = ""
         yield from d.step(*S[1])
+        yield from self.show_page(p.event_card)          # the Pause and Trigger sub-tab
         yield from d.point_at(p.event_card, ms=800)
         yield 800
         yield from d.step(*S[2])

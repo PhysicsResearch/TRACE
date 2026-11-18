@@ -31,6 +31,7 @@ All paths are on this PC.
 | `kokoro_tts.py` | Runs Kokoro in its own conda env; `PRONUNCIATIONS` for product names | Copy; replace the names in `PRONUNCIATIONS` |
 | `demo_control.py`, `demo_intro.py` | Complete example scripts (steps list, demo class, `main()`) | Templates for new videos |
 | `demo_planning.py` | Planning videos; `build_window()`; helpers to type into spin boxes and answer modal dialogs | Pattern for `build_window()` and helpers |
+| `demo_vxp.py` | VXP import video: a filmable Qt file dialog, a modal import dialog, matplotlib toolbar zoom, an Export warning answered No, a combo box | Pattern for dialog-heavy videos |
 | `site_videos.py` | Copies videos to the website: fast-start MP4, poster JPG, WebVTT subtitles, chapters JSON | Adapt the list and the site path |
 | `site_shots.py`, `site_shots_control.py` | Website screenshots with `widget.grab()` (only the app, real fonts), cropped and saved as WebP | Adapt the widget names |
 
@@ -113,6 +114,14 @@ class Demo:
   `close_message`, and `answer_modal` in `demo_planning.py`).
 - **Typing:** select all, type characters, check the widget value, and set it directly if the app reformatted it.
   Decimal comma or point depends on the widget.
+- **Enter in a dialog:** the Return key that ends typing also "clicks" the dialog's default button. In the Import Motion
+  Curve dialog that was *Select All*, so the curve silently went onto every axis (fixed in the app, 18 Nov 2026). After
+  typing in a dialog, check the state that matters (e.g. the selected axes) and ABORT if it is wrong.
+- **Which screen:** record on the primary (laptop) screen, never the large monitor. Pin the window with
+  `w.windowHandle().setScreen(app.primaryScreen())` and `setGeometry(...)` before `showMaximized()`, and abort if
+  `w.screen()` is not the primary one (`demo_vxp.py`).
+- **Saved settings:** the device switch loads the saved settings (e.g. Max Speed). Set the values the video talks about
+  after the switch, and never run tests that back up / restore the settings file at the same time.
 - **Offscreen Qt (`QT_QPA_PLATFORM=offscreen`) has no fonts** (squares in screenshots). Use the real platform for
   screenshots and recordings.
 - **Hardware state:** check it read-only before recording (connected, homed, etc.) and make the script ABORT if the

@@ -44,7 +44,7 @@ STEPS = [
      "recognises the platform: the KINETIQ button is filled, and the status shows connected."),
     ("Step 4 - Home all", "first setup: build plate disconnected",
      "Press Home ALL. During the first setup, the build plate should be disconnected when you home; after that it "
-     "can stay connected. Home LAT, Home SI and Home AP home one group of motors only."),
+     "can stay connected."),
     ("Step 5 - Homing: 8 switches", "A, B, C, D, then LAT, then SI",
      "While it homes: each of the eight motors moves to its own switch. First the four vertical actuators, A, B, C "
      "and D, then the two lateral motors, then the two superior inferior motors. When every switch is found, the "
@@ -64,25 +64,28 @@ STEPS = [
     ("Step 10 - Incremental moves", "minus and plus per direction",
      "Each minus or plus button moves the platform one step in that direction. Here AP goes up by one millimetre, and "
      "with a step of five, by five more. The current position follows the platform."),
-    ("Step 11 - The actuators A, B, C and D", "colour coded and labelled on the platform",
+    ("Step 11 - Advanced mode", "more controls to set the platform up",
+     "The Advanced mode button shows the controls for setting the platform up: the four actuators, homing one group "
+     "of motors, and the KINETIQ dimensions. Press it. Home LAT, Home SI and Home AP home one group of motors only."),
+    ("Step 12 - The actuators A, B, C and D", "colour coded and labelled on the platform",
      "Below are the four vertical actuators, A, B, C and D. They have the same colours and letters as on the "
      "platform: A red, B white, C yellow and D purple. Each one can be moved on its own, for example to level the "
      "build plate. Here C goes up one millimetre, and back."),
-    ("Step 12 - Set zero", "the current position reads zero; nothing moves",
+    ("Step 13 - Set zero", "the current position reads zero; nothing moves",
      "When the platform is where you want its zero, for example level and aligned with the room lasers, press Set "
      "zero. Tick the axes to change, here AP, and press Set zero. Nothing moves: AP now reads zero here, and the "
      "indicator shows a custom zero. Plans then run around this zero."),
-    ("Step 13 - Back to centre", "the standard zero again",
+    ("Step 14 - Back to centre", "the standard zero again",
      "To go back to the standard zero, open Set zero again and press Back to centre, and confirm. AP reads six "
      "millimetres again: its distance from the centre. Home all also puts the zero back at the centre."),
-    ("Step 14 - Send a command", "the console shows the reply",
+    ("Step 15 - Send a command", "the console shows the reply",
      "You can also send a single command to the controller. Type M one one five and press Send. The reply, with the "
      "firmware name and version, appears in the console. The sun and moon button switches it between light and "
      "dark."),
-    ("Step 15 - KINETIQ dimensions", "the distances between the actuators",
+    ("Step 16 - KINETIQ dimensions", "the distances between the actuators",
      "The KINETIQ dimensions, LAT and SI, are the distances between the actuators, and LogIQ uses them to calculate "
      "Roll and Pitch. They are provided with your hardware and depend on the build plate."),
-    ("Step 16 - Offset of the rotation point", "rotate about another point",
+    ("Step 17 - Offset of the rotation point", "rotate about another point",
      "The rotation offset sets the point the platform rotates about, in AP, LAT and SI. For a rotation that is not "
      "about the centre, the platform then corrects the lateral shift by itself."),
     ("Done", "LogIQ user guide - Control tab",
@@ -212,7 +215,7 @@ class Demo:
         yield 600
         for g in ("LAT", "SI", "AP"):
             b = getattr(w, f"HOME_{g}_PLATFORM", None)
-            if b is not None:
+            if b is not None and b.isVisible():              # hidden in Basic mode (shown in step 11)
                 yield from d.point_at(b, ms=450)
                 yield 350
         yield from d.until_left(2.0)
@@ -271,8 +274,25 @@ class Demo:
         yield 3000
         yield from d.point_at(w.POS_CURR_APAXIS, ms=600)
         yield 1200
-        # 11 - the actuators: C up 1 mm and back
+        # 11 - Advanced mode: actuators, group homing, dimensions (all hidden in Basic mode)
         yield from d.step(*STEPS[11])
+        adv = getattr(w, 'btn_control_advanced', None)
+        if adv is not None and not adv.isChecked():
+            yield from d.point_at(adv, ms=700)
+            yield 600
+            yield from d.until_left(6.0)
+            yield from d.click(adv)
+            yield 1200
+        for g in ("LAT", "SI", "AP"):
+            b = getattr(w, f"HOME_{g}_PLATFORM", None)
+            if b is not None and b.isVisible():
+                yield from d.point_at(b, ms=500)
+                yield 500
+        if not w.PLUS_C.isVisible():
+            print("ABORT: Advanced mode did not show the actuators", flush=True)
+            return
+        # 12 - the actuators: C up 1 mm and back
+        yield from d.step(*STEPS[12])
         for act in ("A", "B", "C", "D"):
             lbl = getattr(w, f"LBL_PLAT_{act}", None)
             if lbl is not None:
@@ -285,8 +305,8 @@ class Demo:
         yield 2500
         yield from d.click(w.MIN_C)
         yield 2500
-        # 12 - set zero: AP
-        yield from d.step(*STEPS[12])
+        # 13 - set zero: AP
+        yield from d.step(*STEPS[13])
         yield from d.click(w.btn_set_zero_platform)
         yield from d.wait_popup(5000)
         dlg = d.popup
@@ -305,8 +325,8 @@ class Demo:
         yield from d.point_at(w.lbl_zero_platform, ms=600)
         yield 1200
         print("  after Set zero:", w.lbl_zero_platform.text(), "| AP", w.POS_CURR_APAXIS.text(), flush=True)
-        # 13 - back to centre
-        yield from d.step(*STEPS[13])
+        # 14 - back to centre
+        yield from d.step(*STEPS[14])
         yield from d.click(w.btn_set_zero_platform)
         yield from d.wait_popup(5000)
         dlg = d.popup
@@ -325,8 +345,8 @@ class Demo:
         yield from d.point_at(w.lbl_zero_platform, ms=600)
         yield 1000
         print("  after Back to centre:", w.lbl_zero_platform.text(), "| AP", w.POS_CURR_APAXIS.text(), flush=True)
-        # 14 - send a command, light / dark
-        yield from d.step(*STEPS[14])
+        # 15 - send a command, light / dark
+        yield from d.step(*STEPS[15])
         yield from self.type_text(w.duet_command, "M115")
         yield from d.click(w.sendCommandDUET)
         yield 2500
@@ -338,19 +358,19 @@ class Demo:
             yield 1800
             yield from d.click(tb)
             yield 900
-        # 15 - dimensions
-        yield from d.step(*STEPS[15])
+        # 16 - dimensions
+        yield from d.step(*STEPS[16])
         yield from d.point_at(w.input_plat_lat, ms=700)
         yield 1500
         yield from d.point_at(w.input_plat_si, ms=600)
         yield 1500
-        # 16 - rotation offset
-        yield from d.step(*STEPS[16])
+        # 17 - rotation offset
+        yield from d.step(*STEPS[17])
         for f in (w.input_offset_ap, w.input_offset_lat, w.input_offset_si):
             yield from d.point_at(f, ms=600)
             yield 1100
-        # 17 - done
-        yield from d.step(*STEPS[17])
+        # 18 - done
+        yield from d.step(*STEPS[18])
         self.ok = True
 
 

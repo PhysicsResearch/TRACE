@@ -489,7 +489,8 @@ def generate_gcode_string(
     * consecutive samples on a straight line (space and time) are merged into one G1.
     Slow motion is expected to be baked (``bake_stepped_plan``) beforehand.
     ``step_overhead_ms`` shortens every dwell to compensate the restart delay after a G4.
-    If ``info`` is a dict it receives statistics (moves, dwells, duration_s, residual_ms).
+    If ``info`` is a dict it receives statistics (moves, dwells, duration_s, residual_ms, speed_late_s: the time the
+    Max Speed cap adds to the moves).
     Returns (gcode_string, exceeds_limits).
     """
     t_orig = np.asarray(t_orig, dtype=float)
@@ -561,7 +562,7 @@ def generate_gcode_string(
     trg_safety = trg_safety_lines(columns_data.get("Command"))  # 'M42 P5 S0' at start and end (plans with a trigger)
     lines.extend(trg_safety)
 
-    stats = {"moves": 0, "dwells": 0}
+    stats = {"moves": 0, "dwells": 0, "speed_late_s": 0.0}
     state = {"carry": 0.0, "pending": 0.0, "pending_start": 0.0, "next_mark": 10.0}
     rows = P.tolist()
     raw_rows = P_raw.tolist()
@@ -600,7 +601,10 @@ def generate_gcode_string(
         delta = [a - b for a, b in zip(target, cur)]
         lines.append(f"G1 F{feed:.6f} {_fmt_axes(letters, target)}")
         stats["moves"] += 1
-        state["carry"] += planned - move_time(rot, delta, feed, vmax, min_speed)
+        t_run = move_time(rot, delta, feed, vmax, min_speed)
+        state["carry"] += planned - t_run
+        # time added only by the Max Speed cap (fcn_plan/speed_warning.py: the Timing Warning uses this, not the carry)
+        stats["speed_late_s"] += max(0.0, t_run - max(planned, move_time(rot, delta, feed, None, min_speed)))
         cur = target
 
     def emit_commands(i):

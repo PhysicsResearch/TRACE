@@ -10,6 +10,9 @@ Import Motion Curve dialog (VXP / CSV): a plot of the curve that will be importe
 * Smoothing (s): Savitzky-Golay window (fcn_plan/motion_smooth.py); 0 = off (default, the curve is imported as
   recorded).  The line under the plot says what it changes: largest / RMS difference, direction changes, range.
 * Import & Apply uses the smoothed curve when Smoothing is on; everything else of the import is unchanged.
+* Enter in a number box no longer presses a button (it pressed 'Select All', the dialog's default button).
+* Centre at 0 (fcn_plan/import_centre.py, KINETIQ default): the middle of the range goes to 0 instead of the lowest
+  point (Zero baseline, DYNAMIQ default); the plot and Import & Apply follow it.
 """
 import numpy as np
 from PySide6.QtWidgets import (QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
@@ -31,6 +34,10 @@ def _output(dlg, smooth_s):
     if dlg.cb_zero_baseline.isChecked():
         base = np.nanmin(sm)
         raw, sm = raw - base, sm - base
+    else:                                                  # KINETIQ: Centre at 0 (fcn_plan/import_centre.py)
+        from fcn_plan.import_centre import centre_offset
+        c = centre_offset(dlg, sm)
+        raw, sm = raw - c, sm - c
     t = np.arange(len(raw)) / sps
     return t, raw, sm
 
@@ -38,6 +45,9 @@ def _output(dlg, smooth_s):
 def install_import_preview(dlg):
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
     from matplotlib.figure import Figure
+
+    from fcn_plan.import_centre import install_import_centre, centre_on, centre_value
+    install_import_centre(dlg)                             # KINETIQ: Centre at 0 (default), DYNAMIQ: Zero baseline
 
     # '&' in the existing titles is read by Qt as a shortcut mark ("Scaling _Timing"): shown as a real '&'
     from PySide6.QtWidgets import QPushButton
@@ -47,6 +57,10 @@ def install_import_preview(dlg):
     for w in dlg.findChildren(QPushButton):
         if "&" in w.text() and "&&" not in w.text():
             w.setText(w.text().replace("&", "&&"))
+        # Enter in a number box (Smoothing, samples per second, scale factor) clicked the dialog's default button,
+        # 'Select All': the curve went silently onto every axis (found 18 Nov 2026).  No button reacts to Enter now.
+        w.setAutoDefault(False)
+        w.setDefault(False)
 
     # existing controls move to a left column; the preview goes on the right
     lay = dlg.layout()
@@ -142,9 +156,11 @@ def install_import_preview(dlg):
                           f"direction changes).")
 
     for sig in (dlg.spin_sps.valueChanged, dlg.spin_sf.valueChanged, dlg.cb_invert.toggled,
-                dlg.cb_zero_baseline.toggled, spin.valueChanged):
+                dlg.cb_zero_baseline.toggled, spin.valueChanged, dlg.cb_centre.toggled):
         sig.connect(refresh)
+    spin.valueChanged.connect(dlg._centre_banner)          # the centred range follows the smoothing too
     refresh()
+    dlg._centre_banner()
 
     # Import & Apply: the smoothed curve (smoothing is linear, so it commutes with the scale factor and the flip; the
     # zero baseline of on_apply then shifts the smoothed curve, as in the preview)
@@ -159,6 +175,9 @@ def install_import_preview(dlg):
         raw0 = dlg.raw_amp
         if s > 0:
             dlg.raw_amp = smooth_curve(np.asarray(raw0, dtype=float), max(0.001, dlg.spin_sps.value()), s)
+        if centre_on(dlg) and not dlg.cb_zero_baseline.isChecked():
+            # the middle of the range to 0: scale and Flip keep the middle, so centring before them centres the output
+            dlg.raw_amp = np.asarray(dlg.raw_amp, dtype=float) - centre_value(dlg.raw_amp)
         try:
             original_apply(dlg)
         finally:

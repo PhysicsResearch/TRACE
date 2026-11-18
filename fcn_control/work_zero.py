@@ -26,7 +26,8 @@ LogIQ works in G-code coordinates, so a run stays comparable with its plan:
 * Live samples, the run log, the Status plot and Start's pre-position wait use machinePosition minus the offset
   (to_gcode_frame); the log header names the offset (positions_header); a first move that the Duet clamps at a limit
   is waited for at the limit (preposition_targets).
-* Start (confirm_start) asks only when the zero is not the device's standard one or cannot be read, when an axis of
+* Start (confirm_start) asks only when the zero cannot be read or KINETIQ's zero is at home after a reset (a custom
+  zero set by the user does not ask on its own: it is named in the console and in any question below), when an axis of
   the file goes past its limits (with its offset, 0 where none) or its moves cannot be followed (also G92, G10,
   G54-G59.3, G53 moves and arcs in the file), when a KINETIQ file sends A-D outside 0.2-70 mm, or when a KINETIQ
   file lacks Planning's work-zero line (it may be written for the old frame, 0 at home).
@@ -1179,14 +1180,15 @@ def _status_text(self, text):
 def confirm_start(self, fname, lines):
     """Start hook (fcn_duet._start_selected_gcode_execution_impl), before anything moves: True to go on.
 
-    The user confirms first only when: the zero is not the device's standard one (custom, or KINETIQ offsets 0 after
-    a reset), the zero cannot be read, an axis of the file goes past its M208 limits (with its offset, 0 where none;
+    The user confirms first only when: KINETIQ's offsets are 0 after a reset (home, not centre), the zero cannot be
+    read, an axis of the file goes past its M208 limits (with its offset, 0 where none;
     also with the standard zero), an offset is set and the file's moves on it cannot be followed, the file changes
     positions / offsets / the workplace or moves in machine coordinates or on arcs (G92, G10, G54-G59.3, G53, G2 /
     G3), a KINETIQ file sends A-D outside LogIQ's actuator range (0.2-70 mm machine), a KINETIQ file lacks
     Planning's work-zero line, or the file moves an axis the connected board does not have (it would not move: 'c on
-    a board that uses 'b for SI, A-D on DYNAMIQ).  A centred KINETIQ file from Planning, inside the limits, with the
-    standard zero starts without a question."""
+    a board that uses 'b for SI, A-D on DYNAMIQ).  A custom zero set by the user does not ask on its own (user, 18 Nov
+    2026): a file inside the limits starts, and the console names the zero.  A centred KINETIQ file from Planning,
+    inside the limits, with the standard zero starts without a question."""
     st = state(self)
     fresh = False
     if getattr(self, 'duet_connected', False):
@@ -1215,11 +1217,13 @@ def confirm_start(self, fname, lines):
                      + (" (the checks below use the last known values)" if nz else "") +
                      f". {fname} runs displaced if the zero is not the standard one, {_standard_text(dev)}.")
     elif custom:
-        reasons.append("custom zero")
+        # a zero the user set (Set zero) is intended: Start asks only for the checks below (limits ...), not for the
+        # zero itself (user, 18 Nov 2026); KINETIQ back at home after a reset was not chosen, so that still asks
         text = (f"The zero of {dev_txt} is not the standard one, {_standard_text(dev)}:\n" +
                 "\n".join(f"    {MOTOR_NAMES.get(m, m)}: 0 at machine {w:.3f} mm (standard {s:.3f})"
                           for m, (w, s) in custom.items()))
         if dev == KINETIQ and _kinetiq_at_home(self):
+            reasons.append("custom zero")
             text += "\n" + _HOME_NOT_CENTRE
         parts.append(text + f"\n{fname} runs displaced by this zero.")
     else:
@@ -1298,8 +1302,12 @@ def confirm_start(self, fname, lines):
                          f"{c['AP']:g} mm.")
 
     if not reasons:
+        if custom and not unread:
+            _console(self, f"Work zero: {fname} starts with the custom zero ("
+                     + ", ".join(f"{MOTOR_NAMES.get(m, m)} 0 at machine {w:.3f} mm" for m, (w, _s) in custom.items())
+                     + "); it stays inside the limits.", color=NOTE)
         return True
-    title = "Work zero" if ("zero not read" in reasons or "custom zero" in reasons) else "Confirm start"
+    title = "Work zero" if ("zero not read" in reasons or custom) else "Confirm start"
     _status_text(self, "Waiting for the confirmation of the start (work zero)...")
     if QMessageBox.question(self, title, "\n\n".join(parts + [f"Start {fname} anyway?"]),
                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:

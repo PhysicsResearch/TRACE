@@ -26,6 +26,7 @@ import demo_planning as DP
 import demo_control as DC
 import demo_intro as DI
 import demo_logs as DL
+import demo_vxp as DV
 
 DL_STEPS = [(c, sub, DL.narration(i)) for i, (c, sub, _n) in enumerate(DL.STEPS)]     # numbers filled in
 
@@ -37,6 +38,7 @@ VIDEOS = [
     ("intro-workflow", "intro_workflow", DI.STEPS, "Overview - The workflow, end to end with KINETIQ", 195.0),
     ("control-kinetiq", "control_kinetiq", DC.STEPS, "Control tab - KINETIQ: connect, home, set the zero and move", 180.0),
     ("logs-analysis", "logs_analysis", DL_STEPS, "Log files tab - three runs compared with the plan", 236.0),
+    ("planning-vxp", "planning_vxp", DV.STEPS, "Planning - Measured breathing (VXP)", 128.0),
 ]
 
 

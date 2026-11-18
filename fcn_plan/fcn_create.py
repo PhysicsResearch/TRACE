@@ -1637,14 +1637,14 @@ def generate_planned_gcode(self):
         )
 
     # Moves the Duet cannot run at the planned speed (Max Speed / axis limits) make it lag
-    residual_ms = gcode_info.get('residual_ms', 0.0)
-    if abs(residual_ms) > 10.0:
+    # (only the time the Max Speed cap adds: fcn_plan/speed_warning.py, why the total residual is not used)
+    from .speed_warning import speed_warning_text
+    warn_text = speed_warning_text(gcode_info, plan_prm['max_speed'])
+    if warn_text:
         res = QMessageBox.question(
             self,
             "Timing Warning",
-            f"Some moves need more than the Max Speed setting ({plan_prm['max_speed']:g} mm/s).\n"
-            f"The G-code is expected to run {abs(residual_ms) / 1000.0:.2f} s "
-            f"{'longer' if residual_ms < 0 else 'shorter'} than planned.\n\nDo you still want to proceed?",
+            warn_text,
             QMessageBox.Yes | QMessageBox.No
         )
         if res == QMessageBox.No:
